@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>{{ page_title | default(app_name | default("NimHunt")) }}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ app_icon_path | default('/favicon.ico') }}">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="{{ google_font_muli }}">
+    <link rel="stylesheet" href="{{ nimiq_style_cdn }}">
+    <link rel="stylesheet" href="{{ leaflet_css_url }}">
+    <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-polish-v2-20260704') }}">
+</head>
+<body
+    class="nq-style"
+    data-app-name="{{ app_name | default('NimHunt') }}"
+    data-nimiq-pay-url="{{ nimiq_pay_url | default('https://nimpay.app') }}"
+    data-map-tile-url="{{ map_tile_url }}"
+    data-map-tile-attribution="{{ map_tile_attribution }}"
+    data-report-details-max="{{ report_details_max | default(300) }}"
+>
+    <div id="notice-backdrop" class="notice-backdrop" hidden>
+        <section class="notice-card" role="alertdialog" aria-modal="true" aria-labelledby="notice-title" aria-describedby="notice-body">
+            <h2 id="notice-title">{{ app_name | default('NimHunt') }} notice</h2>
+            <p id="notice-body">Something needs your attention.</p>
+            <a id="notice-link" class="notice-link" hidden>Read more</a>
+            <button id="notice-ok" class="nq-button light-blue">OK</button>
+        </section>
+    </div>
+
+    <div id="report-backdrop" class="notice-backdrop" hidden>
+        <section class="notice-card nh-confirm-card report-spot-card" role="dialog" aria-modal="true" aria-labelledby="report-title">
+            <h2 id="report-title">Make a Report</h2>
+            <p id="report-spot-name" class="report-spot-name"></p>
+
+            <form id="report-form" class="report-form" novalidate>
+                <label class="report-field-label" for="report-reason-select">Reason</label>
+                <select id="report-reason-select" class="create-spot-input report-select" required>
+                    <option value="">Select a reason</option>
+                </select>
+
+                <label class="report-field-label" for="report-details-input">Details</label>
+                <textarea id="report-details-input" class="create-spot-input create-spot-textarea report-details-input" rows="4"></textarea>
+                <p id="report-details-limit" class="report-field-hint"></p>
+
+                <label class="report-field-label" for="report-captcha-input">Captcha</label>
+                <div class="report-captcha-row">
+                    <span id="report-captcha-question" class="report-captcha-question"></span>
+                    <input id="report-captcha-input" class="create-spot-input report-captcha-input" type="text" inputmode="numeric" autocomplete="off">
+                </div>
+
+                <p id="report-error" class="create-spot-error" role="alert" hidden></p>
+
+                <div class="nh-modal-actions report-spot-actions">
+                    <button id="report-confirm" class="nq-button light-blue" type="submit" disabled>Confirm</button>
+                    <button id="report-cancel" class="nq-button nh-grey-cancel-button" type="button">Cancel</button>
+                </div>
+            </form>
+        </section>
+    </div>
+
+    <main class="home-shell find-shell" aria-live="polite">
+        <header class="page-top-card">
+            <a class="back-link" href="/spots" aria-label="Back to Find Spots">‹ Find Spots</a>
+            <h1>{{ spot.title }}</h1>
+        </header>
+
+        <section class="spot-page-detail-section" aria-label="Spot details">
+            <ol id="spot-detail-list" class="spot-list spot-page-list"></ol>
+            <p id="spot-detail-fallback" class="empty-spots">Loading spot.</p>
+        </section>
+    </main>
+
+    <script id="spot-data" type="application/json">{{ spot_json | safe }}</script>
+    <script src="{{ leaflet_js_url }}"></script>
+    <script type="module" src="/static/spot_detail.js?v={{ asset_version | default('claim-polish-v2-20260704') }}"></script>
+</body>
+</html>

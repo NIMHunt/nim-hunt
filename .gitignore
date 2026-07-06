@@ -1,0 +1,43 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# Local SQLite databases and sidecar files
+records.db
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Local config and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Node/helper dependencies if installed locally
+node_modules/
+dist/
+build/
+
+# Editor/OS files
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Private/local notes
+x-dob.txt
+NIMHUNT_RUN_COMMANDS.txt
+nimiq_helper_setup_*.txt

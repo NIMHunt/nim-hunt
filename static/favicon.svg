@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="diamond-gradient" x1="16" y1="16" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffc435"/>
+      <stop offset="1" stop-color="#21bca5"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="32" height="32" rx="7" fill="url(#diamond-gradient)" transform="rotate(45 32 32)"/>
+</svg>

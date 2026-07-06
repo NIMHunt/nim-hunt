@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>{{ page_title | default(app_name | default("NimHunt")) }}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ app_icon_path | default('/favicon.ico') }}">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="{{ google_font_muli }}">
+    <link rel="stylesheet" href="{{ nimiq_style_cdn }}">
+    <link rel="stylesheet" href="{{ leaflet_css_url }}">
+    <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-ui-polish-v1-20260704') }}">
+</head>
+<body
+    class="nq-style"
+    data-app-name="{{ app_name | default('NimHunt') }}"
+    data-nimiq-pay-url="{{ nimiq_pay_url | default('https://nimpay.app') }}"
+    data-report-details-max="{{ report_details_max | default(300) }}"
+    data-map-tile-url="{{ map_tile_url }}"
+    data-map-tile-attribution="{{ map_tile_attribution }}"
+    data-max-map-init-spots="{{ max_map_init_spots }}"
+    data-max-map-zoom-out="{{ max_map_zoom_out }}"
+    data-create-spot-url="{{ create_spot_url }}"
+    data-claim-captcha-min="{{ claim_captcha_min | default(1) }}"
+    data-claim-captcha-max="{{ claim_captcha_max | default(9) }}"
+>
+    <div id="notice-backdrop" class="notice-backdrop" hidden>
+        <section class="notice-card" role="alertdialog" aria-modal="true" aria-labelledby="notice-title" aria-describedby="notice-body">
+            <h2 id="notice-title">{{ app_name | default('NimHunt') }} notice</h2>
+            <p id="notice-body">Something needs your attention.</p>
+            <a id="notice-link" class="notice-link" hidden>Read more</a>
+            <button id="notice-ok" class="nq-button light-blue">OK</button>
+        </section>
+    </div>
+
+
+
+    <div id="report-backdrop" class="notice-backdrop" hidden>
+        <section class="notice-card nh-confirm-card report-spot-card" role="dialog" aria-modal="true" aria-labelledby="report-title">
+            <h2 id="report-title">Make a Report</h2>
+            <p id="report-spot-name" class="report-spot-name"></p>
+
+            <form id="report-form" class="report-form" novalidate>
+                <label class="report-field-label" for="report-reason-select">Reason</label>
+                <select id="report-reason-select" class="create-spot-input report-select" required>
+                    <option value="">Select a reason</option>
+                </select>
+
+                <label class="report-field-label" for="report-details-input">Details</label>
+                <textarea id="report-details-input" class="create-spot-input create-spot-textarea report-details-input" rows="4"></textarea>
+                <p id="report-details-limit" class="report-field-hint"></p>
+
+                <label class="report-field-label" for="report-captcha-input">Captcha</label>
+                <div class="report-captcha-row">
+                    <span id="report-captcha-question" class="report-captcha-question"></span>
+                    <input id="report-captcha-input" class="create-spot-input report-captcha-input" type="text" inputmode="numeric" autocomplete="off">
+                </div>
+
+                <p id="report-error" class="create-spot-error" role="alert" hidden></p>
+
+                <div class="nh-modal-actions report-spot-actions">
+                    <button id="report-confirm" class="nq-button light-blue" type="submit" disabled>Confirm</button>
+                    <button id="report-cancel" class="nq-button nh-grey-cancel-button" type="button">Cancel</button>
+                </div>
+            </form>
+        </section>
+    </div>
+
+    <div id="claim-backdrop" class="notice-backdrop" hidden>
+        <section class="notice-card nh-confirm-card claim-spot-card" role="dialog" aria-modal="true" aria-labelledby="claim-title">
+            <h2 id="claim-title">Claim Spot</h2>
+            <p id="claim-spot-name" class="report-spot-name"></p>
+            <div id="claim-summary" class="claim-summary"></div>
+
+            <form id="claim-form" class="report-form claim-form" novalidate>
+                <div id="claim-password-field" class="claim-password-field" hidden>
+                    <label id="claim-password-label" class="report-field-label" for="claim-password-input">Password</label>
+                    <input id="claim-password-input" class="create-spot-input claim-password-input" type="text" autocomplete="off" spellcheck="false">
+
+                    <label id="claim-captcha-label" class="report-field-label" for="claim-captcha-input">Captcha</label>
+                    <div class="report-captcha-row claim-captcha-row">
+                        <span id="claim-captcha-question" class="report-captcha-question"></span>
+                        <input id="claim-captcha-input" class="create-spot-input report-captcha-input" type="text" inputmode="numeric" autocomplete="off" placeholder="Answer">
+                    </div>
+                </div>
+
+                <p id="claim-error" class="create-spot-error" role="alert" hidden></p>
+
+                <div class="nh-modal-actions claim-spot-actions">
+                    <button id="claim-confirm" class="nq-button green" type="submit">Claim</button>
+                    <button id="claim-cancel" class="nq-button nh-grey-cancel-button" type="button">Cancel</button>
+                </div>
+            </form>
+        </section>
+    </div>
+
+    <main class="home-shell find-shell" aria-live="polite">
+        <header class="page-top-card">
+            <a class="back-link" href="/" aria-label="Back home">‹ Home</a>
+            <h1>Find Spots</h1>
+        </header>
+
+        <section class="map-card" aria-label="Spot map">
+            <div id="spot-map" class="spot-map"></div>
+        </section>
+
+        <section class="spot-list-card" aria-label="Visible spots">
+            <div class="spot-list-head">
+                <h2 id="visible-spots-title">Visible Spots</h2>
+                <fieldset class="spot-filters" aria-label="Spot filters">
+                    <label class="filter-toggle">
+                        <input id="filter-active" type="checkbox" checked>
+                        <span>Active</span>
+                    </label>
+                    <label class="filter-toggle">
+                        <input id="filter-upcoming" type="checkbox" checked>
+                        <span>Upcoming</span>
+                    </label>
+                    <label class="filter-toggle is-prizedraw">
+                        <input id="filter-prizedraws" type="checkbox" checked>
+                        <span>Incl. Prizedraws</span>
+                    </label>
+                    <label class="filter-toggle is-test-location" title="Use the centre of the map as your temporary test location.">
+                        <input id="filter-test-location" type="checkbox">
+                        <span>Test Location</span>
+                    </label>
+                </fieldset>
+            </div>
+            <ol id="spot-list" class="spot-list"></ol>
+            <p id="empty-spots" class="empty-spots" hidden></p>
+        </section>
+    </main>
+
+    <script src="{{ leaflet_js_url }}"></script>
+    <script type="module" src="/static/find_spots.js?v={{ asset_version | default('claim-ui-polish-v1-20260704') }}"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "nimhunt-nimiq-helper",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check nimiq_helper.mjs"
+  },
+  "dependencies": {
+    "@nimiq/core": "latest"
+  }
+}

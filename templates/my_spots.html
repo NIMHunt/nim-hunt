@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>{{ page_title | default(app_name | default("NimHunt")) }}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ app_icon_path | default('/favicon.ico') }}">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="{{ google_font_muli }}">
+    <link rel="stylesheet" href="{{ nimiq_style_cdn }}">
+    <link rel="stylesheet" href="{{ leaflet_css_url }}">
+    <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('publish-confirm-v1-20260701') }}">
+</head>
+<body
+    class="nq-style"
+    data-app-name="{{ app_name | default('NimHunt') }}"
+    data-nimiq-pay-url="{{ nimiq_pay_url | default('https://nimpay.app') }}"
+    data-map-tile-url="{{ map_tile_url }}"
+    data-map-tile-attribution="{{ map_tile_attribution }}"
+    data-create-spot-url="{{ create_spot_url | default('/create') }}"
+    data-spot-title-min="{{ spot_title_min | default(display_name_min | default(3)) }}"
+    data-spot-title-max="{{ spot_title_max | default(display_name_max | default(18)) }}"
+    data-draft-limit="{{ max_draft_spots_per_user | default(3) }}"
+>
+    <div id="notice-backdrop" class="notice-backdrop" hidden>
+        <section class="notice-card" role="alertdialog" aria-modal="true" aria-labelledby="notice-title" aria-describedby="notice-body">
+            <h2 id="notice-title">{{ app_name | default('NimHunt') }} notice</h2>
+            <p id="notice-body">Something needs your attention.</p>
+            <a id="notice-link" class="notice-link" hidden>Read more</a>
+            <button id="notice-ok" class="nq-button light-blue">OK</button>
+        </section>
+    </div>
+
+    <div id="create-spot-type-tooltip" class="lock-tooltip create-spot-type-tooltip" role="tooltip" hidden></div>
+
+    <div id="deposit-spot-backdrop" class="notice-backdrop" hidden>
+        <section class="notice-card nh-confirm-card deposit-spot-card" role="dialog" aria-modal="true" aria-labelledby="deposit-spot-title" aria-describedby="deposit-spot-body">
+            <h2 id="deposit-spot-title">Deposit NIM</h2>
+            <p id="deposit-spot-body">Confirm the deposit amount.</p>
+            <div class="nh-modal-actions deposit-spot-actions">
+                <button id="deposit-spot-confirm" class="nq-button green" type="button">Confirm</button>
+                <button id="deposit-spot-cancel" class="nq-button nh-grey-cancel-button deposit-spot-cancel" type="button">Cancel</button>
+            </div>
+        </section>
+    </div>
+
+    <div id="publish-spot-backdrop" class="notice-backdrop" hidden>
+        <section class="notice-card nh-confirm-card publish-spot-card" role="dialog" aria-modal="true" aria-labelledby="publish-spot-title" aria-describedby="publish-spot-body">
+            <h2 id="publish-spot-title">Publish Spot</h2>
+            <p id="publish-spot-body">Are you sure?</p>
+            <div class="nh-modal-actions publish-spot-actions">
+                <button id="publish-spot-confirm" class="nq-button green" type="button">Confirm</button>
+                <button id="publish-spot-cancel" class="nq-button nh-grey-cancel-button publish-spot-cancel" type="button">Cancel</button>
+            </div>
+        </section>
+    </div>
+
+    <div id="cancel-spot-backdrop" class="notice-backdrop" hidden>
+        <section class="notice-card nh-confirm-card cancel-spot-card" role="dialog" aria-modal="true" aria-labelledby="cancel-spot-title" aria-describedby="cancel-spot-body">
+            <h2 id="cancel-spot-title">Cancel Spot</h2>
+            <p id="cancel-spot-body">Are you sure?</p>
+            <div class="nh-modal-actions cancel-spot-actions">
+                <button id="cancel-spot-confirm" class="nq-button red" type="button">Confirm</button>
+                <button id="cancel-spot-cancel" class="nq-button nh-grey-cancel-button cancel-spot-cancel" type="button">Cancel</button>
+            </div>
+        </section>
+    </div>
+
+    <div id="create-spot-backdrop" class="notice-backdrop" hidden>
+        <section class="notice-card create-spot-modal-card" role="dialog" aria-modal="true" aria-labelledby="create-spot-title" aria-describedby="create-spot-error">
+            <h2 id="create-spot-title">Create a Spot</h2>
+            <form id="create-spot-form" class="create-spot-form" novalidate>
+                <label class="sr-only" for="create-spot-title-input">Spot Title</label>
+                <input
+                    id="create-spot-title-input"
+                    class="create-spot-title-input"
+                    type="text"
+                    placeholder="Spot Title"
+                    minlength="{{ spot_title_min | default(display_name_min | default(3)) }}"
+                    maxlength="{{ spot_title_max | default(display_name_max | default(18)) }}"
+                    autocomplete="off"
+                    spellcheck="false"
+                >
+
+                <fieldset class="create-spot-type-field" aria-label="Spot type">
+                    <label id="create-spot-type-standard-option" class="create-spot-type-option">
+                        <input id="create-spot-type-standard" type="radio" name="create-spot-type" value="standard" checked>
+                        <span id="create-spot-type-standard-label">Standard</span>
+                    </label>
+                    <label id="create-spot-type-prizedraw-option" class="create-spot-type-option">
+                        <input id="create-spot-type-prizedraw" type="radio" name="create-spot-type" value="prizedraw">
+                        <span id="create-spot-type-prizedraw-label">Prizedraw</span>
+                    </label>
+                </fieldset>
+
+                <div class="create-spot-captcha-field" aria-label="Create Spot captcha">
+                    <label id="create-spot-captcha-label" class="report-field-label create-spot-captcha-label" for="create-spot-captcha-input">Captcha</label>
+                    <div class="report-captcha-row create-spot-captcha-row">
+                        <span id="create-spot-captcha-question" class="report-captcha-question create-spot-captcha-question"></span>
+                        <input
+                            id="create-spot-captcha-input"
+                            class="create-spot-input report-captcha-input create-spot-captcha-input"
+                            type="text"
+                            inputmode="numeric"
+                            autocomplete="off"
+                            placeholder="Answer"
+                        >
+                    </div>
+                </div>
+
+                <p id="create-spot-error" class="display-name-error" role="alert" hidden></p>
+
+                <div class="create-spot-modal-actions">
+                    <button id="create-spot-submit" class="nq-button light-blue" type="submit" disabled>Create</button>
+                    <button id="create-spot-cancel" class="nq-button light-blue create-spot-cancel" type="button">Cancel</button>
+                </div>
+            </form>
+        </section>
+    </div>
+
+    <main class="home-shell find-shell" aria-live="polite">
+        <header class="page-top-card">
+            <a class="back-link" href="/" aria-label="Back home">‹ Home</a>
+            <h1>My Spots</h1>
+        </header>
+
+        <section class="map-card" aria-label="My spots map">
+            <div id="spot-map" class="spot-map"></div>
+        </section>
+
+        <button id="create-spot-open" class="nq-button light-blue create-spot-open-button" type="button">Create Spot</button>
+
+        <div id="my-spots-sections" class="my-spots-sections" aria-label="Spots you created"></div>
+        <p id="empty-my-spots" class="empty-spots" hidden></p>
+    </main>
+
+    <script src="{{ leaflet_js_url }}"></script>
+    <script type="module" src="/static/my_spots.js?v={{ asset_version | default('publish-confirm-v1-20260701') }}"></script>
+</body>
+</html>

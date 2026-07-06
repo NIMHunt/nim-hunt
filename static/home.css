@@ -1,0 +1,3413 @@
+:root {
+    --nh-bg-1: #f8fbff;
+    --nh-bg-2: #eef5ff;
+    --nh-text: #1f2348;
+    --nh-muted: #6b6f8f;
+    --nh-card: rgba(255, 255, 255, 0.92);
+    --nh-border: rgba(31, 35, 72, 0.11);
+    --nh-shadow: 0 22px 60px rgba(31, 35, 72, 0.14);
+    --nh-danger: #d94444;
+    --nh-warning: #e9a400;
+    --nh-success: #21bca5;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    min-height: 100%;
+    background: radial-gradient(circle at top, #ffffff 0%, var(--nh-bg-1) 42%, var(--nh-bg-2) 100%);
+}
+
+body {
+    min-height: 100%;
+    margin: 0;
+    color: var(--nh-text);
+    font-family: Muli, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.home-shell {
+    width: min(100%, 520px);
+    min-height: 100vh;
+    margin: 0 auto;
+    padding: max(18px, env(safe-area-inset-top)) 18px max(24px, env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.hero-card,
+.welcome-card,
+.debug-card,
+.notice-card {
+    border: 1px solid var(--nh-border);
+    background: var(--nh-card);
+    box-shadow: var(--nh-shadow);
+    border-radius: 28px;
+}
+
+.hero-card {
+    padding: 14px 10px 12px;
+    text-align: center;
+    overflow: hidden;
+    position: relative;
+}
+
+.home-hero-link {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+}
+
+.home-hero-link:focus-visible {
+    outline: 3px solid rgba(33, 188, 165, 0.45);
+    outline-offset: 4px;
+}
+
+h1,
+h2 {
+    margin: 0;
+    line-height: 1.08;
+}
+
+.hero-title {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    max-width: 100%;
+    color: var(--nh-text);
+    font-size: clamp(5.8rem, 25vw, 11rem) !important;
+    font-weight: 900 !important;
+    letter-spacing: -0.08em;
+    line-height: 0.88;
+    white-space: nowrap;
+}
+
+.hero-diamond {
+    display: inline-grid;
+    place-items: center;
+    width: 0.52em;
+    height: 0.52em;
+    margin-left: 0.25em;
+    border-radius: 0.12em;
+
+    background: linear-gradient(
+        135deg,
+        #ffc435 -20%,
+        #ffc435 28%,
+        #f8dc64 35%,
+        #21bca5 47%,
+        #21bca5 53%,
+        #f8dc64 65%,
+        #ffc435 72%,
+        #ffc435 120%
+    );
+    background-size: 100% 420%;
+    background-position: 50% 100%;
+    color: transparent;
+    transform: rotate(45deg);
+    flex: 0 0 auto;
+    animation: nh-diamond-gradient-scroll 5.2s linear infinite;
+}
+
+@keyframes nh-diamond-gradient-scroll {
+    from {
+        background-position: 50% 105%;
+    }
+
+    to {
+        background-position: 50% 0%;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hero-diamond {
+        animation: none;
+        background-position: 50% 48%;
+    }
+}
+
+.welcome-card {
+    padding: 15px;
+}
+
+.welcome-line {
+    margin: 0;
+    color: var(--nh-text);
+    font-size: 1rem;
+    font-weight: 800;
+    line-height: 1.35;
+    text-align: center;
+}
+
+.home-error-code {
+    margin: 0;
+    color: var(--nh-text);
+    font-size: clamp(5rem, 28vw, 9rem);
+    font-weight: 900;
+    line-height: 0.9;
+    letter-spacing: -0.08em;
+    text-align: center;
+}
+
+.home-error-message {
+    margin: 0.6rem 0 0;
+    color: var(--nh-soft-text);
+    font-size: 1rem;
+    font-weight: 800;
+    line-height: 1.35;
+    text-align: center;
+}
+
+.welcome-link {
+    color: inherit;
+    font-weight: 900;
+    text-decoration: underline;
+    text-decoration-thickness: 0.08em;
+    text-underline-offset: 0.14em;
+}
+
+.welcome-link:hover,
+.welcome-link:focus {
+    text-decoration-thickness: 0.12em;
+}
+
+.welcome-edit-button {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.welcome-edit-button:hover,
+.welcome-edit-button:focus {
+    text-decoration: none;
+}
+
+.display-name-input {
+    width: auto;
+    min-width: 1ch;
+    max-width: calc(100% - 5.25rem);
+    margin: 0;
+    padding: 0 2px 2px;
+    border: 0;
+    border-bottom: 2px solid var(--nh-muted);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-weight: inherit;
+    line-height: 1.1;
+    outline: none;
+    text-align: left;
+}
+
+.display-name-input:focus {
+    border-bottom-color: var(--nh-muted);
+}
+
+.display-name-input.is-invalid,
+.display-name-input.is-invalid:focus {
+    border-bottom-color: var(--nh-danger);
+}
+
+.display-name-measurer {
+    position: fixed;
+    left: -9999px;
+    top: -9999px;
+    visibility: hidden;
+    white-space: pre;
+    font: inherit;
+    font-weight: inherit;
+    line-height: 1.1;
+}
+
+.display-name-editor {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.display-name-editor[hidden] {
+    display: none;
+}
+
+.display-name-error {
+    margin: 0;
+    color: var(--nh-danger);
+    font-weight: 800;
+    line-height: 1.25;
+    text-align: center;
+}
+
+.display-name-error[hidden] {
+    display: none;
+}
+
+.display-name-actions {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+}
+
+.display-name-actions .nq-button {
+    min-width: 10.8rem !important;
+    width: auto !important;
+    height: 4.5rem !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 1rem !important;
+    border-radius: 999px !important;
+    font-size: 1.5rem !important;
+    line-height: 1 !important;
+}
+
+.display-name-actions #display-name-cancel {
+    background: var(--nh-danger) !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 32px rgba(217, 68, 68, 0.18) !important;
+}
+
+.display-name-actions #display-name-save.is-disabled-by-validation {
+    background: var(--nh-success) !important;
+    filter: grayscale(1);
+    opacity: 0.48;
+    box-shadow: none !important;
+    cursor: default;
+}
+
+.home-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    align-items: stretch;
+    overflow: visible;
+}
+
+.action-button {
+    position: relative;
+    width: 100%;
+    margin: 0 !important;
+    padding: 16px 18px !important;
+    display: flex !important;
+    flex-direction: column;
+    align-items: flex-start !important;
+    justify-content: center;
+    gap: 4px;
+    border-radius: 22px !important;
+    text-align: left !important;
+    text-decoration: none !important;
+    line-height: 1.15;
+}
+
+/* Nimiq's button stylesheet adds a hover overlay via pseudo-elements.
+   On these large card-like homepage buttons it appears as an unwanted oval. */
+.home-actions .action-button::before,
+.home-actions .action-button::after {
+    display: none !important;
+    content: none !important;
+}
+
+.primary-action {
+    grid-column: 1 / -1;
+    min-height: 74px;
+}
+
+.secondary-action {
+    min-height: 112px;
+    justify-content: center !important;
+}
+
+.action-button,
+.action-title,
+.action-detail {
+    text-transform: none !important;
+}
+
+.action-title {
+    display: block;
+    font-size: 2.0rem;
+    font-weight: 900;
+    letter-spacing: -0.03em;
+    line-height: 1.02;
+}
+
+.secondary-action .action-title {
+    font-size: 2.0rem;
+}
+
+.action-detail {
+    display: block;
+    max-width: 100%;
+    font-size: 1.2rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1.22;
+    opacity: 0.78;
+    text-transform: none !important;
+}
+
+.action-button.disabled,
+.action-button[aria-disabled="true"] {
+    filter: grayscale(0.9);
+    opacity: 0.48;
+    cursor: default;
+}
+
+.action-button[aria-disabled="true"]:hover,
+.action-button[aria-disabled="true"]:focus,
+.action-button[aria-disabled="true"]:active {
+    transform: none !important;
+}
+
+.action-button[aria-disabled="true"]::before,
+.action-button[aria-disabled="true"]::after {
+    display: none !important;
+    content: none !important;
+}
+
+.lock-tooltip {
+    position: fixed;
+    z-index: 1200;
+    max-width: min(280px, calc(100vw - 32px));
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(31, 35, 72, 0.96);
+    color: #fff;
+    box-shadow: 0 10px 28px rgba(31, 35, 72, 0.26);
+    font-size: 1.2rem;
+    font-weight: 800;
+    line-height: 1.25;
+    text-align: center;
+    pointer-events: none;
+}
+
+.lock-tooltip[hidden] {
+    display: none;
+}
+
+.lock-tooltip::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 7px solid transparent;
+}
+
+.lock-tooltip[data-placement="top"]::after {
+    top: 100%;
+    border-top-color: rgba(31, 35, 72, 0.96);
+}
+
+.lock-tooltip[data-placement="bottom"]::after {
+    bottom: 100%;
+    border-bottom-color: rgba(31, 35, 72, 0.96);
+}
+
+.cancel-spot-body-line {
+    display: block;
+}
+
+.cancel-spot-body-line + .cancel-spot-body-line {
+    margin-top: 0.45rem;
+}
+
+.debug-card {
+    padding: 0;
+    overflow: hidden;
+}
+
+.debug-toggle {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    padding: 16px 18px;
+    color: var(--nh-muted);
+    font: inherit;
+    font-weight: 800;
+    text-align: left;
+}
+
+.home-metrics {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: -6px;
+    line-height: 1.15;
+    text-align: center;
+}
+
+.home-metrics[hidden] {
+    display: none;
+}
+
+.home-metrics-separator {
+    color: var(--nh-muted);
+    font-weight: 900;
+    opacity: 0.72;
+}
+
+.disclosure-toggle {
+    --disclosure-arrow-size: 0.82rem;
+    --disclosure-arrow-stroke: 3px;
+    --disclosure-arrow-right-offset: 9px;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+}
+
+.disclosure-toggle:disabled,
+.disclosure-toggle[aria-disabled="true"] {
+    cursor: default;
+}
+
+.disclosure-toggle::after {
+    content: "";
+    width: var(--disclosure-arrow-size);
+    height: var(--disclosure-arrow-size);
+    margin-right: var(--disclosure-arrow-right-offset);
+    border-right: var(--disclosure-arrow-stroke) solid currentColor;
+    border-bottom: var(--disclosure-arrow-stroke) solid currentColor;
+    transform: rotate(-45deg);
+    transition: transform 140ms ease;
+    flex: 0 0 auto;
+}
+
+.disclosure-toggle[aria-expanded="true"]::after {
+    transform: rotate(45deg);
+}
+
+.debug-panel {
+    margin: 0;
+    padding: 0 18px 16px;
+}
+
+.debug-panel div {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 0;
+    border-top: 1px solid var(--nh-border);
+}
+
+.debug-panel dt {
+    color: var(--nh-muted);
+    font-weight: 700;
+}
+
+.debug-panel dd {
+    margin: 0;
+    text-align: right;
+    font-weight: 700;
+}
+
+.notice-backdrop {
+    position: fixed;
+    z-index: 5000;
+    inset: 0;
+    padding: max(18px, env(safe-area-inset-top)) 20px max(18px, env(safe-area-inset-bottom));
+    display: grid;
+    place-items: center;
+    background: rgba(31, 35, 72, 0.46);
+    backdrop-filter: blur(10px);
+    overflow-y: auto;
+}
+
+.notice-backdrop[hidden] {
+    display: none;
+}
+
+.notice-card {
+    width: min(100%, 440px);
+    margin: 0;
+    padding: 22px;
+}
+
+#notice-title {
+    margin: 0 0 14px;
+    color: var(--nh-text);
+    font-weight: 900;
+    letter-spacing: -0.025em;
+    line-height: 1.12;
+    text-transform: none;
+}
+
+#notice-body {
+    margin: 0 0 20px;
+    color: var(--nh-muted);
+    font-weight: 600;
+    line-height: 1.45;
+}
+
+.notice-link {
+    display: inline-block;
+    margin: 0 0 18px;
+    font-weight: 800;
+}
+
+.notice-link[hidden] {
+    display: none;
+}
+
+.notice-card .nq-button {
+    width: 100%;
+}
+
+.help-shell {
+    justify-content: center;
+}
+
+@media (min-width: 620px) {
+    .home-shell {
+        padding-top: 38px;
+    }
+
+    .hero-card,
+    .welcome-card,
+    .debug-card {
+        border-radius: 34px;
+    }
+}
+
+/* -----------------------------
+   Find Spots page
+   ----------------------------- */
+
+.find-shell {
+    gap: 14px;
+}
+
+.page-top-card,
+.map-card,
+.spot-list-card {
+    border: 1px solid var(--nh-border);
+    background: var(--nh-card);
+    box-shadow: var(--nh-shadow);
+    border-radius: 28px;
+}
+
+.page-top-card {
+    padding: 18px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.page-top-card h1 {
+    margin: 0;
+    font-weight: 900;
+    letter-spacing: -0.055em;
+    text-transform: none;
+    min-width: 0;
+}
+
+.back-link {
+    display: inline-flex;
+    align-items: center;
+    color: var(--nh-muted);
+    font-weight: 900;
+    line-height: 1;
+    text-decoration: none;
+}
+
+.back-link:hover,
+.back-link:focus {
+    color: var(--nh-text);
+    text-decoration: underline;
+    text-underline-offset: 0.14em;
+}
+
+.map-card {
+    padding: 10px;
+    overflow: hidden;
+}
+
+.spot-map {
+    width: 100%;
+    height: min(50vh, 430px);
+    min-height: 320px;
+    border-radius: 22px;
+    overflow: hidden;
+    background: var(--nh-bg-2);
+}
+
+.spot-map .leaflet-control-attribution {
+    font-family: Muli, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 0.72rem;
+}
+
+.spot-list-card {
+    padding: 18px;
+}
+
+.spot-list-head {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.spot-list-head h2 {
+    min-height: 42px;
+    margin: 0;
+    padding-inline: 2px;
+    display: flex;
+    align-items: center;
+    font-weight: 900;
+    letter-spacing: -0.035em;
+    line-height: 1;
+    text-transform: none;
+}
+
+.spot-filters {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+}
+
+.filter-toggle {
+    position: relative;
+    min-width: 12.5rem;
+    height: 3.5rem;
+    padding: 2.0rem;
+    margin: 0 !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px !important;
+    background: var(--nh-success);
+    color: #ffffff;
+    box-shadow: 0 0px 32px rgba(33, 188, 165, 0.22);
+    cursor: pointer;
+    user-select: none;
+    transition: filter 140ms ease, opacity 140ms ease, transform 140ms ease;
+}
+
+.filter-toggle.is-off {
+    filter: grayscale(1);
+    opacity: 0.48;
+    box-shadow: none !important;
+}
+
+.filter-toggle.is-prizedraw {
+    background: #ffc435;
+    color: var(--nh-text);
+    box-shadow: 0 0px 32px rgba(255, 196, 53, 0.22);
+}
+
+.filter-toggle.is-test-location {
+    background: #0582ca;
+    color: #ffffff;
+    box-shadow: 0 0px 32px rgba(5, 130, 202, 0.22);
+}
+
+.filter-toggle,
+.filter-toggle span {
+    font-weight: 900;
+    letter-spacing: 0;
+    line-height: 1;
+    text-transform: none !important;
+}
+
+.filter-toggle input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.spot-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.spot-list[hidden] {
+    display: none;
+}
+
+.spot-list-item {
+    margin: 0;
+    border: 1px solid var(--nh-border);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.74);
+    box-shadow: 0 8px 22px rgba(31, 35, 72, 0.06);
+    overflow: hidden;
+}
+
+.spot-list-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 16px 14px;
+    border: 1px solid var(--nh-border);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.74);
+    color: var(--nh-text);
+    text-decoration: none;
+    box-shadow: 0 8px 22px rgba(31, 35, 72, 0.06);
+}
+
+.spot-list-link:hover,
+.spot-list-link:focus {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 26px rgba(31, 35, 72, 0.10);
+}
+
+.spot-list-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.spot-list-title {
+    overflow: hidden;
+    color: var(--nh-text);
+    font-weight: 900;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.spot-list-meta {
+    color: var(--nh-muted);
+    font-weight: 750;
+    line-height: 1.25;
+}
+
+.spot-badge {
+    flex: 0 0 auto;
+    padding: 7px 9px;
+    border-radius: 999px;
+    color: #ffffff;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.spot-badge.is-active {
+    background: var(--nh-success);
+}
+
+.spot-badge.is-upcoming {
+    background: var(--nh-success);
+    filter: grayscale(1);
+    opacity: 0.48;
+}
+
+.spot-badge.is-cancelled {
+    background: var(--nh-danger);
+}
+
+.empty-spots {
+    margin: 12px 0 2px;
+    padding: 14px;
+    border: 1px dashed var(--nh-border);
+    border-radius: 18px;
+    color: var(--nh-muted);
+    background: rgba(255, 255, 255, 0.58);
+    font-weight: 800;
+    line-height: 1.35;
+    text-align: center;
+}
+
+.empty-spots[hidden] {
+    display: none;
+}
+
+@media (min-width: 620px) {
+    .page-top-card,
+    .map-card,
+    .spot-list-card {
+        border-radius: 34px;
+    }
+
+    .spot-map {
+        border-radius: 26px;
+    }
+}
+
+/* Collapsible spot cards. Keep the closed card visually close to the
+   earlier spot-list-link layout; the only extra control is the chevron. */
+.spot-list-toggle {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    padding: 16px 14px;
+    border: 0;
+    background: transparent;
+    color: var(--nh-text);
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+}
+
+.spot-list-item:hover,
+.spot-list-item:focus-within {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 26px rgba(31, 35, 72, 0.10);
+}
+
+.spot-list-toggle:focus-visible {
+    outline: 3px solid rgba(33, 188, 165, 0.28);
+    outline-offset: 3px;
+}
+
+.spot-list-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+}
+
+.spot-list-top-row {
+    align-items: center;
+}
+
+.spot-list-bottom-row {
+    justify-content: flex-start;
+}
+
+.spot-list-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+.spot-list-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--nh-muted);
+    font-weight: 900;
+    line-height: 1;
+    transition: transform 140ms ease;
+    flex: 0 0 auto;
+}
+
+.spot-list-item.is-expanded .spot-list-chevron {
+    transform: rotate(180deg);
+}
+
+.spot-list-item.is-expanded .spot-list-toggle {
+    padding-bottom: 4px;
+}
+
+.spot-list-detail {
+    padding: 0 14px 16px;
+    color: var(--nh-text);
+    font-weight: 750;
+    line-height: 1.4;
+}
+
+.spot-list-detail[hidden] {
+    display: none;
+}
+
+.spot-detail-description {
+    margin: 0 0 0.75em;
+    color: var(--nh-muted);
+    font-style: italic;
+    font-weight: 750;
+}
+
+.spot-detail-lines {
+    margin: 0;
+    padding-left: 1.15em;
+}
+
+.spot-detail-line {
+    margin: 0 0 0.62em;
+    padding-left: 0.05em;
+}
+
+.spot-detail-line:last-child {
+    margin-bottom: 0;
+}
+
+.spot-detail-line strong {
+    font-weight: 900;
+}
+
+.spot-detail-link-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    max-width: 100%;
+}
+
+.spot-link-anchor {
+    color: inherit;
+    font-weight: 900;
+    overflow-wrap: anywhere;
+    text-decoration: underline;
+    text-decoration-thickness: 0.08em;
+    text-underline-offset: 0.14em;
+}
+
+.spot-copy-button {
+    position: relative;
+    flex: 0 0 auto;
+    width: 1.25em;
+    height: 1.25em;
+    min-width: 1.25em;
+    min-height: 1.25em;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--nh-text);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: inherit;
+    line-height: 1;
+    vertical-align: -0.16em;
+}
+
+.spot-copy-button .nq-icon {
+    width: 1.12em;
+    height: 1.12em;
+    display: block;
+    flex: 0 0 auto;
+    color: currentColor;
+    fill: currentColor;
+    overflow: visible;
+}
+
+
+.nh-inline-nimiq-icon {
+    pointer-events: none;
+    vertical-align: middle;
+    shape-rendering: geometricPrecision;
+}
+.spot-copy-button.is-copied {
+    color: var(--nh-success);
+}
+.spot-page-card .spot-list-item {
+    margin: 0;
+}
+
+.spot-list-toggle .spot-list-title,
+.spot-list-toggle .spot-list-meta {
+    min-width: 0;
+}
+
+.spot-list-toggle .spot-list-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* -----------------------------
+   Reusable owner/status spot styles
+   ----------------------------- */
+
+.spot-badge.is-draft,
+.spot-badge.is-ended,
+.spot-badge.is-completed,
+.spot-badge.is-unknown {
+    background: var(--nh-muted);
+    filter: grayscale(1);
+    opacity: 0.62;
+}
+
+.spot-badge.is-banned {
+    background: var(--nh-danger);
+    filter: grayscale(0.4);
+    opacity: 0.72;
+}
+
+/* -----------------------------
+   My Spots page
+   ----------------------------- */
+
+.my-spots-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.my-spots-section-card {
+    padding: 18px;
+}
+
+.spot-section-toggle {
+    width: 100%;
+    margin: 0;
+    padding: 0 2px 12px;
+    border: 0;
+    background: transparent;
+    color: var(--nh-text);
+    font: inherit;
+    font-weight: 900;
+    letter-spacing: -0.035em;
+    line-height: 1;
+    text-align: left;
+}
+
+.spot-section-toggle:focus-visible {
+    outline: 3px solid rgba(33, 188, 165, 0.28);
+    outline-offset: 3px;
+    border-radius: 14px;
+}
+
+.spot-section-toggle[aria-expanded="false"] {
+    padding-bottom: 0;
+}
+
+.my-spots-section-card .spot-list {
+    margin-top: 0;
+}
+
+.spot-list-meta-notice {
+    font-weight: 900;
+}
+
+.spot-list-meta-notice.is-ready {
+    color: var(--nh-success);
+}
+
+.spot-list-meta-notice.is-partial {
+    color: var(--nh-warning);
+}
+
+.spot-list-meta-notice.is-missing {
+    color: var(--nh-danger);
+}
+
+@media (min-width: 620px) {
+    .my-spots-section-card {
+        border-radius: 34px;
+    }
+}
+
+
+/* Individual Spot pages show one permanently expanded card, not a collapsible list item. */
+.spot-detail-static-summary {
+    cursor: default;
+}
+
+.spot-page-card .spot-list-item:hover,
+.spot-page-card .spot-list-item:focus-within {
+    transform: none;
+}
+
+
+/* Locked mini-map shown inside the individual Spot detail card. */
+.spot-detail-map {
+    width: 100%;
+    height: min(34vh, 280px);
+    min-height: 220px;
+    margin: 0 0 0.85em;
+    border: 1px solid var(--nh-border);
+    border-radius: 18px;
+    overflow: hidden;
+    background: var(--nh-bg-2);
+}
+
+.spot-detail-map .leaflet-control-attribution {
+    font-family: Muli, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 0.68rem;
+}
+
+/* Leaflet spot popups. Keep them large, simple, and title-only. */
+.nh-spot-popup .leaflet-popup-content-wrapper {
+    padding: 0;
+    border-radius: 16px;
+    background: var(--nh-card);
+    color: var(--nh-text);
+    box-shadow: 0 10px 28px rgba(31, 35, 72, 0.18);
+}
+
+.nh-spot-popup .leaflet-popup-content {
+    width: auto !important;
+    min-width: 0;
+    max-width: min(420px, calc(100vw - 72px));
+    margin: 0;
+    font-family: Muli, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 2rem;
+    line-height: 1.2;
+}
+
+.nh-spot-popup .leaflet-popup-close-button {
+    display: none !important;
+}
+
+.nh-spot-popup-content {
+    display: inline-block;
+    max-width: inherit;
+    padding: 12px 18px;
+}
+
+.nh-spot-popup-content.is-clickable {
+    cursor: pointer;
+}
+
+.nh-spot-popup-title {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    color: var(--nh-text);
+    font-weight: 900;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+/* -----------------------------
+   Create Spot initial modal
+   ----------------------------- */
+
+.create-spot-open-button {
+    width: 100% !important;
+    margin: 0 !important;
+    min-height: 4.5rem !important;
+    border-radius: 999px !important;
+    font-size: 1.5rem !important;
+    line-height: 1 !important;
+}
+
+.create-spot-form {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.create-spot-title-input {
+    width: 100%;
+    margin: 0;
+    padding: 0 2px 8px;
+    border: 0;
+    border-bottom: 2px solid var(--nh-muted);
+    background: transparent;
+    color: var(--nh-text);
+    font: inherit;
+    font-weight: 900;
+    line-height: 1.2;
+    outline: none;
+    text-align: center;
+}
+
+.create-spot-title-input::placeholder {
+    color: var(--nh-muted);
+    opacity: 0.84;
+}
+
+.create-spot-title-input:focus {
+    border-bottom-color: var(--nh-muted);
+}
+
+.create-spot-title-input.is-invalid,
+.create-spot-title-input.is-invalid:focus {
+    border-bottom-color: var(--nh-danger);
+}
+
+.create-spot-type-field {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+}
+
+.create-spot-type-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--nh-text);
+    font-weight: 900;
+    cursor: pointer;
+    user-select: none;
+}
+
+.create-spot-type-option input {
+    width: 1.15em;
+    height: 1.15em;
+    margin: 0;
+    accent-color: var(--nh-success);
+}
+
+.create-spot-modal-actions {
+    display: flex;
+    flex-direction: row;
+    gap: 10px;
+}
+
+.create-spot-modal-actions .nq-button {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 4.5rem !important;
+    margin: 0 !important;
+    border-radius: 999px !important;
+    font-size: 1.5rem !important;
+    line-height: 1 !important;
+    flex: 1 1 0;
+}
+
+.create-spot-modal-actions .nq-button.is-disabled-by-validation,
+.create-spot-modal-actions .nq-button:disabled {
+    filter: grayscale(1);
+    opacity: 0.48;
+    box-shadow: none !important;
+    cursor: default;
+}
+
+.create-spot-cancel {
+    background: var(--nh-danger) !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 32px rgba(217, 68, 68, 0.18) !important;
+}
+
+.create-spot-modal-actions .create-spot-cancel:hover,
+.create-spot-modal-actions .create-spot-cancel:focus,
+.create-spot-modal-actions .create-spot-cancel:active {
+    background: var(--nh-danger) !important;
+    color: #ffffff !important;
+    filter: brightness(0.94);
+}
+
+.create-spot-modal-actions .create-spot-cancel::before,
+.create-spot-modal-actions .create-spot-cancel::after {
+    display: none !important;
+    content: none !important;
+}
+
+.create-spot-page-card h2 {
+    margin: 0 0 12px;
+    font-weight: 900;
+    letter-spacing: -0.035em;
+    text-transform: none;
+}
+
+.create-spot-placeholder-text {
+    margin: 0;
+    color: var(--nh-muted);
+    font-weight: 750;
+    line-height: 1.45;
+}
+
+/* Create Spot type tooltips reuse the homepage pill-button tooltip look,
+   but sit above the modal backdrop. */
+.create-spot-type-tooltip {
+    z-index: 6200;
+}
+
+.create-spot-type-option:focus-within {
+    outline: 3px solid rgba(33, 188, 165, 0.28);
+    outline-offset: 6px;
+    border-radius: 999px;
+}
+
+/* -----------------------------
+   Create Spot full form page
+   ----------------------------- */
+
+.create-spot-page-card {
+    padding: 18px;
+}
+
+.create-spot-page-head {
+    margin-bottom: 14px;
+}
+
+.create-spot-page-head h2 {
+    margin: 2px 0 0;
+    color: var(--nh-text);
+    font-weight: 900;
+    letter-spacing: -0.035em;
+    text-transform: none;
+}
+
+.create-spot-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.create-spot-field-row {
+    display: grid;
+    grid-template-columns: minmax(8.8rem, 36%) minmax(0, 1fr);
+    gap: 14px;
+    align-items: center;
+    padding: 13px 0;
+    border-top: 1px solid var(--nh-border);
+}
+
+.create-spot-field-row > label,
+.create-spot-field-label {
+    color: var(--nh-muted);
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.create-spot-input {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 7px 2px 6px;
+    border: 0;
+    border-bottom: 2px solid rgba(107, 111, 143, 0.56);
+    border-radius: 0;
+    background: transparent;
+    color: var(--nh-text);
+    font: inherit;
+    font-weight: 800;
+    line-height: 1.2;
+    outline: none;
+}
+
+.create-spot-input:focus {
+    border-bottom-color: var(--nh-muted);
+}
+
+.create-spot-input.is-invalid,
+.create-spot-input.is-invalid:focus {
+    border-bottom-color: var(--nh-danger);
+}
+
+.create-spot-textarea {
+    min-height: 6.5rem;
+    resize: vertical;
+    border: 1px solid var(--nh-border);
+    border-radius: 16px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.58);
+}
+
+.create-spot-description-row {
+    align-items: start;
+}
+
+.create-spot-description-row > label {
+    padding-top: 10px;
+}
+
+.create-spot-map-row {
+    align-items: start;
+}
+
+.create-spot-map-row .create-spot-field-label {
+    padding-top: 10px;
+}
+
+.create-spot-map-field {
+    position: relative;
+    min-width: 0;
+}
+
+.create-spot-map {
+    height: min(42vh, 360px);
+    min-height: 260px;
+    border: 1px solid var(--nh-border);
+    border-radius: 18px;
+    box-shadow: 0 8px 22px rgba(31, 35, 72, 0.06);
+}
+
+.create-spot-map-crosshair {
+    position: absolute;
+    z-index: 650;
+    left: 50%;
+    top: 50%;
+    width: 22px;
+    height: 22px;
+    border: 3px solid var(--nh-success);
+    border-radius: 999px;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.84), 0 8px 20px rgba(31, 35, 72, 0.22);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+.create-spot-map-crosshair::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--nh-success);
+    transform: translate(-50%, -50%);
+}
+
+.create-spot-map-note {
+    margin: 8px 0 0;
+    color: var(--nh-muted);
+    font-weight: 800;
+    line-height: 1.25;
+}
+
+.create-spot-form-error {
+    margin: 14px 0 0;
+}
+
+.create-spot-page-actions {
+    display: flex;
+    justify-content: stretch;
+    padding-top: 16px;
+}
+
+.create-spot-page-actions .nq-button {
+    width: 100%;
+    min-height: 4.5rem !important;
+    margin: 0 !important;
+    border-radius: 999px !important;
+    font-weight: 900 !important;
+    text-transform: none !important;
+}
+
+.create-spot-page-actions .nq-button.is-disabled-by-validation,
+.create-spot-page-actions .nq-button:disabled {
+    filter: grayscale(1);
+    opacity: 0.48;
+    box-shadow: none !important;
+    cursor: default;
+}
+
+#create-spot-loading .empty-spots {
+    margin: 0;
+}
+
+@media (max-width: 430px) {
+    .create-spot-field-row {
+        grid-template-columns: minmax(7.3rem, 34%) minmax(0, 1fr);
+        gap: 10px;
+    }
+}
+
+/* -----------------------------
+   Create Spot slider refinement
+   ----------------------------- */
+
+.create-spot-location-row {
+    align-items: start;
+}
+
+.create-spot-location-label {
+    padding-top: 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.create-spot-coordinate-line {
+    display: block;
+    color: var(--nh-muted);
+    font-size: 0.86rem;
+    font-weight: 750;
+    line-height: 1.15;
+    opacity: 0.82;
+}
+
+.create-spot-location-field {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.create-spot-city-input {
+    margin-bottom: 0;
+}
+
+.create-spot-location-radius {
+    padding-top: 2px;
+}
+
+.create-spot-inline-label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--nh-muted);
+    font-weight: 900;
+    line-height: 1.2;
+}
+
+.create-spot-slider-control {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(5.4rem, 7.2rem);
+    gap: 10px;
+    align-items: end;
+}
+
+.create-spot-range-wrap {
+    position: relative;
+    min-width: 0;
+    padding-top: 2.25rem;
+}
+
+.create-spot-range-bubble {
+    position: absolute;
+    top: 0;
+    left: 0;
+    max-width: 9.8rem;
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: rgba(31, 35, 72, 0.96);
+    color: #ffffff;
+    box-shadow: 0 8px 18px rgba(31, 35, 72, 0.18);
+    font-weight: 900;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
+.create-spot-range-bubble::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 100%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: rgba(31, 35, 72, 0.96);
+}
+
+.create-spot-range-input {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    accent-color: var(--nh-success);
+    cursor: pointer;
+}
+
+.create-spot-manual-input {
+    padding-top: 6px;
+    padding-bottom: 5px;
+    text-align: center;
+}
+
+@media (max-width: 430px) {
+    .create-spot-slider-control {
+        grid-template-columns: minmax(0, 1fr) minmax(4.8rem, 6.2rem);
+        gap: 8px;
+    }
+
+    .create-spot-range-bubble {
+        max-width: 8.4rem;
+        padding-inline: 7px;
+    }
+}
+
+/* -----------------------------
+   Create Spot form refinement
+   ----------------------------- */
+
+/* The full form no longer needs its own internal title block; the page header
+   already says Create Spot. */
+.create-spot-page-head,
+.create-spot-kicker,
+.create-spot-heading {
+    display: none !important;
+}
+
+/* Location metadata should read like normal form text, not tiny helper text. */
+.create-spot-location-line,
+.create-spot-coordinate-line {
+    display: block;
+    color: var(--nh-muted);
+    font: inherit;
+    font-weight: 750;
+    line-height: 1.2;
+    opacity: 1;
+}
+
+.create-spot-location-label {
+    padding-top: 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.create-spot-location-field {
+    gap: 14px;
+}
+
+/* Slider controls: rounded, soft, and closer to the Nimiq pill/button language. */
+.create-spot-slider-control {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 12px;
+}
+
+.create-spot-range-wrap {
+    padding-top: 3rem;
+    overflow: visible;
+}
+
+.create-spot-range-bubble {
+    --bubble-arrow-left: 50%;
+
+    top: 0;
+    max-width: min(14rem, 100%);
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(31, 35, 72, 0.96);
+    color: #fff;
+    box-shadow: 0 10px 28px rgba(31, 35, 72, 0.26);
+    font-size: 1.2rem;
+    font-weight: 800;
+    line-height: 1.25;
+    text-align: center;
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
+.create-spot-range-bubble::after {
+    left: var(--bubble-arrow-left);
+    border-width: 7px;
+    border-top-color: rgba(31, 35, 72, 0.96);
+}
+
+.create-spot-range-input {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 1.3rem;
+    border-radius: 999px;
+    background: rgba(33, 188, 165, 0.22);
+    box-shadow: inset 0 0 0 1px rgba(31, 35, 72, 0.10);
+    cursor: pointer;
+}
+
+.create-spot-range-input:focus-visible {
+    outline: 3px solid rgba(33, 188, 165, 0.28);
+    outline-offset: 5px;
+}
+
+.create-spot-range-input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 2.4rem;
+    height: 2.4rem;
+    border: 3px solid #ffffff;
+    border-radius: 999px;
+    background: var(--nh-success);
+    box-shadow: 0 8px 18px rgba(31, 35, 72, 0.20);
+}
+
+.create-spot-range-input::-moz-range-thumb {
+    width: 2.4rem;
+    height: 2.4rem;
+    border: 3px solid #ffffff;
+    border-radius: 999px;
+    background: var(--nh-success);
+    box-shadow: 0 8px 18px rgba(31, 35, 72, 0.20);
+}
+
+.create-spot-range-input::-moz-range-track {
+    height: 1.3rem;
+    border: 0;
+    border-radius: 999px;
+    background: rgba(33, 188, 165, 0.22);
+}
+
+.create-spot-manual-input {
+    width: auto;
+    min-width: 4.2ch;
+    max-width: 9ch;
+    justify-self: end;
+    padding-inline: 2px;
+    text-align: center;
+}
+
+.create-spot-manual-input::-webkit-outer-spin-button,
+.create-spot-manual-input::-webkit-inner-spin-button,
+#spot-total-value-input::-webkit-outer-spin-button,
+#spot-total-value-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.create-spot-manual-input,
+#spot-total-value-input {
+    -moz-appearance: textfield;
+}
+
+@media (max-width: 430px) {
+    .create-spot-slider-control {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+    }
+
+    .create-spot-range-bubble {
+        max-width: min(12rem, 100%);
+    }
+}
+
+/* -----------------------------
+   Create Spot slider nitpick pass
+   ----------------------------- */
+
+.create-spot-location-line,
+.create-spot-coordinate-line {
+    font: inherit;
+    font-weight: 750;
+    line-height: 1.25;
+}
+
+.create-spot-location-line[hidden],
+.create-spot-coordinate-line[hidden] {
+    display: none;
+}
+
+.create-spot-range-wrap {
+    padding-top: 3.65rem;
+}
+
+.create-spot-range-bubble::after {
+    display: none !important;
+    content: none !important;
+}
+
+.create-spot-range-input {
+    background: rgba(107, 111, 143, 0.24) !important;
+    accent-color: var(--nh-muted);
+}
+
+.create-spot-range-input:focus-visible {
+    outline-color: rgba(107, 111, 143, 0.28);
+}
+
+.create-spot-range-input::-webkit-slider-thumb {
+    background: var(--nh-muted) !important;
+}
+
+.create-spot-range-input::-moz-range-thumb {
+    background: var(--nh-muted) !important;
+}
+
+.create-spot-range-input::-moz-range-track {
+    background: rgba(107, 111, 143, 0.24) !important;
+}
+
+.create-spot-manual-input {
+    width: 6.8ch !important;
+    min-width: 6.8ch !important;
+    max-width: 6.8ch !important;
+}
+
+.create-spot-manual-input.is-per-user {
+    width: 5.4ch !important;
+    min-width: 5.4ch !important;
+    max-width: 5.4ch !important;
+}
+
+.create-spot-manual-input.is-radius,
+.create-spot-manual-input.is-duration,
+.create-spot-manual-input.is-total-participants {
+    width: 6.8ch !important;
+    min-width: 6.8ch !important;
+    max-width: 6.8ch !important;
+}
+
+/* -----------------------------
+   Create Spot radius/live-map polish
+   ----------------------------- */
+
+.create-spot-location-line,
+.create-spot-coordinate-line {
+    color: rgba(107, 111, 143, 0.72) !important;
+    font-weight: 700 !important;
+}
+
+.create-spot-slider-control {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0 !important;
+}
+
+.create-spot-location-radius {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: end;
+    gap: 12px;
+    padding-top: 2px;
+}
+
+.create-spot-inline-label {
+    margin: 0 !important;
+    padding-bottom: 0.15rem;
+    white-space: nowrap;
+}
+
+.create-spot-range-wrap {
+    padding-top: 3.3rem !important;
+}
+
+.create-spot-range-bubble {
+    top: 0 !important;
+}
+
+.create-spot-range-bubble::after {
+    display: none !important;
+    content: none !important;
+}
+
+.create-spot-range-input {
+    background: rgba(107, 111, 143, 0.24) !important;
+    accent-color: var(--nh-muted);
+}
+
+.create-spot-range-input::-webkit-slider-thumb {
+    background: var(--nh-muted) !important;
+}
+
+.create-spot-range-input::-moz-range-thumb {
+    background: var(--nh-muted) !important;
+}
+
+.create-spot-range-input::-moz-range-track {
+    background: rgba(107, 111, 143, 0.24) !important;
+}
+
+@media (max-width: 430px) {
+    .create-spot-location-radius {
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 10px;
+    }
+}
+
+/* -----------------------------
+   Create Spot radius slider alignment
+   ----------------------------- */
+
+/* The Radius control lives inside Location, but it should look like the other
+   sliders: label first, then a full-width slider. The previous side-by-side
+   layout made the radius slider noticeably shorter than the rest. */
+.create-spot-location-radius {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 3px !important;
+    padding-top: 2px;
+}
+
+.create-spot-location-radius .create-spot-inline-label {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    color: var(--nh-muted);
+    font-weight: 800;
+    line-height: 1.2;
+    white-space: normal;
+}
+
+.create-spot-location-radius .create-spot-slider-control {
+    width: 100%;
+    min-width: 0;
+}
+
+
+/* -----------------------------
+   Create Spot radius row correction
+   ----------------------------- */
+
+/* Radius still belongs to the Location group, but it is now laid out like
+   the other slider rows: label on the left, slider on the right. */
+.create-spot-location-row {
+    align-items: start !important;
+}
+
+.create-spot-location-field {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+}
+
+.create-spot-radius-label {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    align-self: center !important;
+    padding-top: 0 !important;
+    color: var(--nh-muted);
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.create-spot-radius-control {
+    grid-column: 2 !important;
+    grid-row: 2 !important;
+    width: 100%;
+    min-width: 0;
+}
+
+/* The requested gap is between the bubble and the slider track, not between
+   the field label and the slider block. */
+.create-spot-range-wrap {
+    padding-top: calc(3.3rem + 3px) !important;
+}
+
+/* Keep the live centre marker visually consistent with the solid map dots
+   used elsewhere: coloured fill, white rim, no hollow target ring. */
+.create-spot-map-crosshair {
+    width: 12px !important;
+    height: 12px !important;
+    border: 2px solid #ffffff !important;
+    border-radius: 999px !important;
+    background: var(--nh-success) !important;
+    box-shadow: 0 8px 18px rgba(31, 35, 72, 0.20) !important;
+}
+
+.create-spot-map-crosshair::after {
+    display: none !important;
+    content: none !important;
+}
+
+@media (max-width: 430px) {
+    .create-spot-radius-label {
+        grid-column: 1 !important;
+        grid-row: 2 !important;
+    }
+
+    .create-spot-radius-control {
+        grid-column: 2 !important;
+        grid-row: 2 !important;
+    }
+}
+
+/* -----------------------------
+   Create Spot Prizedraw form variants
+   ----------------------------- */
+
+.create-spot-field-row[hidden] {
+    display: none !important;
+}
+
+/* -----------------------------
+   Create Spot delete/rate/help polish
+   ----------------------------- */
+
+/* Keep the initial Create Spot modal comfortably spaced. */
+.create-spot-modal-card .create-spot-type-field {
+    margin-bottom: 14px !important;
+}
+
+.create-spot-modal-card .create-spot-modal-actions {
+    margin-top: 14px !important;
+}
+
+/* Small reusable form-label help control. Keep the Nimiq icon inline;
+   the symbol itself supplies the circle, so the button adds no extra one. */
+.create-spot-label-with-help {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 6px;
+}
+
+.create-spot-label-help {
+    width: 1.25em;
+    height: 1.25em;
+    min-width: 1.25em;
+    min-height: 1.25em;
+    margin: 0;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--nh-muted);
+    box-shadow: none;
+    cursor: default;
+    font: inherit;
+    font-size: 1.05em;
+    font-style: normal;
+    line-height: 1;
+    text-transform: none;
+    vertical-align: -0.12em;
+}
+
+.create-spot-label-help .nq-icon {
+    width: 1.18em;
+    height: 1.18em;
+    display: block;
+    flex: 0 0 auto;
+    color: currentColor;
+    fill: currentColor;
+    overflow: visible;
+}
+
+.create-spot-label-help:hover,
+.create-spot-label-help:focus,
+.create-spot-label-help:active {
+    background: transparent;
+    color: var(--nh-text);
+    outline: none;
+}
+
+.create-spot-label-help:focus-visible {
+    outline: 3px solid rgba(31, 35, 72, 0.18);
+    outline-offset: 3px;
+    border-radius: 999px;
+}
+.create-spot-total-nim-control {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+#spot-total-value-input {
+    width: 10.5ch !important;
+    min-width: 10.5ch !important;
+    max-width: 10.5ch !important;
+    flex: 0 0 auto;
+    text-align: center;
+}
+
+.create-spot-value-rate {
+    min-width: 0;
+    color: rgba(107, 111, 143, 0.78);
+    font-weight: 800;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+.create-spot-page-actions {
+    gap: 10px;
+}
+
+.create-spot-page-actions .nq-button {
+    flex: 1 1 0;
+}
+
+.create-spot-delete-button {
+    background: var(--nh-danger) !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 32px rgba(217, 68, 68, 0.18) !important;
+}
+
+.create-spot-delete-button:hover,
+.create-spot-delete-button:focus,
+.create-spot-delete-button:active {
+    background: var(--nh-danger) !important;
+    color: #ffffff !important;
+    filter: brightness(0.94);
+}
+
+.create-spot-delete-button::before,
+.create-spot-delete-button::after {
+    display: none !important;
+    content: none !important;
+}
+
+.delete-spot-card {
+    text-align: left;
+}
+
+.delete-spot-card h2 {
+    margin: 0 0 14px;
+    font-weight: 900;
+    letter-spacing: -0.025em;
+    text-transform: none;
+}
+
+.delete-spot-card p {
+    margin: 0 0 20px;
+    color: var(--nh-muted);
+    font-weight: 800;
+    line-height: 1.35;
+}
+
+.delete-spot-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.delete-spot-actions .nq-button {
+    flex: 1 1 0;
+    width: auto !important;
+    min-height: 4.5rem !important;
+    margin: 0 !important;
+    border-radius: 999px !important;
+    font-weight: 900 !important;
+    text-transform: none !important;
+}
+
+.delete-spot-actions .red {
+    background: var(--nh-danger) !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 32px rgba(217, 68, 68, 0.18) !important;
+}
+
+.delete-spot-actions .red:hover,
+.delete-spot-actions .red:focus,
+.delete-spot-actions .red:active {
+    background: var(--nh-danger) !important;
+    color: #ffffff !important;
+    filter: brightness(0.94);
+}
+
+.delete-spot-cancel {
+    background: rgba(107, 111, 143, 0.22) !important;
+    color: var(--nh-text) !important;
+    box-shadow: none !important;
+}
+
+.delete-spot-cancel:hover,
+.delete-spot-cancel:focus,
+.delete-spot-cancel:active {
+    background: rgba(107, 111, 143, 0.28) !important;
+    color: var(--nh-text) !important;
+}
+
+@media (max-width: 430px) {
+    .create-spot-total-nim-control {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 6px;
+    }
+}
+
+
+/* -----------------------------
+   Create Spot save/delete polish
+   ----------------------------- */
+
+/* Keep the delete confirmation card balanced and override Nimiq button
+   pseudo-overlays so the grey Cancel button never flashes blue on hover. */
+.delete-spot-card {
+    padding: 22px !important;
+    text-align: left;
+}
+
+.delete-spot-card #delete-spot-body {
+    margin-right: 0 !important;
+}
+
+.delete-spot-actions {
+    width: 100%;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+}
+
+.delete-spot-actions .nq-button {
+    min-width: 0 !important;
+    width: 100% !important;
+}
+
+.delete-spot-actions .nq-button::before,
+.delete-spot-actions .nq-button::after,
+.delete-spot-cancel::before,
+.delete-spot-cancel::after {
+    display: none !important;
+    content: none !important;
+}
+
+.delete-spot-cancel,
+.delete-spot-cancel:hover,
+.delete-spot-cancel:focus,
+.delete-spot-cancel:active {
+    background: rgba(107, 111, 143, 0.22) !important;
+    color: var(--nh-text) !important;
+    box-shadow: none !important;
+}
+
+.delete-spot-cancel:hover,
+.delete-spot-cancel:focus,
+.delete-spot-cancel:active {
+    filter: brightness(0.94);
+}
+
+/* The Save Draft button is deliberately kept focusable/clickable when locked
+   because disabled buttons cannot show our existing homepage-style tooltip. */
+#create-spot-save[aria-disabled="true"] {
+    filter: grayscale(0.9);
+    opacity: 0.48;
+    cursor: default;
+}
+
+#create-spot-save[aria-disabled="true"]::before,
+#create-spot-save[aria-disabled="true"]::after {
+    display: none !important;
+    content: none !important;
+}
+
+
+/* My Spots inline Prizedraw label inside detail text. Keep this compact so it
+   does not make the bullet row taller than neighbouring lines. */
+.spot-detail-prizedraw-pill {
+    display: inline-block;
+    padding: 0.08em 0.45em;
+    border-radius: 999px;
+    background: #ffc435;
+    color: var(--nh-text);
+    font-weight: 900;
+    line-height: 1;
+    vertical-align: baseline;
+    white-space: nowrap;
+}
+
+/* -----------------------------
+   Owner actions for expanded My Spots cards
+   ----------------------------- */
+
+.spot-owner-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.spot-owner-action-button {
+    flex: 1 1 0;
+    min-width: 0 !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 13px 14px !important;
+    border-radius: 999px !important;
+    line-height: 1 !important;
+    text-align: center !important;
+    text-decoration: none !important;
+    text-transform: none !important;
+}
+
+/* -----------------------------
+   Reusable modal confirm/cancel patterns
+   ----------------------------- */
+
+.nh-confirm-card {
+    padding: 22px !important;
+    text-align: left;
+}
+
+.nh-confirm-card h2 {
+    margin: 0 0 14px;
+    color: var(--nh-text);
+    font-weight: 900;
+    letter-spacing: -0.025em;
+    line-height: 1.12;
+    text-transform: none;
+}
+
+.nh-confirm-card p {
+    margin: 0 0 20px;
+    color: var(--nh-muted);
+    font-weight: 800;
+    line-height: 1.35;
+}
+
+.nh-modal-actions {
+    width: 100%;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+}
+
+.nh-modal-actions .nq-button {
+    min-width: 0 !important;
+    width: 100% !important;
+    min-height: 4.5rem !important;
+    margin: 0 !important;
+    border-radius: 999px !important;
+    font-weight: 900 !important;
+    line-height: 1 !important;
+    text-transform: none !important;
+}
+
+.nh-modal-actions .nq-button::before,
+.nh-modal-actions .nq-button::after,
+.nh-grey-cancel-button::before,
+.nh-grey-cancel-button::after {
+    display: none !important;
+    content: none !important;
+}
+
+.nh-grey-cancel-button,
+.nh-grey-cancel-button:hover,
+.nh-grey-cancel-button:focus,
+.nh-grey-cancel-button:active {
+    background: rgba(107, 111, 143, 0.22) !important;
+    color: var(--nh-text) !important;
+    box-shadow: none !important;
+}
+
+.nh-grey-cancel-button:hover,
+.nh-grey-cancel-button:focus,
+.nh-grey-cancel-button:active {
+    background: rgba(107, 111, 143, 0.28) !important;
+    filter: none !important;
+}
+
+.deposit-spot-card {
+    width: min(100%, 440px);
+}
+
+.deposit-spot-actions {
+    margin-top: 2px;
+}
+
+.publish-spot-card {
+    width: min(100%, 440px);
+}
+
+.publish-spot-actions {
+    margin-top: 2px;
+}
+
+.nh-confetti {
+    position: fixed;
+    z-index: 7000;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.nh-confetti span {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: var(--size);
+    height: calc(var(--size) * 1.55);
+    border-radius: 3px;
+    background: var(--nh-success);
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.4) rotate(0deg);
+    animation: nh-confetti-burst var(--duration) cubic-bezier(0.16, 0.9, 0.22, 1) var(--delay) forwards;
+}
+
+.nh-confetti span.is-gold {
+    background: #ffc435;
+}
+
+.nh-confetti span.is-blue {
+    background: #0582ca;
+}
+
+@keyframes nh-confetti-burst {
+    0% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.4) rotate(0deg);
+    }
+
+    12% {
+        opacity: 1;
+    }
+
+    58% {
+        opacity: 1;
+        transform: translate(
+            calc(-50% + var(--tx)),
+            calc(-50% + var(--ty))
+        ) scale(1) rotate(calc(var(--rotation) * 0.72));
+    }
+
+    100% {
+        opacity: 0;
+        transform: translate(
+            calc(-50% + var(--tx) + var(--drift)),
+            calc(-50% + var(--ty) + 18vh)
+        ) scale(0.82) rotate(var(--rotation));
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .nh-confetti {
+        display: none;
+    }
+}
+
+.create-spot-readonly-value {
+    display: inline-flex;
+    align-items: center;
+    min-height: 3.2rem;
+    color: var(--nh-muted);
+    font-weight: 900;
+    line-height: 1.2;
+}
+
+.create-spot-readonly-value[hidden] {
+    display: none;
+}
+
+/* Alias older delete-card cancel buttons to the shared grey cancel pattern. */
+.delete-spot-cancel,
+.delete-spot-cancel:hover,
+.delete-spot-cancel:focus,
+.delete-spot-cancel:active {
+    background: rgba(107, 111, 143, 0.22) !important;
+    color: var(--nh-text) !important;
+    box-shadow: none !important;
+}
+
+.delete-spot-cancel:hover,
+.delete-spot-cancel:focus,
+.delete-spot-cancel:active {
+    background: rgba(107, 111, 143, 0.28) !important;
+    filter: none !important;
+}
+
+.delete-spot-cancel::before,
+.delete-spot-cancel::after {
+    display: none !important;
+    content: none !important;
+}
+
+.cancel-spot-card {
+    width: min(100%, 440px);
+}
+
+.cancel-spot-actions {
+    margin-top: 2px;
+}
+
+/* -----------------------------
+   Spot detail report control
+   ----------------------------- */
+
+.spot-report-line {
+    margin: 13px 0 0;
+    padding: 0;
+    text-align: right;
+}
+
+.spot-report-button {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--nh-muted);
+    margin: 0;
+    padding: 0;
+    font: inherit;
+    font-weight: 800;
+    line-height: 1.25;
+    text-align: right;
+    text-decoration: none;
+}
+
+.spot-report-button:hover,
+.spot-report-button:focus,
+.spot-report-button:active {
+    color: var(--nh-text);
+    background: transparent;
+    outline: none;
+    text-decoration: none;
+}
+
+.report-spot-card {
+    width: min(100%, 460px);
+}
+
+.report-spot-name {
+    margin-bottom: 18px !important;
+    color: var(--nh-text) !important;
+}
+
+.report-form {
+    display: grid;
+    gap: 10px;
+}
+
+.report-field-label {
+    color: var(--nh-muted);
+    font-weight: 900;
+    line-height: 1.15;
+}
+
+.report-select,
+.report-details-input,
+.report-captcha-input {
+    width: 100%;
+}
+
+.report-select {
+    border-radius: 14px !important;
+    border: 2px solid rgba(107, 111, 143, 0.56) !important;
+}
+
+.report-details-input {
+    border-radius: 18px;
+}
+
+.report-field-hint {
+    margin: -4px 0 2px !important;
+    color: var(--nh-muted) !important;
+    font-size: inherit;
+    font-weight: 700 !important;
+    opacity: 0.72;
+}
+
+.report-captcha-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 13rem;
+    gap: 10px;
+    align-items: center;
+}
+
+.report-captcha-question {
+    color: var(--nh-text);
+    font-weight: 900;
+    line-height: 1.2;
+}
+
+.report-captcha-input {
+    min-width: 13rem;
+    box-sizing: border-box;
+    text-align: center;
+}
+
+.report-spot-actions {
+    margin-top: 8px;
+}
+
+/* -----------------------------
+   Report/create disabled tooltips
+   ----------------------------- */
+
+.report-confirm-tooltip-target {
+    flex: 1 1 0;
+    display: block;
+    min-width: 0;
+}
+
+.report-confirm-tooltip-target .nq-button {
+    width: 100% !important;
+}
+
+.create-spot-open-button.is-locked {
+    filter: grayscale(1);
+    opacity: 0.48;
+    box-shadow: none !important;
+    cursor: default;
+}
+
+/* Create Spot start-modal captcha
+   Reuses the same captcha row language as the report card. */
+.create-spot-captcha-field {
+    display: grid;
+    gap: 7px;
+    margin: 12px 0 2px !important;
+}
+
+.create-spot-captcha-row {
+    grid-template-columns: minmax(0, 1fr) 13rem;
+}
+
+.create-spot-captcha-input {
+    min-width: 13rem;
+    text-align: center;
+}
+
+
+/* -----------------------------
+   Create Spot captcha / report disabled cursor fix
+   ----------------------------- */
+.create-spot-captcha-question {
+    display: block !important;
+    color: var(--nh-text) !important;
+    font-weight: 900 !important;
+    line-height: 1.2 !important;
+    min-width: 0;
+}
+
+.report-confirm-tooltip-target .nq-button:disabled,
+.report-confirm-tooltip-target.is-tooltip-locked,
+.report-confirm-tooltip-target.is-tooltip-locked *,
+.report-confirm-tooltip-target.is-tooltip-locked .nq-button {
+    cursor: default !important;
+}
+
+/* Disabled/locked owner actions, e.g. stale draft start time blocking Publish. */
+.spot-owner-action-button[aria-disabled="true"],
+.spot-owner-action-button.is-disabled-by-validation {
+    filter: grayscale(1);
+    opacity: 0.48;
+    box-shadow: none !important;
+    cursor: default;
+}
+
+.spot-owner-action-button[aria-disabled="true"]:hover,
+.spot-owner-action-button[aria-disabled="true"]:focus,
+.spot-owner-action-button[aria-disabled="true"]:active {
+    transform: none !important;
+}
+
+.spot-owner-action-button[aria-disabled="true"]::before,
+.spot-owner-action-button[aria-disabled="true"]::after {
+    display: none !important;
+    content: none !important;
+}
+
+/* -----------------------------
+   Owner-only claim-code list on Spot detail
+   ----------------------------- */
+
+.spot-passwords-line {
+    list-style-position: outside;
+}
+
+.spot-passwords-toggle {
+    width: 100%;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--nh-text);
+    font: inherit;
+    font-weight: 900;
+    line-height: 1.35;
+    text-align: left;
+}
+
+.spot-passwords-toggle:focus-visible {
+    outline: 3px solid rgba(33, 188, 165, 0.22);
+    outline-offset: 4px;
+    border-radius: 10px;
+}
+
+.spot-passwords-panel {
+    margin-top: 0.62em;
+    padding: 10px 0 0;
+    border-top: 1px solid var(--nh-border);
+}
+
+.spot-passwords-panel[hidden] {
+    display: none;
+}
+
+.spot-passwords-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.spot-password-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(31, 35, 72, 0.07);
+}
+
+.spot-password-row:last-child {
+    border-bottom: 0;
+}
+
+.spot-password-left {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.spot-password-code {
+    min-width: 0;
+    color: var(--nh-text);
+    font-weight: 900;
+    overflow-wrap: anywhere;
+}
+
+.spot-password-status {
+    flex: 0 1 auto;
+    color: var(--nh-muted);
+    font-weight: 850;
+    text-align: right;
+    overflow-wrap: anywhere;
+}
+
+.spot-password-row.is-used .spot-password-code {
+    color: var(--nh-muted);
+}
+
+.spot-password-copy-button {
+    margin-left: 1px;
+}
+
+/* Claim handling UI */
+.spot-list-title .spot-title-lock-icon-wrap,
+#claim-page-title .spot-title-lock-icon-wrap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1em;
+    height: 1em;
+    margin-left: 0.25em;
+    vertical-align: -0.12em;
+    color: currentColor;
+}
+
+.spot-title-lock-icon-wrap .nq-icon {
+    width: 1em;
+    height: 1em;
+    display: block;
+}
+
+.spot-title-lock-icon-wrap.has-lock-tooltip {
+    cursor: inherit;
+}
+
+.spot-title-lock-tooltip {
+    white-space: normal;
+}
+
+.spot-list-toggle.is-claim-nearby {
+    border-radius: inherit;
+}
+
+.spot-list-toggle.is-claim-standard {
+    background: var(--nh-success);
+    color: #ffffff;
+}
+
+.spot-list-toggle.is-claim-conditional {
+    background: #0582ca;
+    color: #ffffff;
+}
+
+.spot-list-toggle.is-claim-prizedraw {
+    background: #ffc435;
+    color: var(--nh-text);
+}
+
+.spot-list-toggle.is-claim-standard .spot-list-title,
+.spot-list-toggle.is-claim-standard .spot-list-meta,
+.spot-list-toggle.is-claim-standard .spot-list-chevron,
+.spot-list-toggle.is-claim-conditional .spot-list-title,
+.spot-list-toggle.is-claim-conditional .spot-list-meta,
+.spot-list-toggle.is-claim-conditional .spot-list-chevron {
+    color: #ffffff;
+}
+
+.spot-list-toggle.is-claim-prizedraw .spot-list-title,
+.spot-list-toggle.is-claim-prizedraw .spot-list-meta,
+.spot-list-toggle.is-claim-prizedraw .spot-list-chevron {
+    color: var(--nh-text);
+}
+
+.spot-list-toggle.is-claim-unavailable {
+    background: transparent;
+    color: var(--nh-text);
+}
+
+.spot-claim-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 7.8rem;
+    min-height: 3.6rem;
+    padding: 0.55rem 1rem;
+    border-radius: 999px;
+    background: #ffffff;
+    color: var(--nh-success);
+    font-size: 1.35rem;
+    font-weight: 900;
+    line-height: 1;
+    text-transform: uppercase;
+    box-shadow: 0 8px 18px rgba(31, 35, 72, 0.14);
+}
+
+.spot-claim-button.is-conditional {
+    color: #0582ca;
+}
+
+.spot-claim-button.is-prizedraw {
+    color: #d69b00;
+}
+
+.spot-claim-button.is-unavailable {
+    background: rgba(107, 111, 143, 0.22);
+    color: var(--nh-muted);
+    box-shadow: none;
+    cursor: default;
+}
+
+.claim-spot-card {
+    width: min(100%, 440px);
+}
+
+.claim-summary {
+    display: grid;
+    gap: 0.45rem;
+    margin: 0 0 1rem;
+    color: var(--nh-text);
+    font-weight: 800;
+    line-height: 1.3;
+}
+
+.claim-summary p {
+    margin: 0;
+}
+
+.claim-password-field[hidden] {
+    display: none;
+}
+
+.claim-map-card[hidden] {
+    display: none;
+}
+
+.claim-page-card .spot-list {
+    margin-top: 0;
+}
+
+/* Claim-flow polish: keep spot-list controls vertically centred without adding line gaps. */
+.spot-list-toggle {
+    position: relative;
+    padding-right: 8.9rem;
+}
+
+.spot-list-toggle.has-claim-action {
+    min-height: 7.8rem;
+    padding-right: 13.8rem;
+}
+
+.spot-list-toggle .spot-list-actions {
+    position: absolute;
+    top: 50%;
+    right: 14px;
+    transform: translateY(-50%);
+}
+
+.spot-list-toggle .spot-list-row {
+    width: 100%;
+}
+
+.spot-list-item.is-claim-nearby {
+    border-color: transparent;
+}
+
+.spot-list-item.is-claim-standard {
+    background: var(--nh-success);
+    color: #ffffff;
+}
+
+.spot-list-item.is-claim-conditional {
+    background: #0582ca;
+    color: #ffffff;
+}
+
+.spot-list-item.is-claim-prizedraw {
+    background: #ffc435;
+    color: var(--nh-text);
+}
+
+.spot-list-item.is-claim-standard .spot-list-toggle,
+.spot-list-item.is-claim-conditional .spot-list-toggle,
+.spot-list-item.is-claim-prizedraw .spot-list-toggle,
+.spot-list-item.is-claim-standard .spot-list-detail,
+.spot-list-item.is-claim-conditional .spot-list-detail,
+.spot-list-item.is-claim-prizedraw .spot-list-detail {
+    background: transparent;
+}
+
+.spot-list-item.is-claim-standard .spot-list-title,
+.spot-list-item.is-claim-standard .spot-list-meta,
+.spot-list-item.is-claim-standard .spot-list-chevron,
+.spot-list-item.is-claim-standard .spot-detail-description,
+.spot-list-item.is-claim-standard .spot-detail-lines,
+.spot-list-item.is-claim-standard .spot-report-button,
+.spot-list-item.is-claim-standard .spot-link-anchor,
+.spot-list-item.is-claim-conditional .spot-list-title,
+.spot-list-item.is-claim-conditional .spot-list-meta,
+.spot-list-item.is-claim-conditional .spot-list-chevron,
+.spot-list-item.is-claim-conditional .spot-detail-description,
+.spot-list-item.is-claim-conditional .spot-detail-lines,
+.spot-list-item.is-claim-conditional .spot-report-button,
+.spot-list-item.is-claim-conditional .spot-link-anchor {
+    color: #ffffff;
+}
+
+.spot-list-item.is-claim-prizedraw .spot-list-title,
+.spot-list-item.is-claim-prizedraw .spot-list-meta,
+.spot-list-item.is-claim-prizedraw .spot-list-chevron,
+.spot-list-item.is-claim-prizedraw .spot-detail-description,
+.spot-list-item.is-claim-prizedraw .spot-detail-lines,
+.spot-list-item.is-claim-prizedraw .spot-report-button,
+.spot-list-item.is-claim-prizedraw .spot-link-anchor {
+    color: var(--nh-text);
+}
+
+.spot-list-item.is-claim-standard .spot-copy-button,
+.spot-list-item.is-claim-conditional .spot-copy-button {
+    color: #ffffff;
+}
+
+.spot-list-item.is-claim-prizedraw .spot-copy-button {
+    color: var(--nh-text);
+}
+
+.spot-list-toggle.is-claim-standard,
+.spot-list-toggle.is-claim-conditional,
+.spot-list-toggle.is-claim-prizedraw,
+.spot-list-toggle.is-claim-unavailable {
+    background: transparent;
+}
+
+.spot-claim-button.nq-button-pill {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: 10.6rem !important;
+    min-height: 5.4rem !important;
+    padding: 0.7rem 1.25rem !important;
+    border: 0 !important;
+    border-radius: 999px !important;
+    background: #ffffff !important;
+    box-shadow: 0 10px 24px rgba(31, 35, 72, 0.20) !important;
+    font-size: 1.55rem !important;
+    font-weight: 900 !important;
+    line-height: 1 !important;
+    text-transform: uppercase !important;
+    cursor: pointer !important;
+}
+
+.spot-claim-button.nq-button-pill:hover,
+.spot-claim-button.nq-button-pill:focus-visible {
+    transform: translateY(-1px);
+    box-shadow: 0 14px 28px rgba(31, 35, 72, 0.24) !important;
+}
+
+.spot-claim-button.is-standard {
+    color: var(--nh-success) !important;
+}
+
+.spot-claim-button.is-conditional {
+    color: #0582ca !important;
+}
+
+.spot-claim-button.is-prizedraw {
+    color: #c08400 !important;
+}
+
+.spot-claim-button.is-unavailable,
+.spot-claim-button.is-unavailable:hover,
+.spot-claim-button.is-unavailable:focus-visible {
+    min-width: 10.6rem !important;
+    min-height: 5.4rem !important;
+    color: var(--nh-muted) !important;
+    cursor: default !important;
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+.claim-status-keyword {
+    font-weight: 950;
+}
+
+.claim-status-keyword.is-success {
+    color: var(--nh-success);
+}
+
+.claim-status-keyword.is-pending {
+    color: #c08400;
+}
+
+.claim-status-keyword.is-failed {
+    color: var(--nh-danger);
+}
+
+@media (max-width: 390px) {
+    .spot-list-toggle.has-claim-action {
+        padding-right: 12.1rem;
+    }
+
+    .spot-claim-button.nq-button-pill,
+    .spot-claim-button.is-unavailable {
+        min-width: 9.2rem !important;
+        min-height: 5.1rem !important;
+        padding-inline: 0.9rem !important;
+        font-size: 1.35rem !important;
+    }
+}
+
+.spot-badge.is-success {
+    background: var(--nh-success);
+    color: #ffffff;
+}
+
+.spot-badge.is-pending {
+    background: #ffc435;
+    color: var(--nh-text);
+}
+
+.spot-badge.is-failed {
+    background: var(--nh-danger);
+    color: #ffffff;
+}
+
+.spot-list-item.is-claim-unavailable {
+    border-color: var(--nh-border);
+    background: rgba(255, 255, 255, 0.74);
+    color: var(--nh-text);
+}
+
+/* My Claims / claim-polish follow-up */
+.spot-page-list,
+.claim-page-list {
+    margin-top: 0;
+}
+
+.my-claims-title {
+    margin: 0 0 1rem;
+    color: var(--nh-text);
+    font-size: 1.35rem;
+    font-weight: 900;
+}
+
+.my-claim-list-item .spot-badge.is-success {
+    background: var(--nh-success);
+    color: #ffffff;
+}
+
+.my-claim-list-item .spot-badge.is-pending {
+    background: #ffc435;
+    color: var(--nh-text);
+}
+
+.my-claim-list-item .spot-badge.is-failed {
+    background: var(--nh-danger);
+    color: #ffffff;
+}
+
+/* The claim pill text is always uppercase, so centre the cap-height rather than
+   leaving extra room for lowercase descenders. */
+.spot-claim-button.nq-button-pill {
+    align-items: center !important;
+    line-height: 0.86 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+.spot-claim-button.nq-button-pill:disabled {
+    opacity: 0.86;
+}
+
+/* Claim/list layout correction pass 2026-07-04.
+   Keep right-side controls vertically stable between collapsed and expanded states. */
+.spot-list-item.is-expanded .spot-list-toggle {
+    padding-bottom: 16px;
+}
+
+.spot-list-toggle .spot-list-actions {
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.spot-list-chevron {
+    width: 1.2em;
+    height: 1.2em;
+    line-height: 1;
+    transform-origin: 50% 50%;
+}
+
+.spot-list-item.is-expanded .spot-list-chevron {
+    transform: rotate(180deg);
+}
+
+.spot-list-toggle.has-claim-action {
+    min-height: 7.8rem;
+}
+
+.spot-claim-button.nq-button-pill {
+    height: 5.4rem !important;
+    min-height: 5.4rem !important;
+    padding: 0 1.25rem !important;
+    line-height: 0.82 !important;
+    text-transform: uppercase !important;
+    align-self: center;
+}
+
+.spot-claim-button.nq-button-pill,
+.spot-claim-button.nq-button-pill:hover,
+.spot-claim-button.nq-button-pill:focus,
+.spot-claim-button.nq-button-pill:active,
+.spot-claim-button.is-unavailable,
+.spot-claim-button.is-unavailable:hover,
+.spot-claim-button.is-unavailable:focus,
+.spot-claim-button.is-unavailable:active {
+    cursor: default !important;
+}
+
+.spot-claim-button:not(.is-unavailable),
+.spot-claim-button:not(.is-unavailable):hover,
+.spot-claim-button:not(.is-unavailable):focus,
+.spot-claim-button:not(.is-unavailable):active {
+    cursor: pointer !important;
+}
+
+.spot-claim-button.is-unavailable,
+.spot-claim-button.is-unavailable:hover,
+.spot-claim-button.is-unavailable:focus-visible {
+    background: rgba(107, 111, 143, 0.22) !important;
+    color: var(--nh-muted) !important;
+    filter: none !important;
+}
+
+
+/* Claim polish follow-up 2026-07-04: final alignment, tooltips, and page width consistency. */
+:root {
+    --nh-shell-width: 560px;
+}
+
+.home-shell {
+    width: min(100%, var(--nh-shell-width));
+}
+
+.find-shell {
+    gap: 14px;
+}
+
+.page-top-card + .spot-page-detail-section,
+.page-top-card + .claim-page-detail-section,
+.page-top-card + .map-card,
+.page-top-card + .spot-list-card,
+.page-top-card + .my-spots-sections,
+.page-top-card + .empty-spots {
+    margin-top: 0;
+}
+
+.spot-page-detail-section,
+.claim-page-detail-section {
+    margin: 0;
+    padding: 0;
+}
+
+.create-spot-page-card,
+.my-spots-section-card,
+.my-claims-section-card,
+.map-card,
+.page-top-card,
+.create-spot-open-button {
+    width: 100%;
+}
+
+.spot-time-summary {
+    display: inline;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: default;
+    text-decoration: none;
+}
+
+.spot-claim-button.is-unavailable,
+.spot-claim-button.is-unavailable:hover,
+.spot-claim-button.is-unavailable:focus,
+.spot-claim-button.is-unavailable:focus-visible,
+.spot-claim-button.is-unavailable:active {
+    background: transparent !important;
+    color: var(--nh-muted) !important;
+    box-shadow: none !important;
+    filter: none !important;
+    border: 0 !important;
+    cursor: default !important;
+    transform: none !important;
+}
+
+.spot-claim-button.nq-button-pill {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    line-height: 0.78 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+.spot-list-toggle .spot-list-actions {
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+}
+
+.spot-list-item.is-expanded .spot-list-toggle {
+    padding-bottom: 16px !important;
+}
+
+.spot-list-chevron {
+    align-self: center;
+}
+
+.spot-claim-button.is-unavailable::before,
+.spot-claim-button.is-unavailable::after {
+    display: none !important;
+    content: none !important;
+}
+
+/* Detail spacing / shell-width correction 2026-07-04.
+   Nimiq Style applies `.nq-style ol, .nq-style ul { margin: 2rem 0; }`,
+   which has higher specificity than our plain `.spot-list { margin: 0; }`.
+   These overrides are deliberately scoped to NimHunt-owned lists/cards. */
+.nq-style .spot-list,
+.nq-style .spot-page-list,
+.nq-style .claim-page-list,
+.nq-style .spot-detail-lines {
+    margin: 0 !important;
+}
+
+.nq-style .spot-list,
+.nq-style .spot-page-list,
+.nq-style .claim-page-list {
+    padding: 0 !important;
+}
+
+.nq-style .spot-detail-lines {
+    padding-left: 1.15em !important;
+}
+
+.nq-style .spot-page-detail-section,
+.nq-style .claim-page-detail-section {
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.nq-style .page-top-card + .spot-page-detail-section,
+.nq-style .page-top-card + .claim-page-detail-section {
+    margin-top: 0 !important;
+}
+
+/* Make the site shell width explicit and immune to post-load children changing
+   intrinsic width. This avoids the Create Spot / My Spots "jump narrower after
+   JS loads" effect caused by child cards/maps influencing shrink-to-fit sizing. */
+.nq-style .home-shell {
+    width: 100% !important;
+    max-width: var(--nh-shell-width, 560px) !important;
+    min-width: 0 !important;
+    flex: 0 0 auto;
+}
+
+.nq-style .find-shell,
+.nq-style .create-spot-page-card,
+.nq-style .my-spots-sections,
+.nq-style .my-spots-section-card,
+.nq-style .my-claims-section-card,
+.nq-style .map-card,
+.nq-style .spot-list-card,
+.nq-style .page-top-card {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+/* Desktop width / detail-gap correction 2026-07-04.
+   The previous width patch accidentally let `.find-shell` override the shell
+   max-width because `.home-shell.find-shell` carries both classes. Keep the
+   mobile-first full-width behaviour, but cap all NimHunt page shells on larger
+   screens to the same sensible width as the Home page. */
+:root {
+    --nh-shell-width: 520px;
+    --nh-page-gap: 14px;
+}
+
+.nq-style .home-shell,
+.nq-style .home-shell.find-shell,
+.nq-style .find-shell {
+    width: min(100%, var(--nh-shell-width)) !important;
+    max-width: var(--nh-shell-width) !important;
+    min-width: 0 !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    flex: 0 0 auto;
+}
+
+@media (max-width: 560px) {
+    .nq-style .home-shell,
+    .nq-style .home-shell.find-shell,
+    .nq-style .find-shell {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+}
+
+.nq-style .home-shell.find-shell {
+    gap: var(--nh-page-gap) !important;
+}
+
+/* Nimiq Style also gives normal lists/list-items their own margins. These
+   stronger, page-owned selectors keep Spot/Claim detail pages aligned with
+   the map/list cards on the other pages without touching ordinary prose lists. */
+.nq-style .spot-page-detail-section,
+.nq-style .claim-page-detail-section {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.nq-style .page-top-card + .spot-page-detail-section,
+.nq-style .page-top-card + .claim-page-detail-section,
+.nq-style .page-top-card + .map-card,
+.nq-style .page-top-card + .spot-list-card,
+.nq-style .page-top-card + .my-spots-sections,
+.nq-style .page-top-card + .empty-spots,
+.nq-style .page-top-card + .my-claims-empty {
+    margin-top: 0 !important;
+}
+
+.nq-style .spot-page-detail-section > .spot-list,
+.nq-style .claim-page-detail-section > .spot-list,
+.nq-style .spot-page-list,
+.nq-style .claim-page-list {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+.nq-style .spot-list > .spot-list-item,
+.nq-style .spot-page-list > .spot-list-item,
+.nq-style .claim-page-list > .spot-list-item {
+    margin: 0 !important;
+}
+
+/* Static detail cards are deliberately locked open, so they should not move or
+   gain the interactive hover treatment used by expandable spot/claim list cards. */
+.nq-style .spot-page-list > .spot-list-item:hover,
+.nq-style .spot-page-list > .spot-list-item:focus-within,
+.nq-style .claim-page-list > .spot-list-item:hover,
+.nq-style .claim-page-list > .spot-list-item:focus-within {
+    transform: none !important;
+    box-shadow: 0 8px 22px rgba(31, 35, 72, 0.06) !important;
+}
+
+.nq-style .spot-page-list .spot-detail-static-summary,
+.nq-style .claim-page-list .spot-detail-static-summary {
+    cursor: default;
+}
+

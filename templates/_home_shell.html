@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>{{ page_title | default(app_name | default("NimHunt")) }}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ app_icon_path | default('/favicon.ico') }}">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="{{ google_font_muli }}">
+    <link rel="stylesheet" href="{{ nimiq_style_cdn }}">
+    <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-polish-v2-20260704') }}">
+</head>
+<body class="nq-style"
+    data-app-name="{{ app_name | default('NimHunt') }}"
+    data-nimiq-pay-url="{{ nimiq_pay_url | default('https://nimpay.app') }}"
+    data-display-name-min="{{ display_name_min | default(3) }}"
+    data-display-name-max="{{ display_name_max | default(18) }}"
+>
+    {% if show_notice | default(true) %}
+    <div id="notice-backdrop" class="notice-backdrop" hidden>
+        <section class="notice-card" role="alertdialog" aria-modal="true" aria-labelledby="notice-title" aria-describedby="notice-body">
+            <h2 id="notice-title">{{ app_name | default('NimHunt') }} notice</h2>
+            <p id="notice-body">Something needs your attention.</p>
+            <a id="notice-link" class="notice-link" hidden>Read more</a>
+            <button id="notice-ok" class="nq-button light-blue">OK</button>
+        </section>
+    </div>
+    {% endif %}
+
+    {% if show_lock_tooltip | default(true) %}
+    <div id="lock-tooltip" class="lock-tooltip" role="tooltip" hidden></div>
+    {% endif %}
+
+    <main class="home-shell" aria-live="polite">
+        {% if hero_href is defined and hero_href %}
+        <a class="hero-card home-hero-link" href="{{ hero_href }}" aria-label="{{ hero_aria_label | default('Back home') }}">
+            <h1 class="hero-title"><span>{{ app_name | default('NimHunt') }}</span><span class="hero-diamond" aria-hidden="true">◆</span></h1>
+            <p id="connection-line" class="sr-only">{{ hero_screenreader_text | default('Return to Home') }}</p>
+        </a>
+        {% else %}
+        <header class="hero-card">
+            <h1 class="hero-title"><span>{{ app_name | default('NimHunt') }}</span><span class="hero-diamond" aria-hidden="true">◆</span></h1>
+            <p id="connection-line" class="sr-only">Checking Nimiq Pay…</p>
+        </header>
+        {% endif %}
+
+        <section class="welcome-card{% if welcome_card_extra_class is defined and welcome_card_extra_class %} {{ welcome_card_extra_class }}{% endif %}">
+            {% if error_code is defined and error_code %}
+            <p class="home-error-code">{{ error_code }}</p>
+            {% if error_message is defined and error_message %}
+            <p class="home-error-message">{{ error_message }}</p>
+            {% endif %}
+            {% else %}
+            <p id="welcome-line" class="welcome-line">Preparing your home screen.</p>
+            <div id="display-name-editor" class="display-name-editor" hidden>
+                <p id="display-name-error" class="display-name-error" role="alert" hidden></p>
+                <div class="display-name-actions">
+                    <button id="display-name-save" class="nq-button green" type="button">Save</button>
+                    <button id="display-name-cancel" class="nq-button light-blue" type="button">Cancel</button>
+                </div>
+            </div>
+            {% endif %}
+        </section>
+
+        {% if show_home_nav | default(true) %}
+        <nav class="home-actions" aria-label="Main navigation">
+            <a id="find-spots-button" class="nq-button green action-button primary-action disabled" href="/spots" aria-disabled="true">
+                <span class="action-title">Find Spots</span>
+                <span class="action-detail">Search the map for nearby current and upcoming spots.</span>
+            </a>
+
+            <a id="my-spots-button" class="nq-button gold action-button secondary-action disabled" href="/my-spots" aria-disabled="true">
+                <span class="action-title">My Spots</span>
+                <span class="action-detail">Review spots you created.</span>
+            </a>
+
+            <a id="my-claims-button" class="nq-button light-blue action-button secondary-action disabled" href="/my-claims" aria-disabled="true">
+                <span class="action-title">My Claims</span>
+                <span class="action-detail">See claims you have made.</span>
+            </a>
+        </nav>
+        {% endif %}
+
+        {% if show_debug | default(true) %}
+        <section class="debug-card" aria-label="Troubleshooting information">
+            <button id="debug-toggle" class="debug-toggle disclosure-toggle" type="button" aria-expanded="false" aria-controls="debug-panel">
+                Troubleshooting
+            </button>
+            <dl id="debug-panel" class="debug-panel" hidden>
+                <div>
+                    <dt>Nimiq Pay</dt>
+                    <dd id="debug-wallet">checking</dd>
+                </div>
+                <div>
+                    <dt>Location</dt>
+                    <dd id="debug-location">not requested on Home</dd>
+                </div>
+                <div>
+                    <dt>Language</dt>
+                    <dd id="debug-language">checking</dd>
+                </div>
+                <div>
+                    <dt>User</dt>
+                    <dd id="debug-user">checking</dd>
+                </div>
+            </dl>
+        </section>
+        {% endif %}
+
+        {% if show_metrics | default(true) %}
+        <div id="home-metrics" class="home-metrics" aria-label="NimHunt metrics" hidden>
+            <span id="home-active-spots" class="nq-label">0 Active Spots</span>
+            <span class="home-metrics-separator" aria-hidden="true">–</span>
+            <span id="home-daily-users" class="nq-label">0 Daily Users</span>
+        </div>
+        {% endif %}
+    </main>
+
+    {% if home_script_src is defined and home_script_src %}
+    <script type="module" src="{{ home_script_src }}"></script>
+    {% endif %}
+</body>
+</html>

@@ -65,6 +65,17 @@ def _prize_amounts(*, total_value: int, prize_count: int, winner_count: int) -> 
     return amounts
 
 
+def _prize_amounts_by_claim_id(*, total_value: int, prize_count: int, winner_claim_ids: list[int]) -> dict[int, int]:
+    """Return deterministic payout amounts for a persisted winner set."""
+    clean_ids = sorted({int(claim_id) for claim_id in winner_claim_ids if int(claim_id) > 0})
+    amounts = _prize_amounts(
+        total_value=int(total_value),
+        prize_count=max(1, int(prize_count)),
+        winner_count=len(clean_ids),
+    )
+    return {claim_id: int(amount) for claim_id, amount in zip(clean_ids, amounts)}
+
+
 async def _ready_prizedraw_spot_ids(db, *, limit: int = DEFAULT_MAX_SETTLEMENTS_PER_RUN) -> list[int]:
     """Return published Prizedraw spots whose draw should now be settled."""
     rows = await db.execute_fetchall(
@@ -130,8 +141,22 @@ async def _settlement_ready_reason(db, *, spot: RowDict, now: int) -> str | None
 
 
 async def settle_prizedraw_spot_if_ready(*, spot_id: int) -> RowDict:
-    """Settle one Prizedraw if its capacity or end-time trigger has fired."""
+    """Close one ready Prizedraw and persist its winner set.
+
+    A completed Prizedraw now uses CLAIM status this way:
+    - SUCCESS without a payout transaction: valid losing entry
+    - PENDING on a completed Prizedraw: selected winner awaiting payout confirmation
+    - SUCCESS with a confirmed payout transaction: paid winner
+
+    This function commits the draw result before trying to send winner payouts,
+    so a send failure cannot cause a later pass to redraw different winners.
+    """
     spot_id = int(spot_id)
+    spot: RowDict | None = None
+    ready_reason: str | None = None
+    failed_pending_count = 0
+    successful_claims: list[RowDict] = []
+    winner_claim_ids: list[int] = []
 
     try:
         async with get_db() as db:
@@ -160,30 +185,23 @@ async def settle_prizedraw_spot_if_ready(*, spot_id: int) -> RowDict:
 
                 rng = secrets.SystemRandom()
                 winners = rng.sample(successful_claims, winner_count) if winner_count > 0 else []
-                amounts = _prize_amounts(
-                    total_value=int(spot.get(schema.SPOT_TOTAL_VALUE) or 0),
-                    prize_count=max(1, configured_prize_count),
-                    winner_count=len(winners),
+                winner_claim_ids = sorted(int(claim[schema.CLAIM_ID]) for claim in winners)
+
+                await db_access.mark_prizedraw_winners_pending(
+                    db,
+                    spot_id=spot_id,
+                    winner_claim_ids=winner_claim_ids,
                 )
-
-                payout_results: list[RowDict] = []
-                for claim, amount in zip(winners, amounts):
-                    if int(amount) <= 0:
-                        continue
-                    payout_results.append(
-                        await trans_updater.submit_claim_reward_transaction(
-                            db,
-                            claim_id=int(claim[schema.CLAIM_ID]),
-                            amount=int(amount),
-                        )
-                    )
-
                 await db_access.set_spot_status_to_completed(db, spot_id=spot_id)
 
             await cache.notify_spot_changed(db, spot_id=spot_id)
-            owner_id = int(spot.get(schema.SPOT_CREATED_BY) or 0)
+            if winner_claim_ids:
+                await cache.notify_claim_changed(db, spot_id=spot_id, user_id=None)
+            owner_id = int(spot.get(schema.SPOT_CREATED_BY) or 0) if spot is not None else 0
             if owner_id:
                 await cache.notify_user_changed(db, user_id=owner_id)
+
+        payout_result = await retry_pending_prizedraw_payouts_for_spot(spot_id=spot_id)
 
         return {
             "ok": True,
@@ -192,12 +210,111 @@ async def settle_prizedraw_spot_if_ready(*, spot_id: int) -> RowDict:
             "reason": ready_reason,
             "failed_pending_count": failed_pending_count,
             "eligible_claim_count": len(successful_claims),
-            "winner_count": len(winners),
-            "winner_claim_ids": [int(claim[schema.CLAIM_ID]) for claim in winners],
-            "payouts": payout_results,
+            "winner_count": len(winner_claim_ids),
+            "winner_claim_ids": winner_claim_ids,
+            "payout_retry": payout_result,
+            "payouts": payout_result.get("payouts", []) if isinstance(payout_result, dict) else [],
         }
     except Exception as exc:
         return {"ok": False, "spot_id": spot_id, "settled": False, "reason": repr(exc)}
+
+
+async def retry_pending_prizedraw_payouts_for_spot(*, spot_id: int) -> RowDict:
+    """Retry payout sends for selected winners on one completed Prizedraw."""
+    spot_id = int(spot_id)
+    try:
+        async with get_db() as db:
+            async with db_access.transaction(db):
+                spot = await db_access.get_spot(db, spot_id=spot_id)
+                if spot is None:
+                    return {"ok": False, "spot_id": spot_id, "reason": "spot_missing", "payouts": []}
+                if int(spot[schema.SPOT_STATUS]) != const.SPOT_STATUS_COMPLETED:
+                    return {"ok": True, "spot_id": spot_id, "retried": False, "reason": "not_completed", "payouts": []}
+                if not await db_access.is_prizedraw(db, spot_id=spot_id):
+                    return {"ok": True, "spot_id": spot_id, "retried": False, "reason": "not_prizedraw", "payouts": []}
+
+                pending_winners = await db_access.get_pending_claims_for_spot(db, spot_id=spot_id)
+                if not pending_winners:
+                    return {"ok": True, "spot_id": spot_id, "retried": False, "reason": "no_pending_winners", "payouts": []}
+
+                prizedraw = await db_access.get_prizedraw(db, spot_id=spot_id)
+                configured_prize_count = int(prizedraw.get(schema.PRIZEDRAW_PRIZE_COUNT) if prizedraw else 1)
+                winner_claim_ids = await db_access.get_prizedraw_winner_claim_ids(db, spot_id=spot_id)
+                amount_by_claim_id = _prize_amounts_by_claim_id(
+                    total_value=int(spot.get(schema.SPOT_TOTAL_VALUE) or 0),
+                    prize_count=max(1, configured_prize_count),
+                    winner_claim_ids=winner_claim_ids,
+                )
+
+                payout_results: list[RowDict] = []
+                for claim in pending_winners:
+                    claim_id = int(claim[schema.CLAIM_ID])
+                    if await db_access.has_confirmed_claim_payout_transaction(db, claim_id=claim_id):
+                        await db_access.set_claim_status_to_success(db, claim_id=claim_id)
+                        continue
+                    if await db_access.has_nonfailed_claim_payout_transaction(db, claim_id=claim_id):
+                        payout_results.append({
+                            "ok": True,
+                            "claim_id": claim_id,
+                            "already_exists": True,
+                            "reason": "pending_payout_already_recorded",
+                        })
+                        continue
+
+                    retry_amount = await db_access.latest_failed_claim_payout_amount(db, claim_id=claim_id)
+                    amount = int(retry_amount or amount_by_claim_id.get(claim_id, 0))
+                    if amount <= 0:
+                        payout_results.append({
+                            "ok": False,
+                            "claim_id": claim_id,
+                            "reason": "missing_payout_amount",
+                        })
+                        continue
+
+                    payout_results.append(
+                        await trans_updater.submit_claim_reward_transaction(
+                            db,
+                            claim_id=claim_id,
+                            amount=amount,
+                        )
+                    )
+
+            await cache.notify_spot_changed(db, spot_id=spot_id)
+            await cache.notify_claim_changed(db, spot_id=spot_id, user_id=None)
+            owner_id = int(spot.get(schema.SPOT_CREATED_BY) or 0) if spot is not None else 0
+            if owner_id:
+                await cache.notify_user_changed(db, user_id=owner_id)
+
+        return {
+            "ok": all(bool(result.get("ok")) for result in payout_results),
+            "spot_id": spot_id,
+            "retried": bool(payout_results),
+            "pending_winner_count": len(pending_winners),
+            "payouts": payout_results,
+        }
+    except Exception as exc:
+        return {"ok": False, "spot_id": spot_id, "retried": False, "reason": repr(exc), "payouts": []}
+
+
+async def retry_pending_prizedraw_payouts(*, max_spots: int = DEFAULT_MAX_SETTLEMENTS_PER_RUN) -> RowDict:
+    """Retry payout sends for completed Prizedraws with pending winner claims."""
+    async with get_db() as db:
+        spot_ids = await db_access.get_completed_prizedraw_spot_ids_with_pending_winners(
+            db,
+            limit=int(max_spots),
+        )
+
+    results: list[RowDict] = []
+    for spot_id in spot_ids:
+        results.append(await retry_pending_prizedraw_payouts_for_spot(spot_id=int(spot_id)))
+
+    return {
+        "ok": all(bool(result.get("ok")) for result in results),
+        "checked_count": len(spot_ids),
+        "retried_count": sum(1 for result in results if result.get("retried")),
+        "failed_count": sum(1 for result in results if not result.get("ok")),
+        "results": results,
+    }
 
 
 async def settle_ready_prizedraws(*, max_settlements: int = DEFAULT_MAX_SETTLEMENTS_PER_RUN) -> RowDict:
@@ -268,10 +385,16 @@ async def run_settlement_pass() -> RowDict:
     """Run all app-level settlement work once."""
     duration_result = await settle_pending_duration_claims()
     prizedraw_result = await settle_ready_prizedraws()
+    payout_retry_result = await retry_pending_prizedraw_payouts()
     return {
-        "ok": bool(duration_result.get("ok")) and bool(prizedraw_result.get("ok")),
+        "ok": (
+            bool(duration_result.get("ok"))
+            and bool(prizedraw_result.get("ok"))
+            and bool(payout_retry_result.get("ok"))
+        ),
         "duration_claims": duration_result,
         "prizedraws": prizedraw_result,
+        "prizedraw_payout_retries": payout_retry_result,
     }
 
 

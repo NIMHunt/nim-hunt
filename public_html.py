@@ -1256,31 +1256,42 @@ def _claim_reward_amount(spot: dict[str, Any], *, is_prizedraw: bool) -> int:
 
 
 def _claim_payout_summary(claim_transactions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Summarise non-failed CLAIM payout transactions for one claim.
+    """Summarise CLAIM payout transactions for one claim.
 
-    Prizedraw win/loss is intentionally inferred from these rows. A successful
-    Prizedraw claim with a non-failed CLAIM transaction is a winner; a
-    successful Prizedraw claim on a completed Spot without one is a losing entry.
+    Completed Prizedraws now use PENDING claims as selected winners awaiting
+    payout confirmation. Failed payout attempts are kept in the summary so the
+    UI can show that the app is retrying rather than treating the user as a
+    loser.
     """
-    payout_rows = [
+    all_payout_rows = [
         trans for trans in (claim_transactions or [])
         if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CLAIM
-        and int(trans.get(schema.TRANS_STATUS) or -1) != const.TRANS_STATUS_FAILED
+    ]
+    nonfailed_rows = [
+        trans for trans in all_payout_rows
+        if int(trans.get(schema.TRANS_STATUS) or -1) != const.TRANS_STATUS_FAILED
     ]
     confirmed_rows = [
-        trans for trans in payout_rows
+        trans for trans in nonfailed_rows
         if int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
     ]
     pending_rows = [
-        trans for trans in payout_rows
+        trans for trans in nonfailed_rows
         if int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_PENDING
     ]
+    failed_rows = [
+        trans for trans in all_payout_rows
+        if int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_FAILED
+    ]
     return {
-        "has_payout": bool(payout_rows),
-        "payout_count": len(payout_rows),
+        "has_payout": bool(nonfailed_rows),
+        "has_any_payout_attempt": bool(all_payout_rows),
+        "payout_count": len(nonfailed_rows),
+        "payout_attempt_count": len(all_payout_rows),
         "payout_confirmed_count": len(confirmed_rows),
         "payout_pending_count": len(pending_rows),
-        "payout_amount": sum(int(trans.get(schema.TRANS_AMOUNT) or 0) for trans in payout_rows),
+        "payout_failed_count": len(failed_rows),
+        "payout_amount": sum(int(trans.get(schema.TRANS_AMOUNT) or 0) for trans in nonfailed_rows),
     }
 
 
@@ -1300,13 +1311,22 @@ def _claim_display_status(
             return {"label": "failed", "text": "Failed", "class": "failed"}
         return {"label": "pending", "text": "Pending", "class": "pending"}
 
-    # For Prizedraws, SUCCESS means a valid entry. Win/loss is only shown once
-    # the Spot has been settled/completed. Pending and failed claims never show
-    # Won/Lost.
+    draw_settled = int(spot.get(schema.SPOT_STATUS) or -1) == const.SPOT_STATUS_COMPLETED
+
+    # For completed Prizedraws:
+    # - SUCCESS + confirmed payout/nonfailed payout = paid winner
+    # - SUCCESS + no payout attempt = valid losing entry
+    # - PENDING = selected winner awaiting a confirmed payout/retry
+    if draw_settled and status_label == "pending":
+        if int(payout.get("payout_pending_count") or 0) > 0:
+            return {"label": "won_pending", "text": "Payout Pending", "class": "pending"}
+        if int(payout.get("payout_failed_count") or 0) > 0:
+            return {"label": "won_retrying", "text": "Payout Retrying", "class": "pending"}
+        return {"label": "won_pending", "text": "Payout Pending", "class": "pending"}
+
     if status_label == "success":
-        draw_settled = int(spot.get(schema.SPOT_STATUS) or -1) == const.SPOT_STATUS_COMPLETED
         if draw_settled:
-            if bool(payout.get("has_payout")):
+            if bool(payout.get("has_payout")) or int(payout.get("payout_confirmed_count") or 0) > 0:
                 return {"label": "won", "text": "Won!", "class": "success"}
             return {"label": "lost", "text": "Lost", "class": "failed"}
         return {"label": "waiting", "text": "Waiting", "class": "pending"}
@@ -2685,7 +2705,7 @@ async def my_spots_deposit_submitted_api(spot_id: int, payload: DepositSubmitted
                 user_id=user_id,
                 spot_id=spot_id,
                 amount=amount_due,
-                from_address=payload.from_address or "Nimiq Pay",
+                from_address=payload.from_address,
                 tx_hash=payload.tx_hash,
                 to_address=spot.get(schema.SPOT_DEPOSIT_ADDRESS),
             )

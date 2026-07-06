@@ -126,11 +126,11 @@ def _clean_optional_text(value: str | None) -> str | None:
 
 
 def _clean_optional_nimiq_address(value: str | None, *, required: bool = False) -> str | None:
-    """Return a normalised user-friendly Nimiq address.
+    """Return a checksum-valid, normalised Nimiq address or None.
 
-    This intentionally does light validation only. Full checksum validation
-    belongs in wallet.py / Nimiq tooling, because Nimiq address rules can change
-    with the official SDK.
+    wallet.py owns the actual address rules. Keeping this wrapper here means
+    every CLAIM payout-address path gets the same validation without duplicating
+    Nimiq checksum logic across database helpers.
     """
     cleaned = _clean_optional_text(value)
     if cleaned is None:
@@ -141,9 +141,7 @@ def _clean_optional_nimiq_address(value: str | None, *, required: bool = False) 
     max_chars = int(getattr(const, "CLAIM_PAYOUT_ADDRESS_MAX_CHARS", 160))
     if len(cleaned) > max_chars:
         raise ValueError(f"payout_address must be no more than {max_chars} characters")
-    if not cleaned.upper().startswith("NQ"):
-        raise ValueError("payout_address must be a Nimiq address")
-    return cleaned
+    return wallet.normalise_nimiq_address(cleaned, field_name="payout_address")
 
 
 _UNSET = object()
@@ -1863,6 +1861,10 @@ async def set_claim_status_to_failed(db, *, claim_id: int) -> None:
     await modify_claim_status(db, claim_id=claim_id, status=const.CLAIM_STATUS_FAILED)
 
 
+async def set_claim_status_to_pending(db, *, claim_id: int) -> None:
+    await modify_claim_status(db, claim_id=claim_id, status=const.CLAIM_STATUS_PENDING)
+
+
 async def modify_claim_location_score(
     db,
     *,
@@ -2033,6 +2035,7 @@ async def get_pending_duration_claim_ids(db, *, limit: int = MAX_LIMIT, offset: 
         JOIN {schema.SPOT_TABLE_NAME} s
             ON s.{schema.SPOT_ID} = c.{schema.CLAIM_SPOT_ID}
         WHERE c.{schema.CLAIM_STATUS} = ?
+          AND s.{schema.SPOT_STATUS} = {const.SPOT_STATUS_PUBLISHED}
           AND s.{schema.SPOT_CLAIM_DURATION} > 0
         ORDER BY c.{schema.CLAIM_UPDATED_AT} ASC, c.{schema.CLAIM_ID} ASC
         LIMIT ? OFFSET ?;
@@ -2187,6 +2190,134 @@ async def has_nonfailed_claim_payout_transaction(db, *, claim_id: int) -> bool:
         (int(claim_id), const.TRANS_TYPE_CLAIM, const.TRANS_STATUS_FAILED),
     )
     return await cur.fetchone() is not None
+
+
+async def has_confirmed_claim_payout_transaction(db, *, claim_id: int) -> bool:
+    """Return True if a CLAIM payout transaction is confirmed on-chain."""
+    cur = await db.execute(
+        f"""
+        SELECT 1
+        FROM {schema.TRANS_TABLE_NAME}
+        WHERE {schema.TRANS_CLAIM_ID} = ?
+          AND {schema.TRANS_TYPE} = ?
+          AND {schema.TRANS_STATUS} = ?
+        LIMIT 1;
+        """,
+        (int(claim_id), const.TRANS_TYPE_CLAIM, const.TRANS_STATUS_CONFIRMED),
+    )
+    return await cur.fetchone() is not None
+
+
+async def latest_failed_claim_payout_amount(db, *, claim_id: int) -> int | None:
+    """Return the most recent failed payout amount for retrying a winner."""
+    cur = await db.execute(
+        f"""
+        SELECT {schema.TRANS_AMOUNT} AS amount
+        FROM {schema.TRANS_TABLE_NAME}
+        WHERE {schema.TRANS_CLAIM_ID} = ?
+          AND {schema.TRANS_TYPE} = ?
+          AND {schema.TRANS_STATUS} = ?
+        ORDER BY {schema.TRANS_CREATED_AT} DESC, {schema.TRANS_ID} DESC
+        LIMIT 1;
+        """,
+        (int(claim_id), const.TRANS_TYPE_CLAIM, const.TRANS_STATUS_FAILED),
+    )
+    row = await cur.fetchone()
+    return None if row is None else int(row["amount"] or 0)
+
+
+async def mark_prizedraw_winners_pending(db, *, spot_id: int, winner_claim_ids: list[int]) -> RowDict:
+    """Mark selected Prizedraw winners as pending until payout confirmation.
+
+    At draw close, non-winning successful entries stay SUCCESS, which means the
+    user entered validly but did not win. Chosen winners move back to PENDING so
+    the transaction updater can mark them SUCCESS only after their reward
+    transaction is confirmed.
+    """
+    clean_ids = sorted({int(claim_id) for claim_id in winner_claim_ids if int(claim_id) > 0})
+    if not clean_ids:
+        return {"ok": True, "spot_id": int(spot_id), "winner_claim_ids": [], "updated_count": 0}
+
+    placeholders = _sql_placeholders(len(clean_ids))
+    cur = await db.execute(
+        f"""
+        UPDATE {schema.CLAIM_TABLE_NAME}
+        SET {schema.CLAIM_STATUS} = ?,
+            {schema.CLAIM_UPDATED_AT} = unixepoch()
+        WHERE {schema.CLAIM_SPOT_ID} = ?
+          AND {schema.CLAIM_STATUS} = ?
+          AND {schema.CLAIM_ID} IN ({placeholders});
+        """,
+        (const.CLAIM_STATUS_PENDING, int(spot_id), const.CLAIM_STATUS_SUCCESS, *clean_ids),
+    )
+    return {
+        "ok": True,
+        "spot_id": int(spot_id),
+        "winner_claim_ids": clean_ids,
+        "updated_count": int(cur.rowcount or 0),
+    }
+
+
+async def get_prizedraw_winner_claim_ids(db, *, spot_id: int) -> list[int]:
+    """Return the persisted winner set for a completed Prizedraw.
+
+    Winners are represented by either a pending claim awaiting payout, or by any
+    CLAIM transaction row already created for that claim. The union gives a
+    stable set across retry passes, including after some winner payouts have
+    already confirmed.
+    """
+    rows = await db.execute_fetchall(
+        f"""
+        SELECT claim_id
+        FROM (
+            SELECT c.{schema.CLAIM_ID} AS claim_id
+            FROM {schema.CLAIM_TABLE_NAME} c
+            WHERE c.{schema.CLAIM_SPOT_ID} = ?
+              AND c.{schema.CLAIM_STATUS} = ?
+
+            UNION
+
+            SELECT t.{schema.TRANS_CLAIM_ID} AS claim_id
+            FROM {schema.TRANS_TABLE_NAME} t
+            WHERE t.{schema.TRANS_SPOT_ID} = ?
+              AND t.{schema.TRANS_TYPE} = ?
+              AND t.{schema.TRANS_CLAIM_ID} IS NOT NULL
+        )
+        ORDER BY claim_id ASC;
+        """,
+        (int(spot_id), const.CLAIM_STATUS_PENDING, int(spot_id), const.TRANS_TYPE_CLAIM),
+    )
+    return [int(row["claim_id"]) for row in rows]
+
+
+async def get_completed_prizedraw_spot_ids_with_pending_winners(
+    db,
+    *,
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+) -> list[int]:
+    """Return completed Prizedraws that still have winners awaiting payout."""
+    rows = await db.execute_fetchall(
+        f"""
+        SELECT DISTINCT s.{schema.SPOT_ID} AS spot_id
+        FROM {schema.SPOT_TABLE_NAME} s
+        JOIN {schema.PRIZEDRAW_TABLE_NAME} pd
+            ON pd.{schema.PRIZEDRAW_SPOT_ID} = s.{schema.SPOT_ID}
+        JOIN {schema.CLAIM_TABLE_NAME} c
+            ON c.{schema.CLAIM_SPOT_ID} = s.{schema.SPOT_ID}
+        WHERE s.{schema.SPOT_STATUS} = ?
+          AND c.{schema.CLAIM_STATUS} = ?
+        ORDER BY s.{schema.SPOT_UPDATED_AT} ASC, s.{schema.SPOT_ID} ASC
+        LIMIT ? OFFSET ?;
+        """,
+        (
+            const.SPOT_STATUS_COMPLETED,
+            const.CLAIM_STATUS_PENDING,
+            _clamp_limit(limit),
+            _normalise_offset(offset),
+        ),
+    )
+    return [int(row["spot_id"]) for row in rows]
 
 
 async def count_successful_claims_for_user_spot(
@@ -2470,6 +2601,15 @@ async def refresh_claim_status_from_conditions(db, *, claim_id: int) -> RowDict 
 
     spot = await get_spot(db, spot_id=int(claim[schema.CLAIM_SPOT_ID]))
     if spot is None:
+        return claim
+
+    # Once a Prizedraw is completed, any remaining PENDING claims are selected
+    # winners awaiting a confirmed payout transaction. They must not be treated
+    # as ordinary duration claims and auto-completed by the timer.
+    if int(spot.get(schema.SPOT_STATUS) or -1) == const.SPOT_STATUS_COMPLETED and await is_prizedraw(
+        db,
+        spot_id=int(claim[schema.CLAIM_SPOT_ID]),
+    ):
         return claim
 
     duration = int(spot.get(schema.SPOT_CLAIM_DURATION) or 0)

@@ -250,13 +250,111 @@ def _integration_payload_base() -> dict[str, Any]:
     }
 
 
-def _validate_nimiq_address(value: str, *, field_name: str = "address") -> str:
-    address = str(value or "").strip()
-    if not address:
+NIMIQ_ADDRESS_ALPHABET = "0123456789ABCDEFGHJKLMNPQRSTUVXY"
+_NIMIQ_ADDRESS_ALPHABET_SET = set(NIMIQ_ADDRESS_ALPHABET)
+
+
+def _normalise_address_candidate(value: str) -> str:
+    """Return an uppercase Nimiq address candidate without spaces."""
+    return "".join(str(value or "").strip().upper().split())
+
+
+def _iban_rearranged_numeric(address_no_spaces: str) -> str:
+    """Return the IBAN-style numeric string used for Nimiq checksum checks."""
+    rearranged = address_no_spaces[4:] + address_no_spaces[:4]
+    parts: list[str] = []
+    for char in rearranged:
+        if "0" <= char <= "9":
+            parts.append(char)
+        elif "A" <= char <= "Z":
+            parts.append(str(ord(char) - ord("A") + 10))
+        else:
+            raise ValueError("address contains invalid characters")
+    return "".join(parts)
+
+
+def _mod97_decimal_string(value: str) -> int:
+    """Return int(value) % 97 without building a huge integer all at once."""
+    remainder = 0
+    for char in value:
+        remainder = (remainder * 10 + int(char)) % 97
+    return remainder
+
+
+def is_valid_nimiq_user_friendly_address(value: str) -> bool:
+    """Return True when value is a checksummed Nimiq user-friendly address.
+
+    Nimiq user-friendly addresses use an IBAN-like format: ``NQ`` plus two
+    checksum digits plus 32 base32 address characters. Spaces are presentation
+    only and are ignored for validation.
+    """
+    try:
+        address = _normalise_address_candidate(value)
+        if len(address) != 36:
+            return False
+        if not address.startswith("NQ"):
+            return False
+        if not address[2:4].isdigit():
+            return False
+        if any(char not in _NIMIQ_ADDRESS_ALPHABET_SET for char in address[4:]):
+            return False
+        return _mod97_decimal_string(_iban_rearranged_numeric(address)) == 1
+    except Exception:
+        return False
+
+
+def _format_user_friendly_address(address_no_spaces: str) -> str:
+    """Return the normal grouped display form, e.g. ``NQ48 ....``."""
+    return " ".join(address_no_spaces[i : i + 4] for i in range(0, len(address_no_spaces), 4))
+
+
+def _is_allowed_dev_placeholder_address(value: str) -> bool:
+    """Return True for NimHunt's deliberately fake local-development addresses."""
+    candidate = str(value or "").strip().upper()
+    if not candidate.startswith("NQ00 NIMHUNT DEV "):
+        return False
+
+    allowed_prefixes = (
+        str(getattr(const, "PLACEHOLDER_SPOT_DEPOSIT_ADDRESS_PREFIX", "")).strip().upper(),
+        "NQ00 NIMHUNT DEV CLAIM PAYOUT",
+        "NQ00 NIMHUNT DEV CANCELLATION FEE POOL",
+    )
+    return any(prefix and candidate.startswith(prefix) for prefix in allowed_prefixes)
+
+
+def normalise_nimiq_address(
+    value: str,
+    *,
+    field_name: str = "address",
+    allow_dev_placeholder: bool | None = None,
+) -> str:
+    """Return a canonical, checksum-valid Nimiq address or raise ValueError.
+
+    This is intentionally stricter than the old ``startswith("NQ")`` check.
+    It accepts spaces in user input, validates the Nimiq checksum, and stores
+    real addresses in a predictable grouped uppercase format. Development-only
+    fake addresses are accepted only when the dev wallet flags are enabled.
+    """
+    raw = str(value or "").strip()
+    if not raw:
         raise ValueError(f"{field_name} must be non-empty")
-    if not address.upper().startswith("NQ"):
-        raise ValueError(f"{field_name} must be a Nimiq user-friendly address")
-    return address
+
+    if allow_dev_placeholder is None:
+        allow_dev_placeholder = bool(
+            getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)
+            or getattr(const, "ALLOW_DEV_WALLET_SENDS", False)
+        )
+    if bool(allow_dev_placeholder) and _is_allowed_dev_placeholder_address(raw):
+        return raw
+
+    address = _normalise_address_candidate(raw)
+    if not is_valid_nimiq_user_friendly_address(address):
+        raise ValueError(f"{field_name} must be a valid Nimiq user-friendly address")
+    return _format_user_friendly_address(address)
+
+
+def _validate_nimiq_address(value: str, *, field_name: str = "address") -> str:
+    return normalise_nimiq_address(value, field_name=field_name)
 
 
 # ---------------------------------------------------------------------------

@@ -176,12 +176,17 @@ def _integration_payload_base() -> dict[str, Any]:
 
 
 def _validate_nimiq_address(value: str, *, field_name: str = "address") -> str:
-    address = str(value or "").strip()
-    if not address:
-        raise ValueError(f"{field_name} must be non-empty")
-    if not address.upper().startswith("NQ"):
-        raise ValueError(f"{field_name} must be a Nimiq user-friendly address")
-    return address
+    """Return a checksum-valid Nimiq address in canonical display form.
+
+    Outgoing sends should only accept NimHunt's fake development addresses when
+    fake wallet sends are explicitly enabled. Merely allowing placeholder
+    deposit-address generation for UI tests is not enough.
+    """
+    return wallet.normalise_nimiq_address(
+        value,
+        field_name=field_name,
+        allow_dev_placeholder=bool(getattr(const, "ALLOW_DEV_WALLET_SENDS", False)),
+    )
 
 
 async def submit_chain_send_from_spot_deposit(
@@ -449,6 +454,27 @@ async def check_pending_transaction(
     return chain_status
 
 
+async def _claim_transaction_is_completed_prizedraw_payout(db, trans: RowDict) -> bool:
+    """Return True when a TRANSACTION row is a completed-Prizedraw winner payout."""
+    if int(trans.get(schema.TRANS_TYPE) or -1) != const.TRANS_TYPE_CLAIM:
+        return False
+    claim_id = trans.get(schema.TRANS_CLAIM_ID)
+    if claim_id is None:
+        return False
+
+    claim = await db_access.get_claim(db, claim_id=int(claim_id))
+    if claim is None:
+        return False
+
+    spot = await db_access.get_spot(db, spot_id=int(claim[schema.CLAIM_SPOT_ID]))
+    if spot is None:
+        return False
+    if int(spot.get(schema.SPOT_STATUS) or -1) != const.SPOT_STATUS_COMPLETED:
+        return False
+
+    return await db_access.is_prizedraw(db, spot_id=int(spot[schema.SPOT_ID]))
+
+
 async def mark_trans_as_confirmed(
     db,
     trans: RowDict,
@@ -457,6 +483,8 @@ async def mark_trans_as_confirmed(
 ) -> RowDict:
     """Mark a TRANSACTION confirmed in the DB, then remove it from pending cache."""
     trans_id = _transaction_id(trans)
+    completed_prizedraw_payout = await _claim_transaction_is_completed_prizedraw_payout(db, trans)
+    claim_id = trans.get(schema.TRANS_CLAIM_ID)
 
     async with db_access.transaction(db):
         if block_number is None:
@@ -472,12 +500,23 @@ async def mark_trans_as_confirmed(
                 block_number=int(block_number),
             )
 
+        # In the revised Prizedraw model, selected winners stay PENDING until
+        # their payout transaction confirms. Losers are already SUCCESS.
+        if completed_prizedraw_payout and claim_id is not None:
+            await db_access.set_claim_status_to_success(db, claim_id=int(claim_id))
+
     await cache.notify_transaction_changed(
         db,
         trans_id=trans_id,
         spot_id=trans.get(schema.TRANS_SPOT_ID),
         user_id=trans.get(schema.TRANS_USER_ID),
     )
+    if completed_prizedraw_payout and claim_id is not None:
+        await cache.notify_claim_changed(
+            db,
+            spot_id=trans.get(schema.TRANS_SPOT_ID),
+            user_id=trans.get(schema.TRANS_USER_ID),
+        )
 
     return {"trans_id": trans_id, "status": "confirmed", "block_number": block_number}
 
@@ -485,9 +524,12 @@ async def mark_trans_as_confirmed(
 async def mark_trans_as_failed(db, trans: RowDict, *, reason: str | None = None) -> RowDict:
     """Mark a TRANSACTION failed in the DB, then remove it from pending cache."""
     trans_id = _transaction_id(trans)
+    completed_prizedraw_payout = await _claim_transaction_is_completed_prizedraw_payout(db, trans)
 
     async with db_access.transaction(db):
         await db_access.set_transaction_status_to_failed(db, trans_id=trans_id)
+        # Failed Prizedraw payout attempts deliberately leave the selected
+        # winner CLAIM as PENDING. settlement_updater.py will retry it.
 
     await cache.notify_transaction_changed(
         db,
@@ -495,6 +537,12 @@ async def mark_trans_as_failed(db, trans: RowDict, *, reason: str | None = None)
         spot_id=trans.get(schema.TRANS_SPOT_ID),
         user_id=trans.get(schema.TRANS_USER_ID),
     )
+    if completed_prizedraw_payout:
+        await cache.notify_claim_changed(
+            db,
+            spot_id=trans.get(schema.TRANS_SPOT_ID),
+            user_id=trans.get(schema.TRANS_USER_ID),
+        )
 
     return {"trans_id": trans_id, "status": "failed", "reason": reason}
 
@@ -655,16 +703,29 @@ async def record_spot_deposit_transaction(
     if spot is None:
         raise ValueError(f"spot id={spot_id} does not exist")
 
-    clean_to_address = str(to_address or spot.get(schema.SPOT_DEPOSIT_ADDRESS) or "").strip()
-    if not clean_to_address:
-        raise ValueError("spot has no deposit address")
+    clean_to_address = wallet.normalise_nimiq_address(
+        str(to_address or spot.get(schema.SPOT_DEPOSIT_ADDRESS) or ""),
+        field_name="deposit to_address",
+        allow_dev_placeholder=bool(getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)),
+    )
+
+    try:
+        clean_from_address = wallet.normalise_nimiq_address(
+            str(from_address or ""),
+            field_name="deposit from_address",
+            allow_dev_placeholder=bool(getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)),
+        )
+    except ValueError:
+        if not getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False):
+            raise
+        clean_from_address = str(from_address or "Nimiq Pay").strip() or "Nimiq Pay"
 
     trans_id = await db_access.create_spot_deposit_transaction(
         db,
         user_id=int(user_id),
         spot_id=int(spot_id),
         amount=amount,
-        from_address=str(from_address or "Nimiq Pay").strip() or "Nimiq Pay",
+        from_address=clean_from_address,
         to_address=clean_to_address,
         tx_hash=str(tx_hash).strip(),
     )

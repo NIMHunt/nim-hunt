@@ -235,17 +235,25 @@ async def settle_pending_duration_claims(*, max_claims: int = DEFAULT_MAX_DURATI
                 continue
 
             changed = int(before[schema.CLAIM_STATUS]) != int(after[schema.CLAIM_STATUS])
-            if changed:
+            cleanup = after.get("capacity_cleanup") if isinstance(after, dict) else None
+            cleanup_failed_count = int(cleanup.get("failed_count") or 0) if isinstance(cleanup, dict) else 0
+
+            if changed or cleanup_failed_count > 0:
                 with suppress(Exception):
-                    await cache.notify_spot_changed(db, spot_id=int(after[schema.CLAIM_SPOT_ID]))
-                with suppress(Exception):
-                    await cache.notify_user_changed(db, user_id=int(after[schema.CLAIM_RECIPIENT]))
+                    # A capacity cleanup can fail other users' pending claims,
+                    # so mark the broader claim/user cache dirty when it fires.
+                    await cache.notify_claim_changed(
+                        db,
+                        spot_id=int(after[schema.CLAIM_SPOT_ID]),
+                        user_id=None if cleanup_failed_count > 0 else int(after[schema.CLAIM_RECIPIENT]),
+                    )
 
             results.append({
                 "claim_id": int(claim_id),
                 "changed": changed,
                 "before_status": int(before[schema.CLAIM_STATUS]),
                 "after_status": int(after[schema.CLAIM_STATUS]),
+                "capacity_cleanup": cleanup,
             })
 
     return {

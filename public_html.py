@@ -262,6 +262,30 @@ async def _notify_all_cache_for_spot_owner_change(db, *, user_id: int, spot_id: 
     await _notify_spot_cache(db, spot_id=int(spot_id))
 
 
+async def _notify_capacity_cleanup_cache(db, *, cleanup: dict[str, Any] | None) -> None:
+    """Refresh/dirty cache after capacity cleanup fails other pending claims."""
+    if cache is None or not isinstance(cleanup, dict):
+        return
+    if int(cleanup.get("failed_count") or 0) <= 0:
+        return
+
+    spot_id = cleanup.get("spot_id")
+    if spot_id is None:
+        return
+
+    notify_claim = getattr(cache, "notify_claim_changed", None)
+    mark_spot_dirty = getattr(cache, "mark_spot_cache_dirty", None)
+    mark_user_dirty = getattr(cache, "mark_user_cache_dirty", None)
+
+    if callable(notify_claim):
+        await notify_claim(db, spot_id=int(spot_id), user_id=None)
+    else:
+        if callable(mark_spot_dirty):
+            mark_spot_dirty()
+        if callable(mark_user_dirty):
+            mark_user_dirty()
+
+
 async def _notify_all_cache_if_user_display_changed(db, *, user_id: int) -> None:
     """A display-name change can affect user cache and public spot creator names."""
     if cache is None:
@@ -1593,6 +1617,7 @@ async def claim_spot_api(spot_id: int, payload: ClaimSpotRequest) -> JSONRespons
             user_id=int(user[schema.USER_ID]),
             spot_id=int(spot_id),
         )
+        await _notify_capacity_cleanup_cache(db, cleanup=claim.get("capacity_cleanup") if isinstance(claim, dict) else None)
 
         if settlement_updater is not None:
             await settlement_updater.settle_prizedraw_spot_if_ready(spot_id=int(spot_id))
@@ -1647,6 +1672,7 @@ async def claim_detail_api(claim_id: int, payload: HomeSessionRequest) -> JSONRe
         claim_transactions = await db_access.get_transactions_by_claim(db, claim_id=int(claim_id))
         now = await db_access.get_unixepoch(db)
         await _notify_all_cache_for_spot_owner_change(db, user_id=user_id, spot_id=int(claim[schema.CLAIM_SPOT_ID]))
+        await _notify_capacity_cleanup_cache(db, cleanup=claim.get("capacity_cleanup") if isinstance(claim, dict) else None)
 
     return JSONResponse({
         **meta,
@@ -1697,6 +1723,7 @@ async def claim_location_heartbeat_api(claim_id: int, payload: HomeSessionReques
                 return JSONResponse({**meta, "ok": False, "code": "spot_missing", "message": "Spot not found."}, status_code=status.HTTP_404_NOT_FOUND)
 
         await _notify_all_cache_for_spot_owner_change(db, user_id=user_id, spot_id=int(claim[schema.CLAIM_SPOT_ID]))
+        await _notify_capacity_cleanup_cache(db, cleanup=claim.get("capacity_cleanup") if isinstance(claim, dict) else None)
 
     if settlement_updater is not None and int(claim.get(schema.CLAIM_STATUS) or const.CLAIM_STATUS_PENDING) == const.CLAIM_STATUS_SUCCESS:
         await settlement_updater.settle_prizedraw_spot_if_ready(spot_id=int(claim[schema.CLAIM_SPOT_ID]))

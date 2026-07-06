@@ -202,6 +202,10 @@ SETTLEMENT_INTERVAL_SECONDS = 60
 MAX_SETTLEMENTS_PER_RUN = 50
 MAX_DURATION_CLAIMS_PER_RUN = 200
 
+# Transaction loop. This checks pending Nimiq transaction hashes and moves them
+# from pending to confirmed/failed when the chain/RPC result is known.
+TRANSACTION_CHECK_INTERVAL_SECONDS = 60
+
 # Duration-claim location verification. The browser must keep sending location
 # heartbeats while a duration-based CLAIM is pending. GPS accuracy is used as
 # a mercy margin, but it is capped so very vague readings cannot bless a user

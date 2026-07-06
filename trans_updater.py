@@ -29,6 +29,7 @@ import time
 import urllib.error
 from pathlib import Path
 import urllib.request
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -42,7 +43,7 @@ import wallet
 
 
 RowDict = dict[str, Any]
-TransOutcome = Literal["pending", "confirmed", "failed", "cancelled", "unknown"]
+TransOutcome = Literal["pending", "confirmed", "failed", "unknown"]
 
 # Public RPC servers are useful for development, but a production deployment
 # should point this at your own node or a service you trust.
@@ -57,6 +58,19 @@ DEFAULT_FAIL_AFTER_SECONDS = int(os.getenv("NIMHUNT_TRANS_FAIL_AFTER_SECONDS", s
 # Keep each updater pass small. If there are more pending transactions than
 # this, the next scheduled call will pick up the next batch.
 DEFAULT_MAX_CHECKS_PER_RUN = int(os.getenv("NIMHUNT_TRANS_MAX_CHECKS_PER_RUN", "100"))
+
+# Background polling interval. constants.py defines this for normal app use;
+# the environment variable is still useful when you want quicker local testing.
+DEFAULT_TRANSACTION_CHECK_INTERVAL_SECONDS = int(os.getenv(
+    "NIMHUNT_TRANSACTION_CHECK_INTERVAL_SECONDS",
+    str(getattr(const, "TRANSACTION_CHECK_INTERVAL_SECONDS", 60)),
+))
+
+
+_TRANS_CHECK_TASK: asyncio.Task | None = None
+_TRANS_CHECK_STOP_EVENT: asyncio.Event | None = None
+_TRANS_CHECK_LAST_RESULT: RowDict | None = None
+_TRANS_CHECK_LAST_ERROR: str | None = None
 
 
 @dataclass(slots=True)
@@ -485,28 +499,6 @@ async def mark_trans_as_failed(db, trans: RowDict, *, reason: str | None = None)
     return {"trans_id": trans_id, "status": "failed", "reason": reason}
 
 
-async def mark_trans_as_cancelled(db, trans: RowDict, *, reason: str | None = None) -> RowDict:
-    """Mark a TRANSACTION cancelled in the DB, then remove it from pending cache.
-
-    Nimiq itself usually cannot tell us that a basic transfer was "cancelled";
-    this function is here for app-level cancellations, e.g. when NimHunt decides
-    to abandon a pending transaction before it is confirmed.
-    """
-    trans_id = _transaction_id(trans)
-
-    async with db_access.transaction(db):
-        await db_access.set_transaction_status_to_cancelled(db, trans_id=trans_id)
-
-    await cache.notify_transaction_changed(
-        db,
-        trans_id=trans_id,
-        spot_id=trans.get(schema.TRANS_SPOT_ID),
-        user_id=trans.get(schema.TRANS_USER_ID),
-    )
-
-    return {"trans_id": trans_id, "status": "cancelled", "reason": reason}
-
-
 async def check_pending_transactions(
     *,
     rpc_url: str = DEFAULT_NIMIQ_RPC_URL,
@@ -555,8 +547,6 @@ async def check_pending_transactions(
                 )
             elif status.status == "failed":
                 finalised.append(await mark_trans_as_failed(db, trans, reason=status.reason))
-            elif status.status == "cancelled":
-                finalised.append(await mark_trans_as_cancelled(db, trans, reason=status.reason))
             elif status.status == "unknown":
                 unknown.append({"trans_id": _transaction_id(trans), "reason": status.reason})
             else:
@@ -572,6 +562,73 @@ async def check_pending_transactions(
         "finalised": finalised,
         "still_pending": still_pending,
         "unknown": unknown,
+    }
+
+
+async def _transaction_check_loop(interval_seconds: int) -> None:
+    """Background loop that keeps pending TRANSACTION rows moving."""
+    global _TRANS_CHECK_LAST_RESULT, _TRANS_CHECK_LAST_ERROR
+
+    assert _TRANS_CHECK_STOP_EVENT is not None
+    while not _TRANS_CHECK_STOP_EVENT.is_set():
+        try:
+            _TRANS_CHECK_LAST_RESULT = await check_pending_transactions()
+            _TRANS_CHECK_LAST_ERROR = None
+        except Exception as exc:  # pragma: no cover - defensive loop guard
+            _TRANS_CHECK_LAST_ERROR = repr(exc)
+
+        with suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                _TRANS_CHECK_STOP_EVENT.wait(),
+                timeout=max(1, int(interval_seconds)),
+            )
+
+
+async def start_transaction_refresher(
+    *,
+    run_immediately: bool = False,
+    interval_seconds: int = DEFAULT_TRANSACTION_CHECK_INTERVAL_SECONDS,
+) -> None:
+    """Start the lightweight background transaction-status loop once."""
+    global _TRANS_CHECK_TASK, _TRANS_CHECK_STOP_EVENT, _TRANS_CHECK_LAST_RESULT, _TRANS_CHECK_LAST_ERROR
+
+    if _TRANS_CHECK_TASK is not None and not _TRANS_CHECK_TASK.done():
+        return
+
+    _TRANS_CHECK_STOP_EVENT = asyncio.Event()
+
+    if run_immediately:
+        try:
+            _TRANS_CHECK_LAST_RESULT = await check_pending_transactions()
+            _TRANS_CHECK_LAST_ERROR = None
+        except Exception as exc:  # pragma: no cover - startup should not fail app boot
+            _TRANS_CHECK_LAST_ERROR = repr(exc)
+
+    _TRANS_CHECK_TASK = asyncio.create_task(_transaction_check_loop(int(interval_seconds)))
+
+
+async def stop_transaction_refresher() -> None:
+    """Stop the background transaction-status loop if it is running."""
+    global _TRANS_CHECK_TASK, _TRANS_CHECK_STOP_EVENT
+
+    if _TRANS_CHECK_STOP_EVENT is not None:
+        _TRANS_CHECK_STOP_EVENT.set()
+
+    if _TRANS_CHECK_TASK is not None:
+        _TRANS_CHECK_TASK.cancel()
+        with suppress(asyncio.CancelledError):
+            await _TRANS_CHECK_TASK
+
+    _TRANS_CHECK_TASK = None
+    _TRANS_CHECK_STOP_EVENT = None
+
+
+def transaction_refresher_status() -> RowDict:
+    """Return a small debug snapshot for future admin/status pages."""
+    return {
+        "running": _TRANS_CHECK_TASK is not None and not _TRANS_CHECK_TASK.done(),
+        "last_result": _TRANS_CHECK_LAST_RESULT,
+        "last_error": _TRANS_CHECK_LAST_ERROR,
     }
 
 

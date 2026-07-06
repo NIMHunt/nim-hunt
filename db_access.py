@@ -1625,11 +1625,14 @@ async def can_publish_spot(db, *, spot_id: int) -> bool:
 async def is_spot_claim_capacity_available(db, *, spot_id: int) -> bool:
     """Return whether the SPOT has capacity for another claim/entry.
 
-    Standard spots count only successful claims against max_total_claims.
-    Pending duration claims do not reserve global capacity, so several users can
-    try while the reward remains available. Prizedraw entries are different: an
-    entry is already the final participation action, so pending entries count as
-    participants until future draw settlement resolves them.
+    Standard spots count successful claims against max_total_claims. Pending
+    duration claims may exist while rewards are still available, but once the
+    standard Spot reaches capacity the remaining pending duration claims are
+    failed by fail_pending_standard_duration_claims_if_capacity_full().
+
+    Prizedraw entries are different: an entry is already the final
+    participation action, so pending entries count as participants until future
+    draw settlement resolves them.
     """
     summary = await get_spot_owner_summary(db, spot_id=spot_id)
     if not summary:
@@ -2058,6 +2061,118 @@ async def fail_pending_claims_for_spot(db, *, spot_id: int) -> int:
     return int(cur.rowcount or 0)
 
 
+async def fail_pending_standard_duration_claims_if_capacity_full(db, *, spot_id: int) -> RowDict:
+    """Fail pending duration claims when a standard SPOT has no rewards left.
+
+    Standard duration claims do not reserve global capacity when they start.
+    That lets several people begin the waiting period while a reward is still
+    available. The safety rule is: as soon as successful claims reach
+    max_total_claims, every other still-pending duration claim for the same
+    standard SPOT is failed. This prevents later background refreshes from
+    turning too many pending claims into successful, payable claims.
+
+    Prizedraws deliberately use different accounting and are skipped here.
+    """
+    spot = await get_spot(db, spot_id=int(spot_id))
+    if spot is None:
+        return {
+            "ok": False,
+            "spot_id": int(spot_id),
+            "failed_count": 0,
+            "reason": "spot_missing",
+            "failed_claim_ids": [],
+            "failed_user_ids": [],
+        }
+
+    if await is_prizedraw(db, spot_id=int(spot_id)):
+        return {
+            "ok": True,
+            "spot_id": int(spot_id),
+            "failed_count": 0,
+            "reason": "prizedraw_skipped",
+            "failed_claim_ids": [],
+            "failed_user_ids": [],
+        }
+
+    duration = int(spot.get(schema.SPOT_CLAIM_DURATION) or 0)
+    max_total = int(spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) or 0)
+    if duration <= 0 or max_total <= 0:
+        return {
+            "ok": True,
+            "spot_id": int(spot_id),
+            "failed_count": 0,
+            "reason": "not_limited_duration_spot",
+            "failed_claim_ids": [],
+            "failed_user_ids": [],
+        }
+
+    success_count = await count_claims_by_status_for_spot(
+        db,
+        spot_id=int(spot_id),
+        status=const.CLAIM_STATUS_SUCCESS,
+    )
+    if int(success_count) < int(max_total):
+        return {
+            "ok": True,
+            "spot_id": int(spot_id),
+            "failed_count": 0,
+            "reason": "capacity_available",
+            "success_count": int(success_count),
+            "max_total_claims": int(max_total),
+            "failed_claim_ids": [],
+            "failed_user_ids": [],
+        }
+
+    rows = await db.execute_fetchall(
+        f"""
+        SELECT
+            {schema.CLAIM_ID} AS claim_id,
+            {schema.CLAIM_RECIPIENT} AS user_id
+        FROM {schema.CLAIM_TABLE_NAME}
+        WHERE {schema.CLAIM_SPOT_ID} = ?
+          AND {schema.CLAIM_STATUS} = ?
+        ORDER BY {schema.CLAIM_CLAIMED_AT} ASC, {schema.CLAIM_ID} ASC;
+        """,
+        (int(spot_id), const.CLAIM_STATUS_PENDING),
+    )
+
+    failed_claim_ids = [int(row["claim_id"]) for row in rows]
+    failed_user_ids = sorted({int(row["user_id"]) for row in rows})
+    if not failed_claim_ids:
+        return {
+            "ok": True,
+            "spot_id": int(spot_id),
+            "failed_count": 0,
+            "reason": "capacity_full_no_pending_claims",
+            "success_count": int(success_count),
+            "max_total_claims": int(max_total),
+            "failed_claim_ids": [],
+            "failed_user_ids": [],
+        }
+
+    cur = await db.execute(
+        f"""
+        UPDATE {schema.CLAIM_TABLE_NAME}
+        SET {schema.CLAIM_STATUS} = ?,
+            {schema.CLAIM_UPDATED_AT} = unixepoch()
+        WHERE {schema.CLAIM_SPOT_ID} = ?
+          AND {schema.CLAIM_STATUS} = ?;
+        """,
+        (const.CLAIM_STATUS_FAILED, int(spot_id), const.CLAIM_STATUS_PENDING),
+    )
+
+    return {
+        "ok": True,
+        "spot_id": int(spot_id),
+        "failed_count": int(cur.rowcount or 0),
+        "reason": "capacity_full_pending_claims_failed",
+        "success_count": int(success_count),
+        "max_total_claims": int(max_total),
+        "failed_claim_ids": failed_claim_ids,
+        "failed_user_ids": failed_user_ids,
+    }
+
+
 async def has_nonfailed_claim_payout_transaction(db, *, claim_id: int) -> bool:
     """Return True if a claim already has a non-failed payout transaction."""
     cur = await db.execute(
@@ -2103,8 +2218,10 @@ async def count_active_claims_for_user_spot(
     """Return claims/entries that count against this user's limit.
 
     Standard spots count only successful claims. Pending duration claims do not
-    reserve the user's future capacity. For Prizedraws, a pending entry is the
-    user's actual entry, so it counts immediately.
+    reserve the user's future capacity; when a standard duration Spot reaches
+    global capacity, remaining pending claims are failed automatically. For
+    Prizedraws, a pending entry is the user's actual entry, so it counts
+    immediately.
     """
     statuses = [const.CLAIM_STATUS_SUCCESS]
     if await is_prizedraw(db, spot_id=spot_id):
@@ -2358,7 +2475,14 @@ async def refresh_claim_status_from_conditions(db, *, claim_id: int) -> RowDict 
     duration = int(spot.get(schema.SPOT_CLAIM_DURATION) or 0)
     if duration <= 0:
         await set_claim_status_to_success(db, claim_id=claim_id)
-        return await get_claim(db, claim_id=claim_id)
+        claim_after = await get_claim(db, claim_id=claim_id)
+        cleanup = await fail_pending_standard_duration_claims_if_capacity_full(
+            db,
+            spot_id=int(claim[schema.CLAIM_SPOT_ID]),
+        )
+        if claim_after is not None:
+            claim_after["capacity_cleanup"] = cleanup
+        return claim_after
 
     now = await get_unixepoch(db)
     stale_after = max(1, int(getattr(const, "CLAIM_LOCATION_STALE_AFTER_SECONDS", 180)))
@@ -2370,7 +2494,14 @@ async def refresh_claim_status_from_conditions(db, *, claim_id: int) -> RowDict 
 
     if now >= int(claim[schema.CLAIM_CLAIMED_AT]) + duration:
         await set_claim_status_to_success(db, claim_id=claim_id)
-        return await get_claim(db, claim_id=claim_id)
+        claim_after = await get_claim(db, claim_id=claim_id)
+        cleanup = await fail_pending_standard_duration_claims_if_capacity_full(
+            db,
+            spot_id=int(claim[schema.CLAIM_SPOT_ID]),
+        )
+        if claim_after is not None:
+            claim_after["capacity_cleanup"] = cleanup
+        return claim_after
 
     return claim
 
@@ -2409,8 +2540,13 @@ async def process_duration_claim_location_heartbeat(
     if duration <= 0:
         await set_claim_status_to_success(db, claim_id=claim_id)
         claim_after = await get_claim(db, claim_id=claim_id)
+        cleanup = await fail_pending_standard_duration_claims_if_capacity_full(
+            db,
+            spot_id=int(refreshed[schema.CLAIM_SPOT_ID]),
+        )
         if claim_after is None:
             raise RuntimeError("Claim disappeared during heartbeat")
+        claim_after["capacity_cleanup"] = cleanup
         return claim_after
 
     lat, long = _validate_optional_coordinates(lat, long)
@@ -2453,6 +2589,13 @@ async def process_duration_claim_location_heartbeat(
     claim_after = await get_claim(db, claim_id=claim_id)
     if claim_after is None:
         raise RuntimeError("Claim disappeared during heartbeat")
+
+    if next_status == const.CLAIM_STATUS_SUCCESS:
+        claim_after["capacity_cleanup"] = await fail_pending_standard_duration_claims_if_capacity_full(
+            db,
+            spot_id=int(refreshed[schema.CLAIM_SPOT_ID]),
+        )
+
     claim_after["distance"] = distance_check
     claim_after["location_penalty"] = penalty
     return claim_after

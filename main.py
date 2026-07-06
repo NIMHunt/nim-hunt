@@ -25,6 +25,11 @@ try:
 except Exception:  # settlement is optional while bootstrapping
     settlement_updater = None  # type: ignore[assignment]
 
+try:
+    import trans_updater
+except Exception:  # transaction polling is optional while bootstrapping
+    trans_updater = None  # type: ignore[assignment]
+
 
 app = FastAPI(title=const.APP_NAME)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -98,6 +103,11 @@ async def startup() -> None:
         if callable(start_settlement):
             await start_settlement(run_immediately=True)
 
+    if trans_updater is not None:
+        start_transactions = getattr(trans_updater, "start_transaction_refresher", None)
+        if callable(start_transactions):
+            await start_transactions(run_immediately=True)
+
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
@@ -110,3 +120,8 @@ async def shutdown() -> None:
         stop_settlement = getattr(settlement_updater, "stop_settlement_refresher", None)
         if callable(stop_settlement):
             await stop_settlement()
+
+    if trans_updater is not None:
+        stop_transactions = getattr(trans_updater, "stop_transaction_refresher", None)
+        if callable(stop_transactions):
+            await stop_transactions()

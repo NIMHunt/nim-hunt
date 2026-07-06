@@ -637,6 +637,164 @@ def _json_rpc_post_sync(
     return data.get("result")
 
 
+def _normalise_chain_hash(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _extract_chain_hash(raw: Any) -> str | None:
+    for path, item in _walk_json(raw):
+        if not path or isinstance(item, (dict, list)):
+            continue
+        key = path[-1].lower()
+        if key in {"hash", "tx_hash", "txhash", "transactionhash", "transaction_hash"}:
+            candidate = str(item or "").strip()
+            if candidate:
+                return candidate
+    return None
+
+
+def _transaction_matches_hash(raw: Any, tx_hash: str) -> bool:
+    extracted = _extract_chain_hash(raw)
+    if extracted is None:
+        return False
+    return _normalise_chain_hash(extracted) == _normalise_chain_hash(tx_hash)
+
+
+def _iter_candidate_transactions(result: Any):
+    """Yield likely transaction objects from Nimiq RPC address-list responses."""
+    data, _metadata = _unwrap_rpc_result(result)
+    queue = [data]
+    index = 0
+    while index < len(queue):
+        item = queue[index]
+        index += 1
+        if isinstance(item, list):
+            queue.extend(item)
+            continue
+        if not isinstance(item, dict):
+            continue
+
+        if _extract_chain_hash(item) is not None:
+            yield item
+            continue
+
+        for key in ("transactions", "items", "data", "results", "result"):
+            child = item.get(key)
+            if isinstance(child, (list, dict)):
+                queue.append(child)
+
+
+def _find_transaction_by_hash(result: Any, tx_hash: str) -> Any | None:
+    for tx in _iter_candidate_transactions(result):
+        if _transaction_matches_hash(tx, tx_hash):
+            return tx
+    return None
+
+
+def _verification_failed_because_unstructured(reason: str | None) -> bool:
+    text = str(reason or "").lower()
+    return any(
+        phrase in text
+        for phrase in (
+            "did not expose",
+            "stored transaction sender/from address is invalid",
+            "stored transaction recipient/to address is invalid",
+        )
+    )
+
+
+def _verification_address_for_record(trans: RowDict) -> str | None:
+    """Pick the best address for getTransactionsByAddress verification."""
+    trans_type = int(trans.get(schema.TRANS_TYPE) or -1)
+    if trans_type == const.TRANS_TYPE_FILL_SPOT:
+        return _normalise_address_for_compare(trans.get(schema.TRANS_TO_ADDRESS))
+    return (
+        _normalise_address_for_compare(trans.get(schema.TRANS_FROM_ADDRESS))
+        or _normalise_address_for_compare(trans.get(schema.TRANS_TO_ADDRESS))
+    )
+
+
+async def get_chain_transactions_by_address(
+    address: str,
+    *,
+    rpc_url: str = DEFAULT_NIMIQ_RPC_URL,
+    timeout_seconds: int = DEFAULT_RPC_TIMEOUT_SECONDS,
+    max_transactions: int = 500,
+    start_at: str = "",
+) -> Any:
+    """Return recent transactions for one address via Nimiq RPC."""
+    return await asyncio.to_thread(
+        _json_rpc_post_sync,
+        rpc_url=rpc_url,
+        method="getTransactionsByAddress",
+        params=[address, int(max_transactions), str(start_at or "")],
+        timeout_seconds=int(timeout_seconds),
+    )
+
+
+async def verify_chain_details_for_record(
+    trans: RowDict,
+    status: ChainTransactionStatus,
+    *,
+    rpc_url: str = DEFAULT_NIMIQ_RPC_URL,
+    timeout_seconds: int = DEFAULT_RPC_TIMEOUT_SECONDS,
+) -> VerifiedChainDetails:
+    """Verify a confirmed tx hash against the DB row, with an address-list fallback.
+
+    getTransactionByHash is the cheap first check. Some RPC responses are not
+    shaped consistently enough for a generic parser, so when the direct response
+    is unstructured we ask getTransactionsByAddress for the expected address and
+    match the exact hash there before accepting the transaction as real.
+    """
+    direct = _verify_chain_details_for_record(trans, status)
+    if direct.ok:
+        return direct
+
+    tx_hash = str(status.tx_hash or trans.get(schema.TRANS_TX_HASH) or "").strip()
+    address = _verification_address_for_record(trans)
+    if not tx_hash or not address:
+        return direct
+
+    # The cheap hash lookup response can be unstructured or shaped differently
+    # from address-list transactions. Fall back to the expected address history
+    # and accept only an exact hash match that also passes the same from/to/amount
+    # checks. A wrong transaction will not appear under the expected address.
+    try:
+        address_result = await get_chain_transactions_by_address(
+            address,
+            rpc_url=rpc_url,
+            timeout_seconds=timeout_seconds,
+            max_transactions=int(getattr(const, "NIMIQ_ADDRESS_TX_LOOKUP_LIMIT", 500)),
+        )
+    except (TimeoutError, urllib.error.URLError, OSError, RuntimeError) as exc:
+        return VerifiedChainDetails(
+            ok=False,
+            reason=f"transaction hash was found, but address-list proof failed: {exc!r}",
+        )
+
+    matched = _find_transaction_by_hash(address_result, tx_hash)
+    if matched is None:
+        return VerifiedChainDetails(
+            ok=False,
+            reason="transaction hash was not found in expected address transaction history",
+        )
+
+    fallback_status = ChainTransactionStatus(
+        status="confirmed",
+        tx_hash=tx_hash,
+        block_number=status.block_number,
+        raw=matched,
+        reason="verified via getTransactionsByAddress",
+    )
+    fallback = _verify_chain_details_for_record(trans, fallback_status)
+    if fallback.ok:
+        return fallback
+    return VerifiedChainDetails(
+        ok=False,
+        reason=fallback.reason or direct.reason or "confirmed transaction did not match stored transaction",
+    )
+
+
 async def get_chain_transaction_status(
     tx_hash: str,
     *,
@@ -712,17 +870,6 @@ async def check_pending_transaction(
         rpc_url=rpc_url,
         timeout_seconds=timeout_seconds,
     )
-
-    if chain_status.status == "confirmed":
-        verified = _verify_chain_details_for_record(trans, chain_status)
-        if not verified.ok:
-            return ChainTransactionStatus(
-                status="failed",
-                tx_hash=tx_hash,
-                block_number=chain_status.block_number,
-                raw=chain_status.raw,
-                reason=verified.reason or "confirmed transaction did not match stored transaction",
-            )
 
     if chain_status.status != "pending":
         return chain_status
@@ -880,7 +1027,12 @@ async def check_pending_transactions(
             )
 
             if status.status == "confirmed":
-                verified = _verify_chain_details_for_record(trans, status)
+                verified = await verify_chain_details_for_record(
+                    trans,
+                    status,
+                    rpc_url=rpc_url,
+                    timeout_seconds=int(timeout_seconds),
+                )
                 if not verified.ok:
                     finalised.append(await mark_trans_as_failed(db, trans, reason=verified.reason))
                     continue
@@ -1030,12 +1182,6 @@ async def record_spot_deposit_transaction(
         tx_hash=str(tx_hash).strip(),
     )
 
-    await cache.notify_transaction_changed(
-        db,
-        trans_id=int(trans_id),
-        spot_id=int(spot_id),
-        user_id=int(user_id),
-    )
     return {"ok": True, "trans_id": int(trans_id), "spot_id": int(spot_id), "amount": amount}
 
 
@@ -1140,14 +1286,25 @@ async def submit_spot_cancellation_transactions(
     confirmed_deposit_total = sum(int(trans.get(schema.TRANS_AMOUNT) or 0) for trans in confirmed_deposits)
 
     outgoing_types = {const.TRANS_TYPE_CLAIM, const.TRANS_TYPE_CANCEL_SPOT, const.TRANS_TYPE_PLAT_FEE}
-    nonfailed_outgoing_total = sum(
+    pending_outgoing = [
+        trans for trans in transactions
+        if int(trans.get(schema.TRANS_TYPE) or -1) in outgoing_types
+        and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_PENDING
+    ]
+    if pending_outgoing:
+        raise ValueError(
+            "This spot already has a pending cancellation, refund, fee, or reward transaction. "
+            "Wait for it to confirm or fail before cancelling again."
+        )
+
+    confirmed_outgoing_total = sum(
         int(trans.get(schema.TRANS_AMOUNT) or 0)
         for trans in transactions
         if int(trans.get(schema.TRANS_TYPE) or -1) in outgoing_types
-        and int(trans.get(schema.TRANS_STATUS) or -1) != const.TRANS_STATUS_FAILED
+        and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
     )
 
-    remaining_amount = max(0, confirmed_deposit_total - nonfailed_outgoing_total)
+    remaining_amount = max(0, confirmed_deposit_total - confirmed_outgoing_total)
     fee_amount = min(
         max(0, int(getattr(const, "SPOT_CANCELLATION_FEE", 0) if cancellation_fee is None else cancellation_fee)),
         remaining_amount,
@@ -1188,7 +1345,8 @@ async def submit_spot_cancellation_transactions(
         "spot_id": int(spot_id),
         "cancelled": True,
         "confirmed_deposit_total": confirmed_deposit_total,
-        "nonfailed_outgoing_total": nonfailed_outgoing_total,
+        "confirmed_outgoing_total": confirmed_outgoing_total,
+        "pending_outgoing_count": 0,
         "remaining_amount": remaining_amount,
         "fee_amount": fee_amount,
         "refund_amount": refund_amount,

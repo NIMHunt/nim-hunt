@@ -1380,6 +1380,32 @@ async def _ensure_claim_payout_address_column(db) -> None:
     )
 
 
+# View refresh order matters when existing records.db files already contain old
+# CREATE VIEW IF NOT EXISTS definitions. Views do not store data, so dropping
+# and recreating them on startup is a safe lightweight migration step.
+APP_VIEW_NAMES = (
+    SPOT_VIEW_PUBLIC_LIST,
+    SPOT_VIEW_OWNER_SUMMARY,
+    CLAIM_CODE_VIEW_DETAIL,
+    CLAIM_VIEW_DETAIL,
+    TRANS_VIEW_DETAIL,
+    REPORT_VIEW_DETAIL,
+)
+
+
+async def _refresh_app_views(db) -> None:
+    """Drop and recreate NimHunt views so code changes reach existing DBs."""
+    for view_name in reversed(APP_VIEW_NAMES):
+        await db.execute(f"DROP VIEW IF EXISTS {view_name};")
+
+    await db.executescript(SPOT_VIEW_PUBLIC_LIST_QUERY)
+    await db.executescript(SPOT_VIEW_OWNER_SUMMARY_QUERY)
+    await db.executescript(CLAIM_CODE_VIEW_DETAIL_QUERY)
+    await db.executescript(CLAIM_VIEW_DETAIL_QUERY)
+    await db.executescript(TRANS_VIEW_DETAIL_QUERY)
+    await db.executescript(REPORT_VIEW_DETAIL_QUERY)
+
+
 # --------------------------------------
 # Initialize database and create relevant tables if necessary
 # --------------------------------------
@@ -1449,12 +1475,7 @@ async def init_db():
         await db.executescript(REPORT_INDEX_SPOT_REPORTED_BY_QUERY)
         await db.executescript(REPORT_TRIGGER_SET_REVIEWED_AT_QUERY)
 
-        await db.executescript(SPOT_VIEW_PUBLIC_LIST_QUERY)
-        await db.executescript(SPOT_VIEW_OWNER_SUMMARY_QUERY)
-        await db.executescript(CLAIM_CODE_VIEW_DETAIL_QUERY)
-        await db.executescript(CLAIM_VIEW_DETAIL_QUERY)
-        await db.executescript(TRANS_VIEW_DETAIL_QUERY)
-        await db.executescript(REPORT_VIEW_DETAIL_QUERY)
+        await _refresh_app_views(db)
 
         await db.commit()
 

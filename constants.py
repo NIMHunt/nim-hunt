@@ -157,6 +157,9 @@ NIMIQ_NETWORK = "TestAlbatross"
 NIMIQ_NETWORK_ID = 6
 NIMIQ_RPC_URL = "https://rpc.nimiqwatch.com"
 NIMIQ_RPC_TIMEOUT_SECONDS = 12
+# How many recent address transactions to inspect when getTransactionByHash
+# returns an unstructured response that still needs from/to/amount proof.
+NIMIQ_ADDRESS_TX_LOOKUP_LIMIT = 500
 NIMIQ_TRANSACTION_FEE = 0
 
 # Nimiq Pay / Hub endpoints used by browser-side user deposits. The server does

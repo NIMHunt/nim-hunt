@@ -1016,10 +1016,20 @@ async function requestDepositPayment(intent) {
         console.warn('Could not read Nimiq account list before deposit.', err);
     }
 
-    const txHash = await nimiq.sendBasicTransaction({
+    const payment = await nimiq.sendBasicTransaction({
         recipient: intent.recipient,
         value: Number(intent.amount),
     });
+
+    const txHash = (
+        typeof payment === 'string'
+            ? payment
+            : payment?.txHash || payment?.hash || payment?.transactionHash || payment?.transaction?.hash
+    );
+
+    if (!txHash) {
+        throw new Error('Nimiq Pay did not return a transaction hash for this deposit.');
+    }
 
     return { txHash, fromAddress };
 }

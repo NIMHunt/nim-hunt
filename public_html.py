@@ -1314,8 +1314,8 @@ def _claim_display_status(
     draw_settled = int(spot.get(schema.SPOT_STATUS) or -1) == const.SPOT_STATUS_COMPLETED
 
     # For completed Prizedraws:
-    # - SUCCESS + confirmed payout/nonfailed payout = paid winner
-    # - SUCCESS + no payout attempt = valid losing entry
+    # - SUCCESS + confirmed payout = paid winner
+    # - SUCCESS + no confirmed payout = valid losing entry
     # - PENDING = selected winner awaiting a confirmed payout/retry
     if draw_settled and status_label == "pending":
         if int(payout.get("payout_pending_count") or 0) > 0:
@@ -1326,7 +1326,7 @@ def _claim_display_status(
 
     if status_label == "success":
         if draw_settled:
-            if bool(payout.get("has_payout")) or int(payout.get("payout_confirmed_count") or 0) > 0:
+            if int(payout.get("payout_confirmed_count") or 0) > 0:
                 return {"label": "won", "text": "Won!", "class": "success"}
             return {"label": "lost", "text": "Lost", "class": "failed"}
         return {"label": "waiting", "text": "Waiting", "class": "pending"}
@@ -2700,7 +2700,7 @@ async def my_spots_deposit_submitted_api(spot_id: int, payload: DepositSubmitted
             if amount_due <= 0:
                 return JSONResponse({**meta, "ok": False, "code": "deposit_covered", "message": "This draft already has submitted deposits covering its total value."}, status_code=status.HTTP_409_CONFLICT)
 
-            await trans_updater.record_spot_deposit_transaction(
+            deposit_record = await trans_updater.record_spot_deposit_transaction(
                 db,
                 user_id=user_id,
                 spot_id=spot_id,
@@ -2710,7 +2710,15 @@ async def my_spots_deposit_submitted_api(spot_id: int, payload: DepositSubmitted
                 to_address=spot.get(schema.SPOT_DEPOSIT_ADDRESS),
             )
 
-        await _notify_user_cache(db, user_id=user_id)
+        if cache is not None:
+            await cache.notify_transaction_changed(
+                db,
+                trans_id=int(deposit_record["trans_id"]),
+                spot_id=spot_id,
+                user_id=user_id,
+            )
+        else:
+            await _notify_user_cache(db, user_id=user_id)
         spot_summary = await db_access.get_spot_owner_summary(db, spot_id=spot_id)
         transactions = await db_access.get_transactions_by_spot(db, spot_id=spot_id, limit=50)
         now = await db_access.get_unixepoch(db)

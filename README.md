@@ -1,9 +1,19 @@
-cat > README.md <<'EOF'
 # NimHunt
 
-NimHunt is a simple geofaucet-style web app for the Nimiq cryptocurrency.
+NimHunt is a simple geofaucet-style and prizedraw mini-app for NimPay.
 
-Creators can create funded geographic "spots"; users can find nearby spots and make claims from inside the required radius. The app is currently a local development project built with FastAPI, Jinja templates, SQLite, and static JavaScript/CSS.
+Creators can create Nimiq-funded geographic "spots"; other users can search for these spots and claim a reward once they are within the spot's required radius. Spots can include optional rules and formats so creators can make simple public drops, password-gated rewards, timed location challenges, or Prizedraw-style entries.
+
+## Features
+
+- **Geographic spots**: creators place a funded spot at a real-world location and choose the claim radius.
+- **Password-protected spots**: creators can require a password or claim code before a user can claim from a spot.
+- **Stay duration**: creators can require users to remain within the spot radius for a set amount of time before claiming.
+- **Prizedraws**: creators can create Prizedraw spots where eligible users enter the draw and one or more winners receive the funded rewards.
+- **Start and end times**: spots can be scheduled to begin later and expire after a chosen duration.
+- **Claim limits**: creators can control how many total claims or entries are available and how many times each user can participate.
+- **Creator tools**: users can review their own spots, drafts, deposits, publishing status, and previous activity.
+- **Claim history**: users can review claims they have made and check their status.
 
 ## Current status
 
@@ -32,26 +42,55 @@ source venv/bin/activate
 
 Install dependencies:
 
+```bash
 pip install -r requirements.txt
-Run locally
+```
+
+## Run locally
 
 Start the development server:
 
+```bash
 ./nimhunt_start_dev.sh
+```
 
 Then open:
 
+```text
 http://127.0.0.1:8000/
-Reset mock data
+```
+
+## Reset mock data
 
 This clears and recreates the local development database:
 
+```bash
 ./nimhunt_reset_mock_data.sh
+```
 
 Restart the server afterwards so the in-memory cache reloads.
 
-Phone testing
+## Phone testing
 
 To test on a phone through HTTPS, run the server first, then in a second terminal:
 
+```bash
 npx localtunnel --port 8000
+```
+
+Open the HTTPS URL shown by localtunnel.
+
+## Files not committed
+
+The repository deliberately ignores local, generated, and private files such as:
+
+- `venv/`
+- `records.db`
+- `.env`
+- `x-dob.txt`
+- cache files
+- logs
+
+## Production warning
+
+Before any public deployment, review the development constants, wallet settings, secret handling, database persistence, and Nimiq network settings.

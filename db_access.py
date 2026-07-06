@@ -3034,6 +3034,67 @@ async def _create_transaction(
     return int(cur.lastrowid)
 
 
+
+
+async def update_transaction_chain_details(
+    db,
+    *,
+    trans_id: int,
+    tx_hash: str | None = None,
+    from_address: str | None = None,
+    to_address: str | None = None,
+    amount: int | None = None,
+) -> None:
+    """Update chain-facing TRANSACTION details before final status changes.
+
+    trans_updater.py uses this in two places:
+    - after a server-initiated send returns a real tx_hash for a durable local
+      outbox row;
+    - after RPC verification extracts the real sender/recipient/amount from a
+      confirmed on-chain transaction.
+
+    The helper intentionally does not change t_status. Confirmation/failure is
+    still handled by set_transaction_status_to_confirmed()/failed().
+    """
+    updates: list[str] = []
+    params: list[Any] = []
+
+    if tx_hash is not None:
+        clean_hash = str(tx_hash).strip()
+        if not clean_hash:
+            raise ValueError("tx_hash must be non-empty")
+        updates.append(f"{schema.TRANS_TX_HASH} = ?")
+        params.append(clean_hash)
+
+    if from_address is not None:
+        updates.append(f"{schema.TRANS_FROM_ADDRESS} = ?")
+        params.append(str(from_address))
+
+    if to_address is not None:
+        updates.append(f"{schema.TRANS_TO_ADDRESS} = ?")
+        params.append(str(to_address))
+
+    if amount is not None:
+        amount_i = int(amount)
+        if amount_i < 0:
+            raise ValueError("amount must be non-negative")
+        updates.append(f"{schema.TRANS_AMOUNT} = ?")
+        params.append(amount_i)
+
+    if not updates:
+        return
+
+    params.append(int(trans_id))
+    cur = await db.execute(
+        f"""
+        UPDATE {schema.TRANS_TABLE_NAME}
+        SET {", ".join(updates)}
+        WHERE {schema.TRANS_ID} = ?;
+        """,
+        tuple(params),
+    )
+    _require_one(cur.rowcount, f"Failed to update transaction chain details id={trans_id}")
+
 async def create_spot_deposit_transaction(
     db,
     *,

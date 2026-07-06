@@ -223,6 +223,9 @@ async def retry_pending_prizedraw_payouts_for_spot(*, spot_id: int) -> RowDict:
     """Retry payout sends for selected winners on one completed Prizedraw."""
     spot_id = int(spot_id)
     try:
+        payout_jobs: list[RowDict] = []
+        spot: RowDict | None = None
+
         async with get_db() as db:
             async with db_access.transaction(db):
                 spot = await db_access.get_spot(db, spot_id=spot_id)
@@ -246,39 +249,57 @@ async def retry_pending_prizedraw_payouts_for_spot(*, spot_id: int) -> RowDict:
                     winner_claim_ids=winner_claim_ids,
                 )
 
-                payout_results: list[RowDict] = []
                 for claim in pending_winners:
                     claim_id = int(claim[schema.CLAIM_ID])
                     if await db_access.has_confirmed_claim_payout_transaction(db, claim_id=claim_id):
                         await db_access.set_claim_status_to_success(db, claim_id=claim_id)
                         continue
                     if await db_access.has_nonfailed_claim_payout_transaction(db, claim_id=claim_id):
-                        payout_results.append({
+                        payout_jobs.append({
                             "ok": True,
                             "claim_id": claim_id,
                             "already_exists": True,
                             "reason": "pending_payout_already_recorded",
+                            "send": False,
                         })
                         continue
 
                     retry_amount = await db_access.latest_failed_claim_payout_amount(db, claim_id=claim_id)
                     amount = int(retry_amount or amount_by_claim_id.get(claim_id, 0))
                     if amount <= 0:
-                        payout_results.append({
+                        payout_jobs.append({
                             "ok": False,
                             "claim_id": claim_id,
                             "reason": "missing_payout_amount",
+                            "send": False,
                         })
                         continue
 
-                    payout_results.append(
-                        await trans_updater.submit_claim_reward_transaction(
-                            db,
-                            claim_id=claim_id,
-                            amount=amount,
-                        )
-                    )
+                    payout_jobs.append({
+                        "ok": True,
+                        "claim_id": claim_id,
+                        "amount": amount,
+                        "send": True,
+                    })
 
+        payout_results: list[RowDict] = []
+        for job in payout_jobs:
+            if not job.get("send"):
+                cleaned = dict(job)
+                cleaned.pop("send", None)
+                payout_results.append(cleaned)
+                continue
+
+            async with get_db() as send_db:
+                payout_results.append(
+                    await trans_updater.submit_claim_reward_transaction(
+                        send_db,
+                        claim_id=int(job["claim_id"]),
+                        amount=int(job["amount"]),
+                    )
+                )
+
+        async with get_db() as db:
             await cache.notify_spot_changed(db, spot_id=spot_id)
             await cache.notify_claim_changed(db, spot_id=spot_id, user_id=None)
             owner_id = int(spot.get(schema.SPOT_CREATED_BY) or 0) if spot is not None else 0
@@ -288,8 +309,8 @@ async def retry_pending_prizedraw_payouts_for_spot(*, spot_id: int) -> RowDict:
         return {
             "ok": all(bool(result.get("ok")) for result in payout_results),
             "spot_id": spot_id,
-            "retried": bool(payout_results),
-            "pending_winner_count": len(pending_winners),
+            "retried": any(bool(job.get("send")) for job in payout_jobs),
+            "pending_winner_count": len(payout_jobs),
             "payouts": payout_results,
         }
     except Exception as exc:

@@ -26,6 +26,7 @@ import os
 import shlex
 import subprocess
 import time
+import secrets
 import urllib.error
 from pathlib import Path
 import urllib.request
@@ -65,6 +66,12 @@ DEFAULT_TRANSACTION_CHECK_INTERVAL_SECONDS = int(os.getenv(
     "NIMHUNT_TRANSACTION_CHECK_INTERVAL_SECONDS",
     str(getattr(const, "TRANSACTION_CHECK_INTERVAL_SECONDS", 60)),
 ))
+
+# Server-initiated sends are now recorded before they are broadcast. The
+# temporary tx_hash keeps SQLite's existing NOT NULL + UNIQUE constraint happy.
+# If the helper broadcasts but the later DB update fails, this local intent row
+# prevents automatic retries and therefore avoids accidental double payment.
+LOCAL_TRANSACTION_INTENT_PREFIX = "NIMHUNT_INTENT:"
 
 
 _TRANS_CHECK_TASK: asyncio.Task | None = None
@@ -189,6 +196,176 @@ def _validate_nimiq_address(value: str, *, field_name: str = "address") -> str:
     )
 
 
+def _make_local_intent_hash(*, kind: str, primary_id: int) -> str:
+    """Return a unique local placeholder for a not-yet-broadcast send."""
+    safe_kind = "".join(ch for ch in str(kind).lower() if ch.isalnum() or ch in {"_", "-"}) or "tx"
+    return f"{LOCAL_TRANSACTION_INTENT_PREFIX}{safe_kind}:{int(primary_id)}:{secrets.token_urlsafe(18)}"
+
+
+def _is_local_intent_hash(tx_hash: str) -> bool:
+    return str(tx_hash or "").startswith(LOCAL_TRANSACTION_INTENT_PREFIX)
+
+
+def _normalise_address_for_compare(value: Any) -> str | None:
+    """Return a comparable canonical address, or None if value is unusable."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return wallet.normalise_nimiq_address(
+            raw,
+            allow_dev_placeholder=bool(
+                getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)
+                or getattr(const, "ALLOW_DEV_WALLET_SENDS", False)
+            ),
+        )
+    except ValueError:
+        return None
+
+
+def _walk_json(value: Any):
+    """Yield every nested JSON-ish value breadth-first with its key path."""
+    queue: list[tuple[tuple[str, ...], Any]] = [((), value)]
+    index = 0
+    while index < len(queue):
+        path, item = queue[index]
+        index += 1
+        yield path, item
+        if isinstance(item, dict):
+            for key, child in item.items():
+                queue.append(((*path, str(key)), child))
+        elif isinstance(item, list):
+            for idx, child in enumerate(item):
+                queue.append(((*path, str(idx)), child))
+
+
+def _first_address_for_keys(value: Any, keys: set[str]) -> str | None:
+    keys_lc = {key.lower() for key in keys}
+    for path, item in _walk_json(value):
+        if not path or isinstance(item, (dict, list)):
+            continue
+        if path[-1].lower() not in keys_lc:
+            continue
+        normalised = _normalise_address_for_compare(item)
+        if normalised:
+            return normalised
+    return None
+
+
+def _first_positive_int_for_keys(value: Any, keys: set[str]) -> int | None:
+    keys_lc = [key.lower() for key in keys]
+    candidates: list[tuple[int, int, int]] = []
+    for path, item in _walk_json(value):
+        if not path or isinstance(item, (dict, list)):
+            continue
+        key = path[-1].lower()
+        if key not in keys_lc:
+            continue
+        try:
+            amount = int(str(item), 0) if isinstance(item, str) else int(item)
+        except (TypeError, ValueError):
+            continue
+        if amount >= 0:
+            # Prefer shallower fields, and prefer value over generic amount.
+            priority = 0 if key == "value" else 1
+            candidates.append((priority, len(path), amount))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    return candidates[0][2]
+
+
+def _extract_chain_from_address(raw: Any) -> str | None:
+    return _first_address_for_keys(
+        raw,
+        {
+            "sender",
+            "senderAddress",
+            "sender_address",
+            "from",
+            "fromAddress",
+            "from_address",
+        },
+    )
+
+
+def _extract_chain_to_address(raw: Any) -> str | None:
+    return _first_address_for_keys(
+        raw,
+        {
+            "recipient",
+            "recipientAddress",
+            "recipient_address",
+            "to",
+            "toAddress",
+            "to_address",
+        },
+    )
+
+
+def _extract_chain_amount(raw: Any) -> int | None:
+    return _first_positive_int_for_keys(raw, {"value", "amount"})
+
+
+@dataclass(slots=True)
+class VerifiedChainDetails:
+    """On-chain details extracted from RPC and matched against one DB row."""
+
+    ok: bool
+    reason: str | None = None
+    from_address: str | None = None
+    to_address: str | None = None
+    amount: int | None = None
+
+
+def _verify_chain_details_for_record(trans: RowDict, status: ChainTransactionStatus) -> VerifiedChainDetails:
+    """Check that a confirmed chain transaction matches the stored TRANSACTION.
+
+    This is intentionally strict for deposits: the transaction that unlocks a
+    draft must be the transaction paying that SPOT's deposit address, for at
+    least the amount NimHunt recorded as due. The same comparison is also useful
+    for server-initiated claim/refund/fee sends.
+    """
+    raw = status.raw
+    chain_from = _extract_chain_from_address(raw)
+    chain_to = _extract_chain_to_address(raw)
+    chain_amount = _extract_chain_amount(raw)
+
+    expected_from = _normalise_address_for_compare(trans.get(schema.TRANS_FROM_ADDRESS))
+    expected_to = _normalise_address_for_compare(trans.get(schema.TRANS_TO_ADDRESS))
+    expected_amount = int(trans.get(schema.TRANS_AMOUNT) or 0)
+
+    if chain_from is None:
+        return VerifiedChainDetails(ok=False, reason="confirmed transaction did not expose a sender/from address")
+    if chain_to is None:
+        return VerifiedChainDetails(ok=False, reason="confirmed transaction did not expose a recipient/to address")
+    if chain_amount is None:
+        return VerifiedChainDetails(ok=False, reason="confirmed transaction did not expose an amount/value")
+
+    # For user deposits, the client-supplied from_address is not trusted. The
+    # chain sender replaces it so cancellation refunds go back to the real payer.
+    if int(trans.get(schema.TRANS_TYPE) or -1) != const.TRANS_TYPE_FILL_SPOT:
+        if expected_from is None:
+            return VerifiedChainDetails(ok=False, reason="stored transaction sender/from address is invalid")
+        if chain_from != expected_from:
+            return VerifiedChainDetails(ok=False, reason="confirmed transaction sender does not match stored sender")
+
+    if expected_to is None:
+        return VerifiedChainDetails(ok=False, reason="stored transaction recipient/to address is invalid")
+    if chain_to != expected_to:
+        return VerifiedChainDetails(ok=False, reason="confirmed transaction recipient does not match expected recipient")
+
+    if int(chain_amount) < expected_amount:
+        return VerifiedChainDetails(ok=False, reason="confirmed transaction amount is lower than recorded amount")
+
+    return VerifiedChainDetails(
+        ok=True,
+        from_address=chain_from,
+        to_address=chain_to,
+        amount=int(chain_amount),
+    )
+
+
 async def submit_chain_send_from_spot_deposit(
     *,
     spot: RowDict,
@@ -271,6 +448,94 @@ async def submit_chain_send_from_spot_deposit(
         raw=result.raw,
     )
 
+
+
+async def _submit_recorded_chain_send(
+    db,
+    *,
+    spot: RowDict,
+    to_address: str,
+    amount: int,
+    memo: str,
+    intent_kind: str,
+    intent_primary_id: int,
+    create_transaction,
+    create_transaction_kwargs: dict[str, Any],
+) -> RowDict:
+    """Create a durable pending TRANSACTION row, then broadcast the send.
+
+    This is the lightweight outbox pattern used by NimHunt. The database row is
+    committed before the helper is asked to broadcast. If the broadcast succeeds
+    but the DB update with the real tx_hash fails, the local intent row remains
+    pending and prevents an automatic duplicate send.
+    """
+    amount = int(amount)
+    if amount <= 0:
+        raise ValueError("amount must be positive")
+
+    from_address = _validate_nimiq_address(str(spot.get(schema.SPOT_DEPOSIT_ADDRESS) or ""), field_name="from_address")
+    clean_to_address = _validate_nimiq_address(to_address, field_name="to_address")
+    intent_hash = _make_local_intent_hash(kind=intent_kind, primary_id=intent_primary_id)
+
+    async with db_access.transaction(db):
+        trans_id = await create_transaction(
+            db,
+            **create_transaction_kwargs,
+            amount=amount,
+            from_address=from_address,
+            to_address=clean_to_address,
+            tx_hash=intent_hash,
+        )
+
+    try:
+        result = await submit_chain_send_from_spot_deposit(
+            spot=spot,
+            to_address=clean_to_address,
+            amount=amount,
+            memo=memo,
+        )
+    except Exception as exc:
+        # Do not mark the intent failed automatically. With real chain sends, a
+        # timeout/crash can happen after broadcast but before the helper returns
+        # a tx_hash. Leaving the local intent pending is annoying but safer than
+        # retrying and possibly double-paying. A future admin recovery screen can
+        # either attach the real tx_hash or mark the intent failed manually.
+        await cache.notify_transaction_changed(
+            db,
+            trans_id=int(trans_id),
+            spot_id=create_transaction_kwargs.get("spot_id") or spot.get(schema.SPOT_ID),
+            user_id=create_transaction_kwargs.get("user_id"),
+        )
+        raise RuntimeError(
+            f"Chain send did not return a usable transaction hash; local intent {trans_id} was left pending for safety: {exc}"
+        ) from exc
+
+    async with db_access.transaction(db):
+        await db_access.update_transaction_chain_details(
+            db,
+            trans_id=int(trans_id),
+            tx_hash=result.tx_hash,
+            from_address=result.from_address,
+            to_address=result.to_address,
+            amount=result.amount,
+        )
+
+    await cache.notify_transaction_changed(
+        db,
+        trans_id=int(trans_id),
+        spot_id=create_transaction_kwargs.get("spot_id") or spot.get(schema.SPOT_ID),
+        user_id=create_transaction_kwargs.get("user_id"),
+    )
+
+    return {
+        "ok": True,
+        "trans_id": int(trans_id),
+        "amount": int(result.amount),
+        "to_address": result.to_address,
+        "from_address": result.from_address,
+        "tx_hash": result.tx_hash,
+        "intent_hash": intent_hash,
+    }
 
 def _transaction_id(row: RowDict) -> int:
     return int(row[schema.TRANS_ID])
@@ -434,11 +699,30 @@ async def check_pending_transaction(
 ) -> ChainTransactionStatus:
     """Check one cached pending transaction and return its current outcome."""
     tx_hash = str(trans.get(schema.TRANS_TX_HASH) or "").strip()
+
+    if _is_local_intent_hash(tx_hash):
+        return ChainTransactionStatus(
+            status="pending",
+            tx_hash=tx_hash,
+            reason="local outbox intent has no chain hash yet; leaving pending to avoid duplicate broadcast",
+        )
+
     chain_status = await get_chain_transaction_status(
         tx_hash,
         rpc_url=rpc_url,
         timeout_seconds=timeout_seconds,
     )
+
+    if chain_status.status == "confirmed":
+        verified = _verify_chain_details_for_record(trans, chain_status)
+        if not verified.ok:
+            return ChainTransactionStatus(
+                status="failed",
+                tx_hash=tx_hash,
+                block_number=chain_status.block_number,
+                raw=chain_status.raw,
+                reason=verified.reason or "confirmed transaction did not match stored transaction",
+            )
 
     if chain_status.status != "pending":
         return chain_status
@@ -480,6 +764,7 @@ async def mark_trans_as_confirmed(
     trans: RowDict,
     *,
     block_number: int | None = None,
+    verified_details: VerifiedChainDetails | None = None,
 ) -> RowDict:
     """Mark a TRANSACTION confirmed in the DB, then remove it from pending cache."""
     trans_id = _transaction_id(trans)
@@ -487,6 +772,15 @@ async def mark_trans_as_confirmed(
     claim_id = trans.get(schema.TRANS_CLAIM_ID)
 
     async with db_access.transaction(db):
+        if verified_details is not None and verified_details.ok:
+            await db_access.update_transaction_chain_details(
+                db,
+                trans_id=trans_id,
+                from_address=verified_details.from_address,
+                to_address=verified_details.to_address,
+                amount=verified_details.amount,
+            )
+
         if block_number is None:
             await db_access.modify_transaction_status(
                 db,
@@ -586,11 +880,17 @@ async def check_pending_transactions(
             )
 
             if status.status == "confirmed":
+                verified = _verify_chain_details_for_record(trans, status)
+                if not verified.ok:
+                    finalised.append(await mark_trans_as_failed(db, trans, reason=verified.reason))
+                    continue
+
                 finalised.append(
                     await mark_trans_as_confirmed(
                         db,
                         trans,
                         block_number=status.block_number,
+                        verified_details=verified,
                     )
                 )
             elif status.status == "failed":
@@ -759,28 +1059,21 @@ async def submit_platform_fee_transaction(
     if not clean_fee_address:
         raise ValueError("SPOT_CANCELLATION_FEE_ADDRESS is not configured")
 
-    result = await submit_chain_send_from_spot_deposit(
+    result = await _submit_recorded_chain_send(
+        db,
         spot=spot,
         to_address=clean_fee_address,
         amount=amount,
         memo=f"NimHunt platform fee spot {int(spot_id)}",
+        intent_kind="platform_fee",
+        intent_primary_id=int(spot_id),
+        create_transaction=db_access.create_platform_fee_transaction,
+        create_transaction_kwargs={
+            "user_id": int(spot[schema.SPOT_CREATED_BY]),
+            "spot_id": int(spot_id),
+        },
     )
-    trans_id = await db_access.create_platform_fee_transaction(
-        db,
-        user_id=int(spot[schema.SPOT_CREATED_BY]),
-        spot_id=int(spot_id),
-        amount=amount,
-        from_address=result.from_address,
-        to_address=result.to_address,
-        tx_hash=result.tx_hash,
-    )
-    await cache.notify_transaction_changed(
-        db,
-        trans_id=int(trans_id),
-        spot_id=int(spot_id),
-        user_id=int(spot[schema.SPOT_CREATED_BY]),
-    )
-    return {"ok": True, "trans_id": int(trans_id), "amount": amount, "to_address": result.to_address}
+    return {**result, "spot_id": int(spot_id)}
 
 
 async def submit_spot_refund_transaction(
@@ -799,28 +1092,21 @@ async def submit_spot_refund_transaction(
     if spot is None:
         raise ValueError(f"spot id={spot_id} does not exist")
 
-    result = await submit_chain_send_from_spot_deposit(
+    result = await _submit_recorded_chain_send(
+        db,
         spot=spot,
         to_address=to_address,
         amount=amount,
         memo=f"NimHunt spot refund {int(spot_id)}",
+        intent_kind="spot_refund",
+        intent_primary_id=int(spot_id),
+        create_transaction=db_access.create_spot_refund_transaction,
+        create_transaction_kwargs={
+            "user_id": int(spot[schema.SPOT_CREATED_BY]),
+            "spot_id": int(spot_id),
+        },
     )
-    trans_id = await db_access.create_spot_refund_transaction(
-        db,
-        user_id=int(spot[schema.SPOT_CREATED_BY]),
-        spot_id=int(spot_id),
-        amount=amount,
-        from_address=result.from_address,
-        to_address=result.to_address,
-        tx_hash=result.tx_hash,
-    )
-    await cache.notify_transaction_changed(
-        db,
-        trans_id=int(trans_id),
-        spot_id=int(spot_id),
-        user_id=int(spot[schema.SPOT_CREATED_BY]),
-    )
-    return {"ok": True, "trans_id": int(trans_id), "amount": amount, "to_address": result.to_address}
+    return {**result, "spot_id": int(spot_id)}
 
 
 async def submit_spot_cancellation_transactions(
@@ -891,7 +1177,9 @@ async def submit_spot_cancellation_transactions(
         amount=refund_amount,
     ) if refund_amount > 0 else {"ok": True, "skipped": True, "reason": "no_refund", "trans_id": None}
 
-    await db_access.modify_spot_status(db, spot_id=int(spot_id), status=const.SPOT_STATUS_CANCELLED)
+    async with db_access.transaction(db):
+        await db_access.modify_spot_status(db, spot_id=int(spot_id), status=const.SPOT_STATUS_CANCELLED)
+
     await cache.notify_spot_changed(db, spot_id=int(spot_id))
     await cache.notify_user_changed(db, user_id=int(spot[schema.SPOT_CREATED_BY]))
 
@@ -920,8 +1208,9 @@ async def submit_claim_reward_transaction(
 ) -> RowDict:
     """Submit and record one CLAIM reward transaction.
 
-    Settlement code should call this rather than talking to wallet.py directly.
-    A zero amount is a valid no-op for losing Prizedraw entries.
+    The TRANSACTION row is created and committed before the chain send. That
+    gives each payout a durable local intent and prevents settlement retries
+    from broadcasting the same reward twice if the process crashes after send.
     """
     amount = int(amount)
     if amount <= 0:
@@ -959,36 +1248,24 @@ async def submit_claim_reward_transaction(
     if not clean_to_address:
         raise ValueError("claim has no payout_address; ask the user to enter through Nimiq Pay again")
 
-    result = await submit_chain_send_from_spot_deposit(
+    result = await _submit_recorded_chain_send(
+        db,
         spot=spot,
         to_address=clean_to_address,
         amount=amount,
         memo=f"NimHunt claim {int(claim_id)}",
-    )
-
-    trans_id = await db_access.create_claim_transaction(
-        db,
-        user_id=int(claim[schema.CLAIM_RECIPIENT]),
-        claim_id=int(claim_id),
-        amount=amount,
-        from_address=result.from_address,
-        to_address=result.to_address,
-        tx_hash=result.tx_hash,
-    )
-
-    await cache.notify_transaction_changed(
-        db,
-        trans_id=int(trans_id),
-        spot_id=int(claim[schema.CLAIM_SPOT_ID]),
-        user_id=int(claim[schema.CLAIM_RECIPIENT]),
+        intent_kind="claim_reward",
+        intent_primary_id=int(claim_id),
+        create_transaction=db_access.create_claim_transaction,
+        create_transaction_kwargs={
+            "user_id": int(claim[schema.CLAIM_RECIPIENT]),
+            "claim_id": int(claim_id),
+        },
     )
 
     return {
-        "ok": True,
+        **result,
         "claim_id": int(claim_id),
-        "trans_id": int(trans_id),
-        "amount": amount,
-        "to_address": result.to_address,
         "already_exists": False,
     }
 

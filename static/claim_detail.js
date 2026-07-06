@@ -411,6 +411,19 @@ async function fetchClaimDetail() {
     return data.claim;
 }
 
+
+function isExpectedClaimDetailError(err) {
+    const status = Number(err?.status || 0);
+    const code = String(err?.data?.code || '');
+
+    // These are normal user-facing outcomes for claim links, not JavaScript bugs.
+    return (
+        (status === 404 && ['claim_missing', 'spot_missing'].includes(code))
+        || (status === 403 && code === 'not_allowed')
+        || code === 'wallet_unavailable'
+    );
+}
+
 async function sendLocationHeartbeat() {
     const claim = state.currentClaim;
     if (!claim || !claim.location_monitoring_required || !claim.viewer_is_recipient) {
@@ -509,8 +522,9 @@ window.addEventListener('beforeunload', () => {
 });
 
 initClaimDetail().catch((err) => {
-    console.error(err);
     const data = err?.data || {};
+    if (!isExpectedClaimDetailError(err)) console.error(err);
+
     if (data.code === 'wallet_unavailable') {
         showNotice({
             title: `Open ${APP_NAME} in Nimiq Pay`,

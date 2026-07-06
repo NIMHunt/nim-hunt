@@ -50,7 +50,7 @@ except Exception:  # pragma: no cover - settlement is optional while bootstrappi
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
-_ASSET_VERSION = "custom-404-create-url-v1-20260706"
+_ASSET_VERSION = "claim-missing-console-v1-20260706"
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ALLOWED_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$")
@@ -1171,7 +1171,17 @@ async def spot_detail_page(request: Request, spot_ref: str) -> HTMLResponse:
 
 @router.get("/claim/{claim_id}", response_class=HTMLResponse)
 async def claim_detail_page(request: Request, claim_id: int) -> HTMLResponse:
-    """Private-ish shell for one CLAIM detail page. JS identifies the viewer."""
+    """Private-ish shell for one CLAIM detail page. JS identifies the viewer.
+
+    A numeric /claim/{id} route can exist even when the CLAIM row does not.
+    In that case, render the branded 404 page immediately instead of loading
+    the claim shell and letting claim_detail.js make a doomed API request.
+    """
+    async with get_db() as db:
+        claim_exists = await db_access.get_claim(db, claim_id=int(claim_id))
+    if claim_exists is None:
+        return render_not_found_page(request)
+
     source = str(request.query_params.get("from") or "").strip().lower()
     if source in {"find-spots", "spots"}:
         back_href = "/spots"

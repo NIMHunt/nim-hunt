@@ -19,6 +19,9 @@ class FakeDb:
     async def execute(self, *args, **kwargs):
         return FakeCursor()
 
+    async def execute_fetchall(self, *args, **kwargs):
+        return []
+
     async def commit(self):
         return None
 

@@ -935,13 +935,20 @@ async def _finalize_cancelled_spot_if_ready(db, *, spot_id: int | None) -> bool:
         if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_FILL_SPOT
         and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
     )
+    confirmed_claim_total = sum(
+        int(row.get(schema.TRANS_AMOUNT) or 0)
+        for row in transactions
+        if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CLAIM
+        and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+    )
+    remaining_cancellable_total = max(0, confirmed_deposit_total - confirmed_claim_total)
     confirmed_cancellation_total = sum(
         int(row.get(schema.TRANS_AMOUNT) or 0)
         for row in transactions
         if int(row.get(schema.TRANS_TYPE) or -1) in outgoing_types
         and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
     )
-    if confirmed_cancellation_total < confirmed_deposit_total:
+    if confirmed_cancellation_total < remaining_cancellable_total:
         return False
 
     await db_access.set_spot_status_to_cancelled(db, spot_id=int(spot_id))
@@ -1034,7 +1041,7 @@ async def mark_trans_as_failed(db, trans: RowDict, *, reason: str | None = None)
             spot_id=trans.get(schema.TRANS_SPOT_ID),
             user_id=trans.get(schema.TRANS_USER_ID),
         )
-    if cancelled_finalized:
+    if cancelled_finalized or int(trans.get(schema.TRANS_TYPE) or -1) in {const.TRANS_TYPE_CANCEL_SPOT, const.TRANS_TYPE_PLAT_FEE}:
         await cache.notify_spot_changed(db, spot_id=trans.get(schema.TRANS_SPOT_ID))
 
     return {"trans_id": trans_id, "status": "failed", "reason": reason}

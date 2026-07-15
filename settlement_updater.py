@@ -50,18 +50,26 @@ def _spot_absolute_ends_at(spot: RowDict) -> int | None:
 
 
 def _prize_amounts(*, total_value: int, prize_count: int, winner_count: int) -> list[int]:
-    """Return prize amounts, putting any indivisible remainder on first prize."""
+    """Return Prizedraw payouts for the actual selected winners.
+
+    If fewer eligible winners exist than configured prize slots, the full prize
+    pool is paid across the actual winners. Any indivisible Luna remainder goes
+    to the first deterministic winner.
+    """
     winner_count = max(0, int(winner_count))
     if winner_count <= 0:
         return []
 
+    # prize_count is still accepted for call-site clarity and coerced here to
+    # keep invalid historical values from bubbling out of this helper. Payout
+    # division must use actual winners so undersubscribed Prizedraws pay the
+    # full pool.
     prize_count = max(1, int(prize_count))
-    base = int(total_value) // prize_count
-    remainder = int(total_value) % prize_count
+    base = int(total_value) // winner_count
+    remainder = int(total_value) % winner_count
 
     amounts = [base for _ in range(winner_count)]
-    if amounts:
-        amounts[0] += remainder
+    amounts[0] += remainder
     return amounts
 
 
@@ -187,11 +195,13 @@ async def settle_prizedraw_spot_if_ready(*, spot_id: int) -> RowDict:
                 winners = rng.sample(successful_claims, winner_count) if winner_count > 0 else []
                 winner_claim_ids = sorted(int(claim[schema.CLAIM_ID]) for claim in winners)
 
-                await db_access.mark_prizedraw_winners_pending(
+                persisted = await db_access.mark_prizedraw_winners_pending(
                     db,
                     spot_id=spot_id,
                     winner_claim_ids=winner_claim_ids,
                 )
+                if int(persisted.get("updated_count") or 0) != len(winner_claim_ids):
+                    raise RuntimeError("not all selected Prizedraw winners were persisted")
                 await db_access.set_spot_status_to_completed(db, spot_id=spot_id)
 
             await cache.notify_spot_changed(db, spot_id=spot_id)
@@ -249,6 +259,7 @@ async def retry_pending_prizedraw_payouts_for_spot(*, spot_id: int) -> RowDict:
                     winner_claim_ids=winner_claim_ids,
                 )
 
+                pending_winners.sort(key=lambda row: int(row.get(schema.CLAIM_ID) or 0))
                 for claim in pending_winners:
                     claim_id = int(claim[schema.CLAIM_ID])
                     if await db_access.has_confirmed_claim_payout_transaction(db, claim_id=claim_id):

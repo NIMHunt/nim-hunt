@@ -906,6 +906,48 @@ async def _claim_transaction_is_completed_prizedraw_payout(db, trans: RowDict) -
     return await db_access.is_prizedraw(db, spot_id=int(spot[schema.SPOT_ID]))
 
 
+async def _finalize_cancelled_spot_if_ready(db, *, spot_id: int | None) -> bool:
+    """Mark a standard Spot cancelled only after refund/fee sends are final."""
+    if spot_id is None:
+        return False
+
+    spot = await db_access.get_spot(db, spot_id=int(spot_id))
+    if spot is None or int(spot.get(schema.SPOT_STATUS) or -1) != const.SPOT_STATUS_PUBLISHED:
+        return False
+    if await db_access.is_prizedraw(db, spot_id=int(spot_id)):
+        return False
+
+    transactions = await db_access.get_transactions_by_spot(db, spot_id=int(spot_id), limit=db_access.MAX_LIMIT)
+    outgoing_types = {const.TRANS_TYPE_CANCEL_SPOT, const.TRANS_TYPE_PLAT_FEE}
+    has_cancellation_intent = any(int(row.get(schema.TRANS_TYPE) or -1) in outgoing_types for row in transactions)
+    if not has_cancellation_intent:
+        return False
+    if any(
+        int(row.get(schema.TRANS_TYPE) or -1) in outgoing_types
+        and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_PENDING
+        for row in transactions
+    ):
+        return False
+
+    confirmed_deposit_total = sum(
+        int(row.get(schema.TRANS_AMOUNT) or 0)
+        for row in transactions
+        if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_FILL_SPOT
+        and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+    )
+    confirmed_cancellation_total = sum(
+        int(row.get(schema.TRANS_AMOUNT) or 0)
+        for row in transactions
+        if int(row.get(schema.TRANS_TYPE) or -1) in outgoing_types
+        and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+    )
+    if confirmed_cancellation_total < confirmed_deposit_total:
+        return False
+
+    await db_access.set_spot_status_to_cancelled(db, spot_id=int(spot_id))
+    return True
+
+
 async def mark_trans_as_confirmed(
     db,
     trans: RowDict,
@@ -945,6 +987,9 @@ async def mark_trans_as_confirmed(
         # their payout transaction confirms. Losers are already SUCCESS.
         if completed_prizedraw_payout and claim_id is not None:
             await db_access.set_claim_status_to_success(db, claim_id=int(claim_id))
+        cancelled_finalized = await _finalize_cancelled_spot_if_ready(
+            db, spot_id=trans.get(schema.TRANS_SPOT_ID)
+        )
 
     await cache.notify_transaction_changed(
         db,
@@ -958,6 +1003,8 @@ async def mark_trans_as_confirmed(
             spot_id=trans.get(schema.TRANS_SPOT_ID),
             user_id=trans.get(schema.TRANS_USER_ID),
         )
+    if cancelled_finalized:
+        await cache.notify_spot_changed(db, spot_id=trans.get(schema.TRANS_SPOT_ID))
 
     return {"trans_id": trans_id, "status": "confirmed", "block_number": block_number}
 
@@ -971,6 +1018,9 @@ async def mark_trans_as_failed(db, trans: RowDict, *, reason: str | None = None)
         await db_access.set_transaction_status_to_failed(db, trans_id=trans_id)
         # Failed Prizedraw payout attempts deliberately leave the selected
         # winner CLAIM as PENDING. settlement_updater.py will retry it.
+        cancelled_finalized = await _finalize_cancelled_spot_if_ready(
+            db, spot_id=trans.get(schema.TRANS_SPOT_ID)
+        )
 
     await cache.notify_transaction_changed(
         db,
@@ -984,6 +1034,8 @@ async def mark_trans_as_failed(db, trans: RowDict, *, reason: str | None = None)
             spot_id=trans.get(schema.TRANS_SPOT_ID),
             user_id=trans.get(schema.TRANS_USER_ID),
         )
+    if cancelled_finalized:
+        await cache.notify_spot_changed(db, spot_id=trans.get(schema.TRANS_SPOT_ID))
 
     return {"trans_id": trans_id, "status": "failed", "reason": reason}
 
@@ -1334,16 +1386,14 @@ async def submit_spot_cancellation_transactions(
         amount=refund_amount,
     ) if refund_amount > 0 else {"ok": True, "skipped": True, "reason": "no_refund", "trans_id": None}
 
-    async with db_access.transaction(db):
-        await db_access.modify_spot_status(db, spot_id=int(spot_id), status=const.SPOT_STATUS_CANCELLED)
-
     await cache.notify_spot_changed(db, spot_id=int(spot_id))
     await cache.notify_user_changed(db, user_id=int(spot[schema.SPOT_CREATED_BY]))
 
     return {
         "ok": True,
         "spot_id": int(spot_id),
-        "cancelled": True,
+        "cancelled": False,
+        "cancellation_pending": True,
         "confirmed_deposit_total": confirmed_deposit_total,
         "confirmed_outgoing_total": confirmed_outgoing_total,
         "pending_outgoing_count": 0,

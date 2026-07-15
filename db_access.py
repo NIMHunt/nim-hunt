@@ -3250,6 +3250,8 @@ async def create_claim_transaction(
     claim = await get_claim(db, claim_id=claim_id)
     if claim is None:
         raise RuntimeError(f"Claim not found id={claim_id}")
+    if await has_nonfailed_claim_payout_transaction(db, claim_id=claim_id):
+        raise RuntimeError(f"Claim id={claim_id} already has a non-failed payout transaction")
 
     return await _create_transaction(
         db,

@@ -93,4 +93,4 @@ The repository deliberately ignores local, generated, and private files such as:
 
 ## Production warning
 
-Before any public deployment, review the development constants, wallet settings, secret handling, database persistence, and Nimiq network settings.
+Before any public deployment, review the development constants, wallet settings, secret handling, database persistence, and Nimiq network settings. Set `NIMHUNT_PRODUCTION=1` in production so startup refuses unsafe local settings. Production deployments must disable `DEFAULT_TO_TEST_USER`, `ALLOW_DEV_WALLET_PLACEHOLDERS`, and `ALLOW_DEV_WALLET_SENDS`; set `NIMIQ_NETWORK` to `MainAlbatross`; use a non-testnet `NIMIQ_HUB_URL`; and replace the development `SPOT_CANCELLATION_FEE_ADDRESS` with a production address.

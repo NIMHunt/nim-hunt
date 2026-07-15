@@ -156,6 +156,36 @@ class TransactionFinalStateTest(FinancialDatabaseFixture):
             trans = await db_access.get_transaction(db, trans_id=trans_id)
         self.assertEqual(int(trans[schema.TRANS_STATUS]), const.TRANS_STATUS_CONFIRMED)
 
+    async def test_repeated_confirmation_is_idempotent(self):
+        _owner_id, claimant_id, _spot_id, claim_id = await self.create_claim_fixture()
+        async with schema.get_db() as db:
+            trans_id = await db_access.create_claim_transaction(
+                db,
+                user_id=claimant_id,
+                claim_id=claim_id,
+                amount=50,
+                from_address="from",
+                to_address="to",
+                tx_hash="hash-repeat",
+            )
+            await db_access.set_transaction_status_to_confirmed(
+                db,
+                trans_id=trans_id,
+                block_number=7,
+            )
+            await db.commit()
+
+            await db_access.set_transaction_status_to_confirmed(
+                db,
+                trans_id=trans_id,
+                block_number=8,
+            )
+            await db.commit()
+            trans = await db_access.get_transaction(db, trans_id=trans_id)
+
+        self.assertEqual(int(trans[schema.TRANS_STATUS]), const.TRANS_STATUS_CONFIRMED)
+        self.assertEqual(int(trans[schema.TRANS_BLOCK_NUMBER]), 7)
+
 
 class StandardPayoutRecoveryTest(FinancialDatabaseFixture):
     async def test_successful_standard_claim_is_queued_until_payout_intent_exists(self):
@@ -208,6 +238,25 @@ class StandardPayoutRecoveryTest(FinancialDatabaseFixture):
         self.assertTrue(result["paid"])
         submit.assert_awaited_once()
         self.assertEqual(submit.await_args.kwargs["amount"], 5_000_000)
+
+    async def test_chain_send_failure_is_not_mislabeled_as_concurrent(self):
+        _owner_id, _claimant_id, _spot_id, claim_id = await self.create_claim_fixture()
+        with mock.patch.object(
+            settlement_updater.trans_updater,
+            "submit_claim_reward_transaction",
+            mock.AsyncMock(
+                side_effect=RuntimeError(
+                    "Chain send did not return a usable transaction hash; local intent 7 was left pending for safety"
+                )
+            ),
+        ):
+            result = await settlement_updater.payout_standard_claim_if_ready(
+                claim_id=claim_id,
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["paid"])
+        self.assertIn("local intent 7", result["reason"])
 
 
 class CancellationLiabilityTest(unittest.IsolatedAsyncioTestCase):

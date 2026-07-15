@@ -128,10 +128,15 @@ async def payout_standard_claim_if_ready(*, claim_id: int) -> RowDict:
                     claim_id=claim_id,
                     amount=amount,
                 )
-            except RuntimeError:
-                # A concurrent worker may have created the unique payout row
-                # after our read. Recheck before treating that as an error.
-                if await db_access.has_nonfailed_claim_payout_transaction(send_db, claim_id=claim_id):
+            except RuntimeError as exc:
+                # Only a uniqueness-guard failure proves that another worker
+                # won the race. A helper/broadcast failure may leave our own
+                # local intent pending and must remain visible as an error.
+                duplicate_guard_hit = "already has a non-failed payout transaction" in str(exc)
+                if (
+                    duplicate_guard_hit
+                    and await db_access.has_nonfailed_claim_payout_transaction(send_db, claim_id=claim_id)
+                ):
                     return {
                         "ok": True,
                         "claim_id": claim_id,

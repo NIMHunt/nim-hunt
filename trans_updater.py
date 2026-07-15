@@ -245,7 +245,7 @@ def _validate_submitted_chain_send(
 ) -> SubmittedChainTransaction:
     """Require the helper result to match the payment NimHunt intended.
 
-    The durable outbox row is created from NimHunt\s own expected values. A
+    The durable outbox row is created from NimHunt's own expected values. A
     helper is allowed to return canonical formatting, but it must not be able to
     replace the recipient or amount before later blockchain verification.
     """
@@ -1175,7 +1175,7 @@ async def check_pending_transactions(
                     )
                     if _is_server_initiated_transaction(trans) or uncertain_proof:
                         # The hash was found on-chain. Never release an outgoing
-                        # payment\s uniqueness guard merely because an RPC shape
+                        # payment's uniqueness guard merely because an RPC shape
                         # or helper detail is unexpected; that could double-pay.
                         checked[-1]["status"] = "unknown"
                         checked[-1]["reason"] = reason

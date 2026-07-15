@@ -3481,6 +3481,11 @@ async def modify_transaction_status(db, *, trans_id: int, status: int) -> None:
         """,
         (int(status), int(trans_id), const.TRANS_STATUS_PENDING),
     )
+    if cur.rowcount == 1:
+        return
+    current = await get_transaction(db, trans_id=int(trans_id))
+    if current is not None and int(current[schema.TRANS_STATUS]) == int(status):
+        return
     _require_one(cur.rowcount, f"Failed to update pending transaction status id={trans_id}")
 
 
@@ -3506,6 +3511,11 @@ async def set_transaction_status_to_confirmed(
             const.TRANS_STATUS_PENDING,
         ),
     )
+    if cur.rowcount == 1:
+        return
+    current = await get_transaction(db, trans_id=int(trans_id))
+    if current is not None and int(current[schema.TRANS_STATUS]) == const.TRANS_STATUS_CONFIRMED:
+        return
     _require_one(cur.rowcount, f"Failed to confirm pending transaction id={trans_id}")
 
 
@@ -3520,6 +3530,11 @@ async def set_transaction_status_to_failed(db, *, trans_id: int) -> None:
         """,
         (const.TRANS_STATUS_FAILED, int(trans_id), const.TRANS_STATUS_PENDING),
     )
+    if cur.rowcount == 1:
+        return
+    current = await get_transaction(db, trans_id=int(trans_id))
+    if current is not None and int(current[schema.TRANS_STATUS]) == const.TRANS_STATUS_FAILED:
+        return
     _require_one(cur.rowcount, f"Failed to fail pending transaction id={trans_id}")
 
 

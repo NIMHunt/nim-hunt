@@ -1077,6 +1077,37 @@ async def set_spot_status_to_cancelled(db, *, spot_id: int) -> None:
     await modify_spot_status(db, spot_id=spot_id, status=const.SPOT_STATUS_CANCELLED)
 
 
+async def mark_spot_cancellation_started(db, *, spot_id: int) -> bool:
+    """Durably mark a published Spot cancellation as started.
+
+    Returns True when this call established the marker and False when a previous
+    cancellation attempt had already marked the Spot.
+    """
+    cur = await db.execute(
+        f"""
+        UPDATE {schema.SPOT_TABLE_NAME}
+        SET {schema.SPOT_CANCELLATION_STARTED_AT} = unixepoch()
+        WHERE {schema.SPOT_ID} = ?
+          AND {schema.SPOT_STATUS} = ?
+          AND {schema.SPOT_CANCELLATION_STARTED_AT} IS NULL;
+        """,
+        (int(spot_id), const.SPOT_STATUS_PUBLISHED),
+    )
+    return int(cur.rowcount or 0) == 1
+
+
+async def clear_spot_cancellation_started(db, *, spot_id: int) -> None:
+    """Clear a cancellation marker. Intended only for explicit administrative recovery."""
+    await db.execute(
+        f"""
+        UPDATE {schema.SPOT_TABLE_NAME}
+        SET {schema.SPOT_CANCELLATION_STARTED_AT} = NULL
+        WHERE {schema.SPOT_ID} = ?;
+        """,
+        (int(spot_id),),
+    )
+
+
 async def set_spot_status_to_banned(db, *, spot_id: int) -> None:
     await modify_spot_status(db, spot_id=spot_id, status=const.SPOT_STATUS_BANNED)
 
@@ -2302,9 +2333,14 @@ async def has_nonfailed_claim_payout_transaction(db, *, claim_id: int) -> bool:
 
 
 async def has_spot_cancellation_started(db, *, spot_id: int) -> bool:
-    """Return True once a standard Spot cancellation refund or fee send exists."""
+    """Return True once a standard Spot cancellation has been durably started."""
     cur = await db.execute(
         f"""
+        SELECT 1
+        FROM {schema.SPOT_TABLE_NAME}
+        WHERE {schema.SPOT_ID} = ?
+          AND {schema.SPOT_CANCELLATION_STARTED_AT} IS NOT NULL
+        UNION
         SELECT 1
         FROM {schema.TRANS_TABLE_NAME}
         WHERE {schema.TRANS_SPOT_ID} = ?
@@ -2312,6 +2348,7 @@ async def has_spot_cancellation_started(db, *, spot_id: int) -> bool:
         LIMIT 1;
         """,
         (
+            int(spot_id),
             int(spot_id),
             const.TRANS_TYPE_CANCEL_SPOT,
             const.TRANS_TYPE_PLAT_FEE,
@@ -2697,34 +2734,47 @@ async def create_claim_attempt(
     # outside the Spot after the capped GPS mercy margin is applied.
     accuracy_score = 1.0
 
-    claim_id = await create_claim(
-        db,
-        spot_id=spot_id,
-        user_id=user_id,
-        lat=lat,
-        long=long,
-        accuracy=accuracy_score,
-        payout_address=payout_address,
-    )
+    try:
+        await db.execute("BEGIN IMMEDIATE;")
+        if await has_spot_cancellation_started(db, spot_id=spot_id):
+            raise ValueError("This spot is being cancelled and can no longer be claimed.")
 
-    if use_password and clean_code:
-        await claim_code_for_claim(
+        claim_id = await create_claim(
             db,
             spot_id=spot_id,
-            claim_code=clean_code,
-            claim_id=claim_id,
+            user_id=user_id,
+            lat=lat,
+            long=long,
+            accuracy=accuracy_score,
+            payout_address=payout_address,
         )
 
-    # A zero-duration claim/entry succeeds immediately.
-    # For Prizedraws, SUCCESS means the user has successfully entered the draw;
-    # winning is later inferred from a related CLAIM payout transaction.
-    if claim_duration <= 0:
-        claim_after = await promote_pending_claim_to_success_if_capacity_available(db, claim_id=claim_id)
-        promotion = claim_after.get("capacity_promotion") if isinstance(claim_after, dict) else None
-        if isinstance(promotion, dict) and promotion.get("ok") is False:
-            raise ValueError("This spot has run out of rewards.")
-        if claim_after is not None:
-            return claim_after
+        if use_password and clean_code:
+            await claim_code_for_claim(
+                db,
+                spot_id=spot_id,
+                claim_code=clean_code,
+                claim_id=claim_id,
+            )
+
+        # A zero-duration claim/entry succeeds immediately.
+        # For Prizedraws, SUCCESS means the user has successfully entered the draw;
+        # winning is later inferred from a related CLAIM payout transaction.
+        if claim_duration <= 0:
+            claim_after = await promote_pending_claim_to_success_if_capacity_available(db, claim_id=claim_id)
+            promotion = claim_after.get("capacity_promotion") if isinstance(claim_after, dict) else None
+            if isinstance(promotion, dict) and promotion.get("ok") is False:
+                raise ValueError("This spot has run out of rewards.")
+            if claim_after is not None:
+                await db.commit()
+                return claim_after
+
+        await db.commit()
+    except Exception:
+        try:
+            await db.rollback()
+        finally:
+            raise
 
     claim = await get_claim(db, claim_id=claim_id)
     if claim is None:

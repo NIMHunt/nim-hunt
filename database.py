@@ -180,6 +180,7 @@ SPOT_STATUS = "s_status"                            # Enum-ish. DRAFT, PUBLISHED
 
 SPOT_CREATED_AT = "created_at"                      # Unix timestamp of creation
 SPOT_UPDATED_AT = "updated_at"                      # Unix timestamp of last update
+SPOT_CANCELLATION_STARTED_AT = "cancellation_started_at"  # Unix timestamp when cancellation began
 
 
 # Fields that ordinary update helpers are allowed to modify.
@@ -208,6 +209,7 @@ SPOT_DRAFT_MOD_FIELDS = {
 
 SPOT_MOD_FIELDS = SPOT_DRAFT_MOD_FIELDS | {
     SPOT_STATUS,
+    SPOT_CANCELLATION_STARTED_AT,
 }
 
 SPOT_IMMUTABLE_FIELDS = {
@@ -287,6 +289,8 @@ CREATE TABLE IF NOT EXISTS {SPOT_TABLE_NAME} (
     {SPOT_UPDATED_AT} INTEGER NOT NULL
         DEFAULT (unixepoch()),
 
+    {SPOT_CANCELLATION_STARTED_AT} INTEGER,
+
     CHECK ({SPOT_LAT} IS NULL OR {SPOT_LAT} BETWEEN -90 AND 90),
     CHECK ({SPOT_LONG} IS NULL OR {SPOT_LONG} BETWEEN -180 AND 180),
 
@@ -302,6 +306,7 @@ CREATE TABLE IF NOT EXISTS {SPOT_TABLE_NAME} (
 
     CHECK ({SPOT_CREATED_AT} > 0),
     CHECK ({SPOT_UPDATED_AT} > 0),
+    CHECK ({SPOT_CANCELLATION_STARTED_AT} IS NULL OR {SPOT_CANCELLATION_STARTED_AT} > 0),
     CHECK ({SPOT_DEPOSIT_KEY_INDEX} IS NULL OR {SPOT_DEPOSIT_KEY_INDEX} >= 0),
     CHECK ({SPOT_DEPOSIT_KEY_VERSION} > 0),
 
@@ -1119,6 +1124,10 @@ code_counts AS (
     GROUP BY {CLAIM_CODE_SPOT_ID}
 ),
 started_cancellations AS (
+    SELECT {SPOT_ID} AS spot_id
+    FROM {SPOT_TABLE_NAME}
+    WHERE {SPOT_CANCELLATION_STARTED_AT} IS NOT NULL
+    UNION
     SELECT DISTINCT {TRANS_SPOT_ID} AS spot_id
     FROM {TRANS_TABLE_NAME}
     WHERE {TRANS_TYPE} IN ({TRANS_TYPE_CANCEL_SPOT}, {TRANS_TYPE_PLAT_FEE})
@@ -1389,6 +1398,15 @@ async def _column_exists(db, *, table: str, column: str) -> bool:
     return False
 
 
+async def _ensure_spot_cancellation_started_at_column(db) -> None:
+    """Add the durable Spot cancellation marker to existing databases."""
+    if await _column_exists(db, table=SPOT_TABLE_NAME, column=SPOT_CANCELLATION_STARTED_AT):
+        return
+    await db.execute(
+        f"ALTER TABLE {SPOT_TABLE_NAME} ADD COLUMN {SPOT_CANCELLATION_STARTED_AT} INTEGER;"
+    )
+
+
 async def _ensure_claim_payout_address_column(db) -> None:
     """Add CLAIM.payout_address to older development databases.
 
@@ -1452,6 +1470,7 @@ async def init_db():
 
 
         await db.executescript(CREATE_SPOT_TABLE)
+        await _ensure_spot_cancellation_started_at_column(db)
         await db.executescript(SPOT_INDEX_CREATED_BY_QUERY)
         await db.executescript(SPOT_INDEX_STATUS_CREATED_QUERY)
         await db.executescript(SPOT_INDEX_GEOHASH_QUERY)

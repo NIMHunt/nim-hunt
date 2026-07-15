@@ -924,7 +924,7 @@ async def _finalize_cancelled_spot_if_ready(db, *, spot_id: int | None) -> bool:
         return False
     if any(
         int(row.get(schema.TRANS_TYPE) or -1) in outgoing_types
-        and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_PENDING
+        and int(row.get(schema.TRANS_STATUS) if row.get(schema.TRANS_STATUS) is not None else -1) == const.TRANS_STATUS_PENDING
         for row in transactions
     ):
         return False
@@ -1323,9 +1323,10 @@ async def submit_spot_cancellation_transactions(
 ) -> RowDict:
     """Cancel a published standard Spot and submit fee/refund transactions.
 
-    The refund address is taken from the original confirmed SPOT deposit
-    transaction's from_address. This means a malicious caller cannot choose a
-    new refund address at cancellation time.
+    A durable cancellation marker is written under a database write lock before
+    any chain send is attempted. The balances are then re-read under that same
+    lock so claims or competing cancellation requests cannot race into the gap
+    between calculation and transaction intent creation.
     """
     spot = await db_access.get_spot(db, spot_id=int(spot_id))
     if spot is None:
@@ -1335,74 +1336,77 @@ async def submit_spot_cancellation_transactions(
     if await db_access.is_prizedraw(db, spot_id=int(spot_id)):
         raise ValueError("Prizedraw spots cannot be cancelled through this standard cancellation flow")
 
-    transactions = await db_access.get_transactions_by_spot(db, spot_id=int(spot_id), limit=db_access.MAX_LIMIT)
-    confirmed_deposits = [
-        trans for trans in transactions
-        if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_FILL_SPOT
-        and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
-    ]
-    confirmed_deposits.sort(key=lambda row: int(row.get(schema.TRANS_CREATED_AT) or 0))
-    confirmed_deposit_total = sum(int(trans.get(schema.TRANS_AMOUNT) or 0) for trans in confirmed_deposits)
+    try:
+        await db.execute("BEGIN IMMEDIATE;")
+        await db_access.mark_spot_cancellation_started(db, spot_id=int(spot_id))
+        spot = await db_access.get_spot(db, spot_id=int(spot_id))
+        if spot is None:
+            raise ValueError(f"spot id={spot_id} does not exist")
+        if int(spot[schema.SPOT_STATUS]) != const.SPOT_STATUS_PUBLISHED:
+            raise ValueError("only published spots can be cancelled")
 
-    outgoing_types = {const.TRANS_TYPE_CLAIM, const.TRANS_TYPE_CANCEL_SPOT, const.TRANS_TYPE_PLAT_FEE}
-    pending_outgoing = [
-        trans for trans in transactions
-        if int(trans.get(schema.TRANS_TYPE) or -1) in outgoing_types
-        and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_PENDING
-    ]
-    if pending_outgoing:
-        raise ValueError(
-            "This spot already has a pending cancellation, refund, fee, or reward transaction. "
-            "Wait for it to confirm or fail before cancelling again."
+        transactions = await db_access.get_transactions_by_spot(db, spot_id=int(spot_id), limit=db_access.MAX_LIMIT)
+        confirmed_deposits = [
+            trans for trans in transactions
+            if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_FILL_SPOT
+            and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+        ]
+        confirmed_deposits.sort(key=lambda row: int(row.get(schema.TRANS_CREATED_AT) or 0))
+        confirmed_deposit_total = sum(int(trans.get(schema.TRANS_AMOUNT) or 0) for trans in confirmed_deposits)
+
+        outgoing_types = {const.TRANS_TYPE_CLAIM, const.TRANS_TYPE_CANCEL_SPOT, const.TRANS_TYPE_PLAT_FEE}
+        pending_outgoing = [
+            trans for trans in transactions
+            if int(trans.get(schema.TRANS_TYPE) or -1) in outgoing_types
+            and int(trans.get(schema.TRANS_STATUS) if trans.get(schema.TRANS_STATUS) is not None else -1) == const.TRANS_STATUS_PENDING
+        ]
+        if pending_outgoing:
+            raise ValueError(
+                "This spot already has a pending cancellation, refund, fee, or reward transaction. "
+                "Wait for it to confirm or fail before cancelling again."
+            )
+
+        confirmed_claim_total = sum(
+            int(trans.get(schema.TRANS_AMOUNT) or 0)
+            for trans in transactions
+            if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CLAIM
+            and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
         )
+        remaining_cancellable_total = max(0, confirmed_deposit_total - confirmed_claim_total)
+        desired_fee_total = min(
+            max(0, int(getattr(const, "SPOT_CANCELLATION_FEE", 0) if cancellation_fee is None else cancellation_fee)),
+            remaining_cancellable_total,
+        )
+        desired_refund_total = max(0, remaining_cancellable_total - desired_fee_total)
+        confirmed_fee_total = sum(
+            int(trans.get(schema.TRANS_AMOUNT) or 0)
+            for trans in transactions
+            if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_PLAT_FEE
+            and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+        )
+        confirmed_refund_total = sum(
+            int(trans.get(schema.TRANS_AMOUNT) or 0)
+            for trans in transactions
+            if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CANCEL_SPOT
+            and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+        )
+        fee_amount = max(0, desired_fee_total - confirmed_fee_total)
+        refund_amount = max(0, desired_refund_total - confirmed_refund_total)
+        remaining_amount = fee_amount + refund_amount
+        confirmed_outgoing_total = confirmed_claim_total + confirmed_fee_total + confirmed_refund_total
 
-    confirmed_claim_total = sum(
-        int(trans.get(schema.TRANS_AMOUNT) or 0)
-        for trans in transactions
-        if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CLAIM
-        and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
-    )
-    remaining_cancellable_total = max(0, confirmed_deposit_total - confirmed_claim_total)
-    desired_fee_total = min(
-        max(0, int(getattr(const, "SPOT_CANCELLATION_FEE", 0) if cancellation_fee is None else cancellation_fee)),
-        remaining_cancellable_total,
-    )
-    desired_refund_total = max(0, remaining_cancellable_total - desired_fee_total)
-    confirmed_fee_total = sum(
-        int(trans.get(schema.TRANS_AMOUNT) or 0)
-        for trans in transactions
-        if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_PLAT_FEE
-        and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
-    )
-    confirmed_refund_total = sum(
-        int(trans.get(schema.TRANS_AMOUNT) or 0)
-        for trans in transactions
-        if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CANCEL_SPOT
-        and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
-    )
-    fee_amount = max(0, desired_fee_total - confirmed_fee_total)
-    refund_amount = max(0, desired_refund_total - confirmed_refund_total)
-    remaining_amount = fee_amount + refund_amount
-    confirmed_outgoing_total = confirmed_claim_total + confirmed_fee_total + confirmed_refund_total
+        refund_address = None
+        for trans in confirmed_deposits:
+            candidate = str(trans.get(schema.TRANS_FROM_ADDRESS) or "").strip()
+            if candidate:
+                refund_address = candidate
+                break
+        if refund_amount > 0 and not refund_address:
+            raise ValueError("cannot refund this spot because no original deposit sender address is recorded")
 
-    refund_address = None
-    for trans in confirmed_deposits:
-        candidate = str(trans.get(schema.TRANS_FROM_ADDRESS) or "").strip()
-        if candidate:
-            refund_address = candidate
-            break
-    if refund_amount > 0 and not refund_address:
-        raise ValueError("cannot refund this spot because no original deposit sender address is recorded")
-
-    if remaining_amount <= 0:
-        await db_access.set_spot_status_to_cancelled(db, spot_id=int(spot_id))
-        await cache.notify_spot_changed(db, spot_id=int(spot_id))
-        await cache.notify_user_changed(db, user_id=int(spot[schema.SPOT_CREATED_BY]))
-        return {
+        result_base = {
             "ok": True,
             "spot_id": int(spot_id),
-            "cancelled": True,
-            "cancellation_pending": False,
             "confirmed_deposit_total": confirmed_deposit_total,
             "confirmed_outgoing_total": confirmed_outgoing_total,
             "remaining_cancellable_total": remaining_cancellable_total,
@@ -1410,14 +1414,33 @@ async def submit_spot_cancellation_transactions(
             "desired_refund_total": desired_refund_total,
             "confirmed_fee_total": confirmed_fee_total,
             "confirmed_refund_total": confirmed_refund_total,
-            "remaining_amount": 0,
-            "fee_amount": 0,
-            "refund_amount": 0,
-            "fee": {"ok": True, "skipped": True, "reason": "no_fee_due", "trans_id": None},
-            "refund": {"ok": True, "skipped": True, "reason": "no_refund_due", "trans_id": None},
+            "remaining_amount": remaining_amount,
+            "fee_amount": fee_amount,
+            "refund_amount": refund_amount,
             "refund_address": refund_address,
             "fee_address": fee_address or getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", ""),
         }
+
+        if remaining_amount <= 0:
+            await db_access.set_spot_status_to_cancelled(db, spot_id=int(spot_id))
+            await db.commit()
+            await cache.notify_spot_changed(db, spot_id=int(spot_id))
+            await cache.notify_user_changed(db, user_id=int(spot[schema.SPOT_CREATED_BY]))
+            return {
+                **result_base,
+                "cancelled": True,
+                "cancellation_pending": False,
+                "remaining_amount": 0,
+                "fee": {"ok": True, "skipped": True, "reason": "no_fee_due", "trans_id": None},
+                "refund": {"ok": True, "skipped": True, "reason": "no_refund_due", "trans_id": None},
+            }
+
+        await db.commit()
+    except Exception:
+        try:
+            await db.rollback()
+        finally:
+            raise
 
     fee_result = await submit_platform_fee_transaction(
         db,
@@ -1437,25 +1460,11 @@ async def submit_spot_cancellation_transactions(
     await cache.notify_user_changed(db, user_id=int(spot[schema.SPOT_CREATED_BY]))
 
     return {
-        "ok": True,
-        "spot_id": int(spot_id),
+        **result_base,
         "cancelled": False,
         "cancellation_pending": True,
-        "confirmed_deposit_total": confirmed_deposit_total,
-        "confirmed_outgoing_total": confirmed_outgoing_total,
-        "pending_outgoing_count": 0,
-        "remaining_cancellable_total": remaining_cancellable_total,
-        "desired_fee_total": desired_fee_total,
-        "desired_refund_total": desired_refund_total,
-        "confirmed_fee_total": confirmed_fee_total,
-        "confirmed_refund_total": confirmed_refund_total,
-        "remaining_amount": remaining_amount,
-        "fee_amount": fee_amount,
-        "refund_amount": refund_amount,
         "fee": fee_result,
         "refund": refund_result,
-        "refund_address": refund_address,
-        "fee_address": fee_address or getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", ""),
     }
 
 

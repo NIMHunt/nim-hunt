@@ -40,10 +40,52 @@ jobs:
           payload = Path('.financial-hardening-payload').read_text(encoding='ascii').strip()
           script = zlib.decompress(base64.b64decode(payload))
           digest = hashlib.sha256(script).hexdigest()
-          expected = '5f3460cdb571c81933c8d8e66e340dc3a88ce440fdda1d8f925050d5bf7a9a70'
+          expected = 'd598756e37df3af22d10c19b9aff6a1b8277eebabe6faae9519a5ee44192ae0f'
           if digest != expected:
               raise RuntimeError(f'Patch digest mismatch: {digest}')
-          Path('/tmp/patch_repo.py').write_bytes(script)
+
+          text = script.decode('utf-8')
+          text = text.replace(
+              '(const.SPOT_STATUS_PUBLISHED, 101, 2, spot_id)',
+              '(const.SPOT_STATUS_PUBLISHED, 10_000_001, 2, spot_id)',
+              1,
+          )
+          text = text.replace(
+              'self.assertEqual(submit.await_args.kwargs["amount"], 50)',
+              'self.assertEqual(submit.await_args.kwargs["amount"], 5_000_000)',
+              1,
+          )
+          marker = "Path('tests/test_financial_finality.py').write_text("
+          old_fake = '''
+          class FakeDb:
+              async def execute(self, *args, **kwargs):
+                  return FakeCursor()
+
+              async def commit(self):
+                  return None
+
+              async def rollback(self):
+                  return None
+          '''
+          new_fake = '''
+          class FakeDb:
+              async def execute(self, *args, **kwargs):
+                  return FakeCursor()
+
+              async def execute_fetchall(self, *args, **kwargs):
+                  return []
+
+              async def commit(self):
+                  return None
+
+              async def rollback(self):
+                  return None
+          '''
+          insertion = f"replace_once('tests/test_robustness_guards.py', {old_fake!r}, {new_fake!r})\n"
+          if text.count(marker) != 1:
+              raise RuntimeError('Could not locate generated test-file write')
+          text = text.replace(marker, insertion + marker, 1)
+          Path('/tmp/patch_repo.py').write_text(text, encoding='utf-8')
           PY
             restore_status=$?
           else

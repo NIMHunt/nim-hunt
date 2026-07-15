@@ -55,6 +55,25 @@ jobs:
               'self.assertEqual(submit.await_args.kwargs["amount"], 5_000_000)',
               1,
           )
+          old_final_state = '''            await db_access.set_transaction_status_to_confirmed(
+                db,
+                trans_id=trans_id,
+                block_number=7,
+            )
+            with self.assertRaisesRegex(RuntimeError, "pending"):
+'''
+          new_final_state = '''            await db_access.set_transaction_status_to_confirmed(
+                db,
+                trans_id=trans_id,
+                block_number=7,
+            )
+            await db.commit()
+            with self.assertRaisesRegex(RuntimeError, "pending"):
+'''
+          if text.count(old_final_state) != 1:
+              raise RuntimeError('Could not locate final-state regression test fixture')
+          text = text.replace(old_final_state, new_final_state, 1)
+
           marker = "Path('tests/test_financial_finality.py').write_text("
           old_fake = '''
           class FakeDb:

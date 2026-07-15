@@ -1,8 +1,8 @@
 install_status=0
-restore_status=1
-patch_status=99
-compile_status=99
-test_status=99
+restore_status=0
+patch_status=0
+compile_status=0
+test_status=1
 shell_one=99
 shell_two=99
 node_status=99
@@ -53,7 +53,7 @@ Downloading jinja2-3.1.6-py3-none-any.whl (134 kB)
 Downloading markupsafe-3.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (22 kB)
 Downloading pydantic-2.13.4-py3-none-any.whl (472 kB)
 Downloading pydantic_core-2.46.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 211.4 MB/s  0:00:00
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 190.7 MB/s  0:00:00
 Downloading starlette-1.3.1-py3-none-any.whl (73 kB)
 Downloading typing_inspection-0.4.2-py3-none-any.whl (14 kB)
 Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
@@ -61,12 +61,271 @@ Downloading uvicorn-0.49.0-py3-none-any.whl (71 kB)
 Installing collected packages: typing_extensions, MarkupSafe, idna, h11, click, annotated-types, annotated-doc, aiosqlite, uvicorn, typing-inspection, pydantic_core, Jinja2, anyio, starlette, pydantic, fastapi
 
 Successfully installed Jinja2-3.1.6 MarkupSafe-3.0.3 aiosqlite-0.22.1 annotated-doc-0.0.4 annotated-types-0.7.0 anyio-4.14.0 click-8.4.1 fastapi-0.137.2 h11-0.16.0 idna-3.18 pydantic-2.13.4 pydantic_core-2.46.4 starlette-1.3.1 typing-inspection-0.4.2 typing_extensions-4.15.0 uvicorn-0.49.0
+test_cancellation_waits_for_successful_claim_payout_intent (test_financial_finality.CancellationLiabilityTest.test_cancellation_waits_for_successful_claim_payout_intent) ... ok
+test_confirmed_outgoing_mismatch_does_not_release_payout_guard (test_financial_finality.ConfirmedVerificationQuarantineTest.test_confirmed_outgoing_mismatch_does_not_release_payout_guard) ... ok
+test_old_unseen_hash_is_quarantined_not_failed (test_financial_finality.MissingHashFinalityTest.test_old_unseen_hash_is_quarantined_not_failed) ... ok
+test_recovery_submits_integer_divided_standard_reward (test_financial_finality.StandardPayoutRecoveryTest.test_recovery_submits_integer_divided_standard_reward) ... ERROR
+test_successful_standard_claim_is_queued_until_payout_intent_exists (test_financial_finality.StandardPayoutRecoveryTest.test_successful_standard_claim_is_queued_until_payout_intent_exists) ... ERROR
+test_helper_cannot_replace_intended_amount (test_financial_finality.SubmittedSendValidationTest.test_helper_cannot_replace_intended_amount) ... ok
+test_confirmed_transaction_cannot_be_overwritten_as_failed (test_financial_finality.TransactionFinalStateTest.test_confirmed_transaction_cannot_be_overwritten_as_failed) ... ERROR
+test_local_development_settings_are_allowed_when_not_in_production (test_production_safety.ProductionSafetyValidationTest.test_local_development_settings_are_allowed_when_not_in_production) ... ok
+test_production_refuses_dev_wallet_settings_and_testnet (test_production_safety.ProductionSafetyValidationTest.test_production_refuses_dev_wallet_settings_and_testnet) ... ok
+test_production_refuses_test_user_fallback (test_production_safety.ProductionSafetyValidationTest.test_production_refuses_test_user_fallback) ... ok
+test_production_refuses_testnet_hub_and_dev_fee_address (test_production_safety.ProductionSafetyValidationTest.test_production_refuses_testnet_hub_and_dev_fee_address) ... ok
+test_cancellation_uses_claims_committed_before_marker (test_robustness_guards.AtomicCancellationInitiationGuardTest.test_cancellation_uses_claims_committed_before_marker) ... ERROR
+test_claim_racing_with_cancellation_marker_is_rejected_before_insert (test_robustness_guards.AtomicCancellationInitiationGuardTest.test_claim_racing_with_cancellation_marker_is_rejected_before_insert) ... ok
+test_failed_cancellation_remains_retryable_but_non_claimable (test_robustness_guards.AtomicCancellationInitiationGuardTest.test_failed_cancellation_remains_retryable_but_non_claimable) ... ERROR
+test_second_cancellation_request_with_pending_send_does_not_create_duplicate_sends (test_robustness_guards.AtomicCancellationInitiationGuardTest.test_second_cancellation_request_with_pending_send_does_not_create_duplicate_sends) ... ERROR
+test_cancelled_status_accounts_for_confirmed_claim_payouts (test_robustness_guards.CancellationFinalizationGuardTest.test_cancelled_status_accounts_for_confirmed_claim_payouts) ... ok
+test_cancelled_status_finalizes_after_all_cancellation_sends_confirm (test_robustness_guards.CancellationFinalizationGuardTest.test_cancelled_status_finalizes_after_all_cancellation_sends_confirm) ... ok
+test_cancelled_status_waits_until_refund_and_fee_are_final (test_robustness_guards.CancellationFinalizationGuardTest.test_cancelled_status_waits_until_refund_and_fee_are_final) ... ok
+test_failed_cancellation_transaction_does_not_finalize_and_allows_retry (test_robustness_guards.CancellationFinalizationGuardTest.test_failed_cancellation_transaction_does_not_finalize_and_allows_retry) ... ok
+test_submit_cancellation_can_retry_after_failed_cancellation_sends (test_robustness_guards.CancellationRetryGuardTest.test_submit_cancellation_can_retry_after_failed_cancellation_sends) ... ERROR
+test_duplicate_claim_payout_creation_is_database_idempotent (test_robustness_guards.ClaimPayoutDatabaseIdempotencyTest.test_duplicate_claim_payout_creation_is_database_idempotent) ... ok
+test_failed_claim_payout_can_be_retried (test_robustness_guards.ClaimPayoutDatabaseIdempotencyTest.test_failed_claim_payout_can_be_retried) ... ok
+test_create_claim_attempt_rejects_once_cancellation_has_begun (test_robustness_guards.DirectClaimCancellationGuardTest.test_create_claim_attempt_rejects_once_cancellation_has_begun) ... ok
+test_create_claim_transaction_rejects_existing_nonfailed_payout (test_robustness_guards.DuplicateClaimPayoutGuardTest.test_create_claim_transaction_rejects_existing_nonfailed_payout) ... ok
+test_fresh_database_is_created_with_current_schema_version (test_robustness_guards.FreshSchemaPolicyTest.test_fresh_database_is_created_with_current_schema_version) ... ok
+test_nonempty_unversioned_database_is_rejected_instead_of_migrated (test_robustness_guards.FreshSchemaPolicyTest.test_nonempty_unversioned_database_is_rejected_instead_of_migrated) ... ok
+test_retry_after_confirmed_fee_and_failed_refund_only_sends_refund (test_robustness_guards.PartialCancellationRetryGuardTest.test_retry_after_confirmed_fee_and_failed_refund_only_sends_refund) ... ERROR
+test_retry_after_confirmed_refund_and_failed_fee_only_sends_fee (test_robustness_guards.PartialCancellationRetryGuardTest.test_retry_after_confirmed_refund_and_failed_fee_only_sends_fee) ... ERROR
+test_zero_remaining_cancellation_marks_cancelled_without_transaction (test_robustness_guards.PartialCancellationRetryGuardTest.test_zero_remaining_cancellation_marks_cancelled_without_transaction) ... ERROR
+test_claim_rule_blocks_claims_while_cancellation_transaction_is_pending (test_robustness_guards.PendingCancellationClaimGuardTest.test_claim_rule_blocks_claims_while_cancellation_transaction_is_pending) ... ok
+test_settlement_does_not_complete_when_selected_winners_are_not_persisted (test_robustness_guards.PrizedrawWinnerPersistenceGuardTest.test_settlement_does_not_complete_when_selected_winners_are_not_persisted) ... ok
+test_claim_attempt_works_inside_existing_route_transaction (test_robustness_guards.RealDatabaseCancellationInvariantTest.test_claim_attempt_works_inside_existing_route_transaction) ... ok
+test_database_trigger_blocks_claim_if_marker_appears_after_app_check (test_robustness_guards.RealDatabaseCancellationInvariantTest.test_database_trigger_blocks_claim_if_marker_appears_after_app_check) ... ok
+test_duplicate_active_cancellation_leg_is_rejected_but_failed_leg_retries (test_robustness_guards.RealDatabaseCancellationInvariantTest.test_duplicate_active_cancellation_leg_is_rejected_but_failed_leg_retries) ... ok
+test_claim_id_mapping_is_stable_and_uses_actual_winner_count (test_settlement_prizedraw.PrizedrawPrizeAmountsTest.test_claim_id_mapping_is_stable_and_uses_actual_winner_count) ... ok
+test_fewer_winners_than_prize_slots_receive_full_pool (test_settlement_prizedraw.PrizedrawPrizeAmountsTest.test_fewer_winners_than_prize_slots_receive_full_pool) ... ok
+test_indivisible_remainder_goes_to_first_actual_winner (test_settlement_prizedraw.PrizedrawPrizeAmountsTest.test_indivisible_remainder_goes_to_first_actual_winner) ... ok
+test_no_winners_have_no_payouts (test_settlement_prizedraw.PrizedrawPrizeAmountsTest.test_no_winners_have_no_payouts) ... ok
+test_undersubscribed_settlement_payouts_sum_to_full_spot_value (test_settlement_prizedraw.PrizedrawSettlementIntegrationTest.test_undersubscribed_settlement_payouts_sum_to_full_spot_value) ... ok
+
+======================================================================
+ERROR: test_recovery_submits_integer_divided_standard_reward (test_financial_finality.StandardPayoutRecoveryTest.test_recovery_submits_integer_divided_standard_reward)
+----------------------------------------------------------------------
 Traceback (most recent call last):
-  File "<stdin>", line 6, in <module>
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/pathlib.py", line 1027, in read_text
-    with self.open(mode='r', encoding=encoding, errors=errors) as f:
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/pathlib.py", line 1013, in open
-    return io.open(self, mode, buffering, encoding, errors, newline)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: [Errno 2] No such file or directory: '.financial-hardening-payload'
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/tests/test_financial_finality.py", line 189, in test_recovery_submits_integer_divided_standard_reward
+    _owner_id, _claimant_id, _spot_id, claim_id = await self.create_claim_fixture()
+                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/tests/test_financial_finality.py", line 109, in create_claim_fixture
+    await db.execute(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/aiosqlite/core.py", line 223, in execute
+    cursor = await self._execute(self._conn.execute, sql, parameters)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/aiosqlite/core.py", line 160, in _execute
+    return await future
+           ^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/aiosqlite/core.py", line 63, in _connection_worker_thread
+    result = function()
+             ^^^^^^^^^^
+sqlite3.IntegrityError: CHECK constraint failed: total_value >= 10000000
+
+======================================================================
+ERROR: test_successful_standard_claim_is_queued_until_payout_intent_exists (test_financial_finality.StandardPayoutRecoveryTest.test_successful_standard_claim_is_queued_until_payout_intent_exists)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/tests/test_financial_finality.py", line 161, in test_successful_standard_claim_is_queued_until_payout_intent_exists
+    _owner_id, claimant_id, _spot_id, claim_id = await self.create_claim_fixture()
+                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/tests/test_financial_finality.py", line 109, in create_claim_fixture
+    await db.execute(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/aiosqlite/core.py", line 223, in execute
+    cursor = await self._execute(self._conn.execute, sql, parameters)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/aiosqlite/core.py", line 160, in _execute
+    return await future
+           ^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/aiosqlite/core.py", line 63, in _connection_worker_thread
+    result = function()
+             ^^^^^^^^^^
+sqlite3.IntegrityError: CHECK constraint failed: total_value >= 10000000
+
+======================================================================
+ERROR: test_confirmed_transaction_cannot_be_overwritten_as_failed (test_financial_finality.TransactionFinalStateTest.test_confirmed_transaction_cannot_be_overwritten_as_failed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/tests/test_financial_finality.py", line 134, in test_confirmed_transaction_cannot_be_overwritten_as_failed
+    _owner_id, claimant_id, _spot_id, claim_id = await self.create_claim_fixture()
+                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/tests/test_financial_finality.py", line 109, in create_claim_fixture
+    await db.execute(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/aiosqlite/core.py", line 223, in execute
+    cursor = await self._execute(self._conn.execute, sql, parameters)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/aiosqlite/core.py", line 160, in _execute
+    return await future
+           ^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/aiosqlite/core.py", line 63, in _connection_worker_thread
+    result = function()
+             ^^^^^^^^^^
+sqlite3.IntegrityError: CHECK constraint failed: total_value >= 10000000
+
+======================================================================
+ERROR: test_cancellation_uses_claims_committed_before_marker (test_robustness_guards.AtomicCancellationInitiationGuardTest.test_cancellation_uses_claims_committed_before_marker)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/tests/test_robustness_guards.py", line 433, in test_cancellation_uses_claims_committed_before_marker
+    result = await trans_updater.submit_spot_cancellation_transactions(FakeDb(), spot_id=7, cancellation_fee=10)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/trans_updater.py", line 1437, in submit_spot_cancellation_transactions
+    unpaid_claim_ids = await db_access.get_unpaid_successful_standard_claim_ids(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/db_access.py", line 2478, in get_unpaid_successful_standard_claim_ids
+    rows = await db.execute_fetchall(
+                 ^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FakeDb' object has no attribute 'execute_fetchall'
+
+======================================================================
+ERROR: test_failed_cancellation_remains_retryable_but_non_claimable (test_robustness_guards.AtomicCancellationInitiationGuardTest.test_failed_cancellation_remains_retryable_but_non_claimable)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/tests/test_robustness_guards.py", line 456, in test_failed_cancellation_remains_retryable_but_non_claimable
+    result = await trans_updater.submit_spot_cancellation_transactions(FakeDb(), spot_id=7, cancellation_fee=10)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/trans_updater.py", line 1437, in submit_spot_cancellation_transactions
+    unpaid_claim_ids = await db_access.get_unpaid_successful_standard_claim_ids(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/db_access.py", line 2478, in get_unpaid_successful_standard_claim_ids
+    rows = await db.execute_fetchall(
+                 ^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FakeDb' object has no attribute 'execute_fetchall'
+
+======================================================================
+ERROR: test_second_cancellation_request_with_pending_send_does_not_create_duplicate_sends (test_robustness_guards.AtomicCancellationInitiationGuardTest.test_second_cancellation_request_with_pending_send_does_not_create_duplicate_sends)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/tests/test_robustness_guards.py", line 415, in test_second_cancellation_request_with_pending_send_does_not_create_duplicate_sends
+    await trans_updater.submit_spot_cancellation_transactions(FakeDb(), spot_id=7, cancellation_fee=10)
+  File "/home/runner/work/nim-hunt/nim-hunt/trans_updater.py", line 1437, in submit_spot_cancellation_transactions
+    unpaid_claim_ids = await db_access.get_unpaid_successful_standard_claim_ids(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/db_access.py", line 2478, in get_unpaid_successful_standard_claim_ids
+    rows = await db.execute_fetchall(
+                 ^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FakeDb' object has no attribute 'execute_fetchall'
+
+======================================================================
+ERROR: test_submit_cancellation_can_retry_after_failed_cancellation_sends (test_robustness_guards.CancellationRetryGuardTest.test_submit_cancellation_can_retry_after_failed_cancellation_sends)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/tests/test_robustness_guards.py", line 218, in test_submit_cancellation_can_retry_after_failed_cancellation_sends
+    result = await trans_updater.submit_spot_cancellation_transactions(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/trans_updater.py", line 1437, in submit_spot_cancellation_transactions
+    unpaid_claim_ids = await db_access.get_unpaid_successful_standard_claim_ids(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/db_access.py", line 2478, in get_unpaid_successful_standard_claim_ids
+    rows = await db.execute_fetchall(
+                 ^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FakeDb' object has no attribute 'execute_fetchall'
+
+======================================================================
+ERROR: test_retry_after_confirmed_fee_and_failed_refund_only_sends_refund (test_robustness_guards.PartialCancellationRetryGuardTest.test_retry_after_confirmed_fee_and_failed_refund_only_sends_refund)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/tests/test_robustness_guards.py", line 247, in test_retry_after_confirmed_fee_and_failed_refund_only_sends_refund
+    result = await trans_updater.submit_spot_cancellation_transactions(FakeDb(), spot_id=7, cancellation_fee=10)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/trans_updater.py", line 1437, in submit_spot_cancellation_transactions
+    unpaid_claim_ids = await db_access.get_unpaid_successful_standard_claim_ids(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/db_access.py", line 2478, in get_unpaid_successful_standard_claim_ids
+    rows = await db.execute_fetchall(
+                 ^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FakeDb' object has no attribute 'execute_fetchall'
+
+======================================================================
+ERROR: test_retry_after_confirmed_refund_and_failed_fee_only_sends_fee (test_robustness_guards.PartialCancellationRetryGuardTest.test_retry_after_confirmed_refund_and_failed_fee_only_sends_fee)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/tests/test_robustness_guards.py", line 268, in test_retry_after_confirmed_refund_and_failed_fee_only_sends_fee
+    result = await trans_updater.submit_spot_cancellation_transactions(FakeDb(), spot_id=7, cancellation_fee=10)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/trans_updater.py", line 1437, in submit_spot_cancellation_transactions
+    unpaid_claim_ids = await db_access.get_unpaid_successful_standard_claim_ids(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/db_access.py", line 2478, in get_unpaid_successful_standard_claim_ids
+    rows = await db.execute_fetchall(
+                 ^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FakeDb' object has no attribute 'execute_fetchall'
+
+======================================================================
+ERROR: test_zero_remaining_cancellation_marks_cancelled_without_transaction (test_robustness_guards.PartialCancellationRetryGuardTest.test_zero_remaining_cancellation_marks_cancelled_without_transaction)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/tests/test_robustness_guards.py", line 289, in test_zero_remaining_cancellation_marks_cancelled_without_transaction
+    result = await trans_updater.submit_spot_cancellation_transactions(FakeDb(), spot_id=7, cancellation_fee=10)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/trans_updater.py", line 1437, in submit_spot_cancellation_transactions
+    unpaid_claim_ids = await db_access.get_unpaid_successful_standard_claim_ids(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/nim-hunt/nim-hunt/db_access.py", line 2478, in get_unpaid_successful_standard_claim_ids
+    rows = await db.execute_fetchall(
+                 ^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FakeDb' object has no attribute 'execute_fetchall'
+
+----------------------------------------------------------------------
+Ran 39 tests in 0.599s
+
+FAILED (errors=10)

@@ -7,15 +7,16 @@ Run from the project folder:
 
     python spoof.py
 
-This script clears the core NimHunt tables and recreates a small, predictable
-mock dataset. Run it before starting the FastAPI server, or restart the server
-after running it so any in-memory cache is rebuilt from the new data.
+This script removes the local SQLite database, creates the current schema from
+scratch, and adds a small, predictable mock dataset. Stop the FastAPI server
+before running it, then restart the server so its cache uses the new database.
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
 
@@ -54,43 +55,18 @@ def _device_hash_for_user(user_id: int) -> str:
     return f"{int(user_id):064x}"[-64:]
 
 
-async def _clear_existing_data(db) -> None:
-    """Clear app data in dependency-safe order.
-
-    This is intentionally blunt because this file is a test-data reset tool.
-    Do not run spoof.py against a production database.
-    """
-    for table in (
-        schema.REPORT_TABLE_NAME,
-        schema.TRANS_TABLE_NAME,
-        schema.CLAIM_CODE_TABLE_NAME,
-        schema.CLAIM_TABLE_NAME,
-        schema.PRIZEDRAW_TABLE_NAME,
-        schema.SPOT_TABLE_NAME,
-        schema.USER_TABLE_NAME,
+def _remove_existing_database_files() -> None:
+    """Delete the local development database and its SQLite sidecar files."""
+    db_path = Path(schema.DB_PATH)
+    for candidate in (
+        db_path,
+        Path(f"{db_path}-wal"),
+        Path(f"{db_path}-shm"),
     ):
-        await db.execute(f"DELETE FROM {table};")
-
-    # Reset autoincrement counters where SQLite has created sqlite_sequence.
-    try:
-        await db.execute(
-            """
-            DELETE FROM sqlite_sequence
-            WHERE name IN (?, ?, ?, ?, ?, ?, ?);
-            """,
-            (
-                schema.REPORT_TABLE_NAME,
-                schema.TRANS_TABLE_NAME,
-                schema.CLAIM_CODE_TABLE_NAME,
-                schema.CLAIM_TABLE_NAME,
-                schema.PRIZEDRAW_TABLE_NAME,
-                schema.SPOT_TABLE_NAME,
-                schema.USER_TABLE_NAME,
-            ),
-        )
-    except Exception:
-        # sqlite_sequence may not exist in unusual SQLite builds/schemas.
-        pass
+        try:
+            candidate.unlink()
+        except FileNotFoundError:
+            pass
 
 
 async def _insert_mock_user(db, user: MockUser, *, now: int) -> None:
@@ -187,7 +163,8 @@ async def _create_confirmed_deposit_for_spot(
 
 
 async def seed_mock_data() -> dict[str, Any]:
-    """Create a small dynamic mock dataset and return a summary."""
+    """Recreate the database, seed a dynamic mock dataset, and return a summary."""
+    _remove_existing_database_files()
     await init_db()
     now = int(time.time())
 
@@ -331,8 +308,6 @@ async def seed_mock_data() -> dict[str, Any]:
 
     async with get_db() as db:
         async with db_access.transaction(db):
-            await _clear_existing_data(db)
-
             for user in users:
                 await _insert_mock_user(db, user, now=now)
 

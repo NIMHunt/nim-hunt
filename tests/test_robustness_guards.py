@@ -569,3 +569,31 @@ class RealDatabaseCancellationInvariantTest(unittest.IsolatedAsyncioTestCase):
             await db.commit()
 
         self.assertNotEqual(first_id, retry_id)
+
+
+class FreshSchemaPolicyTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=True)
+        self._old_db_path = schema.DB_PATH
+        schema.DB_PATH = self._tmp.name
+
+    async def asyncTearDown(self):
+        schema.DB_PATH = self._old_db_path
+        self._tmp.close()
+
+    async def test_fresh_database_is_created_with_current_schema_version(self):
+        await schema.init_db()
+
+        async with schema.get_db() as db:
+            cur = await db.execute("PRAGMA user_version;")
+            row = await cur.fetchone()
+
+        self.assertEqual(int(row[0]), int(schema.SCHEMA_VERSION))
+
+    async def test_nonempty_unversioned_database_is_rejected_instead_of_migrated(self):
+        with sqlite3.connect(self._tmp.name) as db:
+            db.execute("CREATE TABLE user (id INTEGER PRIMARY KEY);")
+            db.commit()
+
+        with self.assertRaisesRegex(RuntimeError, "nimhunt_reset_mock_data.sh"):
+            await schema.init_db()

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# NimHunt mock-data reset helper
-# Use this only when you want to wipe and recreate the local development database.
+# NimHunt fresh-database and mock-data helper
+# Stop the FastAPI server before using this: the old local database is deleted.
 
 PROJECT_DIR="${NIMHUNT_PROJECT_DIR:-/home/jakorah/nim-hunt}"
 HELPER_PATH="${PROJECT_DIR}/helpers/nimiq_helper.mjs"
@@ -22,15 +22,17 @@ export NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC="${NIMHUNT_NIMIQ_ALLOW_DEFAULT_
 export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND="${NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND:-node ${HELPER_PATH}}"
 export NIMHUNT_NIMIQ_SEND_COMMAND="${NIMHUNT_NIMIQ_SEND_COMMAND:-node ${HELPER_PATH}}"
 
-echo "Resetting NimHunt mock data in: ${PROJECT_DIR}"
-echo "This will clear and recreate the local records.db test data."
+echo "Recreating NimHunt development data in: ${PROJECT_DIR}"
+echo "The FastAPI server must be stopped before continuing."
+echo "This will delete records.db (and SQLite sidecars), create the current schema, and add mock data."
 echo
 read -r -p "Continue? [y/N] " answer
 case "$answer" in
     y|Y|yes|YES)
         python spoof.py
         echo
-        echo "Done. Restart the FastAPI server so the cache reloads."
+        echo "Done. A fresh records.db and mock dataset were created."
+        echo "You can now start the FastAPI server."
         ;;
     *)
         echo "Cancelled."

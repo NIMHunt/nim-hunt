@@ -53,6 +53,12 @@ from constants import (
 # Where the SQLite database is stored.
 DB_PATH = "records.db"
 
+# NimHunt is still in development and intentionally uses fresh databases
+# instead of carrying schema migrations. Increment this whenever the schema
+# changes. Existing non-empty databases with another version are rejected
+# with a clear instruction to recreate them.
+SCHEMA_VERSION = 1
+
 
 # --------------------------------------
 # Attribute constants for easy access
@@ -1410,95 +1416,41 @@ JOIN {USER_TABLE_NAME} owner
 
 
 # --------------------------------------
-# Lightweight schema migrations for existing development databases
+# Fresh-schema development policy
 # --------------------------------------
 
-async def _column_exists(db, *, table: str, column: str) -> bool:
-    rows = await db.execute_fetchall(f"PRAGMA table_info({table});")
+async def _require_empty_or_current_schema(db) -> None:
+    """Reject old development databases instead of migrating them in place.
 
-    # During init_db(), this helper runs on a raw aiosqlite connection before
-    # get_db() has applied aiosqlite.Row as the row_factory. Depending on the
-    # connection, PRAGMA rows may therefore be tuple-like or dict/Row-like.
-    # PRAGMA table_info columns are: cid, name, type, notnull, dflt_value, pk.
-    for row in rows:
-        try:
-            name = row["name"]
-        except (TypeError, KeyError, IndexError):
-            name = row[1]
-        if str(name) == str(column):
-            return True
-    return False
+    NimHunt has no production records yet, so schema changes are handled by
+    recreating records.db. An empty SQLite file is accepted and initialised
+    below. A non-empty database must already carry this exact SCHEMA_VERSION.
+    """
+    cur = await db.execute("PRAGMA user_version;")
+    row = await cur.fetchone()
+    current_version = int(row[0]) if row is not None else 0
 
-
-async def _ensure_spot_cancellation_started_at_column(db) -> None:
-    """Add the durable Spot cancellation marker to existing databases."""
-    if await _column_exists(db, table=SPOT_TABLE_NAME, column=SPOT_CANCELLATION_STARTED_AT):
-        return
-    await db.execute(
-        f"ALTER TABLE {SPOT_TABLE_NAME} ADD COLUMN {SPOT_CANCELLATION_STARTED_AT} INTEGER;"
-    )
-
-
-async def _backfill_spot_cancellation_markers(db) -> None:
-    """Mark older Spots that already have cancellation transaction history."""
-    await db.execute(
+    cur = await db.execute(
         f"""
-        UPDATE {SPOT_TABLE_NAME} AS s
-        SET {SPOT_CANCELLATION_STARTED_AT} = COALESCE(
-            s.{SPOT_CANCELLATION_STARTED_AT},
-            s.{SPOT_UPDATED_AT},
-            s.{SPOT_CREATED_AT},
-            unixepoch()
-        )
-        WHERE s.{SPOT_CANCELLATION_STARTED_AT} IS NULL
-          AND EXISTS (
-              SELECT 1
-              FROM {TRANS_TABLE_NAME} AS t
-              WHERE t.{TRANS_SPOT_ID} = s.{SPOT_ID}
-                AND t.{TRANS_TYPE} IN ({TRANS_TYPE_CANCEL_SPOT}, {TRANS_TYPE_PLAT_FEE})
-          );
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name IN (
+              '{USER_TABLE_NAME}',
+              '{SPOT_TABLE_NAME}',
+              '{CLAIM_TABLE_NAME}',
+              '{TRANS_TABLE_NAME}'
+          )
+        LIMIT 1;
         """
     )
+    has_app_tables = await cur.fetchone() is not None
 
-
-async def _ensure_claim_payout_address_column(db) -> None:
-    """Add CLAIM.payout_address to older development databases.
-
-    Fresh databases get the column from CREATE_CLAIM_TABLE. Existing local test
-    databases need a safe ALTER so users do not have to reset records.db just
-    to pick up wallet integration.
-    """
-    if await _column_exists(db, table=CLAIM_TABLE_NAME, column=CLAIM_PAYOUT_ADDRESS):
-        return
-    await db.execute(
-        f"ALTER TABLE {CLAIM_TABLE_NAME} ADD COLUMN {CLAIM_PAYOUT_ADDRESS} TEXT;"
-    )
-
-
-# View refresh order matters when existing records.db files already contain old
-# CREATE VIEW IF NOT EXISTS definitions. Views do not store data, so dropping
-# and recreating them on startup is a safe lightweight migration step.
-APP_VIEW_NAMES = (
-    SPOT_VIEW_PUBLIC_LIST,
-    SPOT_VIEW_OWNER_SUMMARY,
-    CLAIM_CODE_VIEW_DETAIL,
-    CLAIM_VIEW_DETAIL,
-    TRANS_VIEW_DETAIL,
-    REPORT_VIEW_DETAIL,
-)
-
-
-async def _refresh_app_views(db) -> None:
-    """Drop and recreate NimHunt views so code changes reach existing DBs."""
-    for view_name in reversed(APP_VIEW_NAMES):
-        await db.execute(f"DROP VIEW IF EXISTS {view_name};")
-
-    await db.executescript(SPOT_VIEW_PUBLIC_LIST_QUERY)
-    await db.executescript(SPOT_VIEW_OWNER_SUMMARY_QUERY)
-    await db.executescript(CLAIM_CODE_VIEW_DETAIL_QUERY)
-    await db.executescript(CLAIM_VIEW_DETAIL_QUERY)
-    await db.executescript(TRANS_VIEW_DETAIL_QUERY)
-    await db.executescript(REPORT_VIEW_DETAIL_QUERY)
+    if has_app_tables and current_version != SCHEMA_VERSION:
+        raise RuntimeError(
+            "This NimHunt database uses an unsupported development schema. "
+            "Stop the server and run ./nimhunt_reset_mock_data.sh to recreate records.db."
+        )
 
 
 # --------------------------------------
@@ -1517,6 +1469,7 @@ async def init_db():
         await db.execute("PRAGMA journal_mode = WAL;")
         await db.execute("PRAGMA synchronous = NORMAL;")
         await db.execute("PRAGMA foreign_keys = ON;")
+        await _require_empty_or_current_schema(db)
 
         await db.executescript(CREATE_USER_TABLE)
         await db.executescript(USER_INDEX_STATUS_QUERY)
@@ -1524,7 +1477,6 @@ async def init_db():
 
 
         await db.executescript(CREATE_SPOT_TABLE)
-        await _ensure_spot_cancellation_started_at_column(db)
         await db.executescript(SPOT_INDEX_CREATED_BY_QUERY)
         await db.executescript(SPOT_INDEX_STATUS_CREATED_QUERY)
         await db.executescript(SPOT_INDEX_GEOHASH_QUERY)
@@ -1539,7 +1491,6 @@ async def init_db():
         await db.executescript(SPOT_TRIGGER_MAX_TOTAL_CLAIMS_PRIZEDRAW_UPDATE_QUERY)
 
         await db.executescript(CREATE_CLAIM_TABLE)
-        await _ensure_claim_payout_address_column(db)
         await db.executescript(CLAIM_INDEX_SPOT_QUERY)
         await db.executescript(CLAIM_INDEX_RECIPIENT_QUERY)
         await db.executescript(CLAIM_INDEX_SPOT_RECIPIENT_STATUS_QUERY)
@@ -1555,7 +1506,6 @@ async def init_db():
         await db.executescript(CLAIM_CODE_TRIGGER_MATCH_SPOT_UPDATE_QUERY)
 
         await db.executescript(CREATE_TRANS_TABLE)
-        await _backfill_spot_cancellation_markers(db)
         await db.executescript(TRANS_INDEX_USER_CREATED_QUERY)
         await db.executescript(TRANS_INDEX_SPOT_CREATED_QUERY)
         await db.executescript(TRANS_INDEX_CLAIM_QUERY)
@@ -1575,8 +1525,14 @@ async def init_db():
         await db.executescript(REPORT_INDEX_SPOT_REPORTED_BY_QUERY)
         await db.executescript(REPORT_TRIGGER_SET_REVIEWED_AT_QUERY)
 
-        await _refresh_app_views(db)
+        await db.executescript(SPOT_VIEW_PUBLIC_LIST_QUERY)
+        await db.executescript(SPOT_VIEW_OWNER_SUMMARY_QUERY)
+        await db.executescript(CLAIM_CODE_VIEW_DETAIL_QUERY)
+        await db.executescript(CLAIM_VIEW_DETAIL_QUERY)
+        await db.executescript(TRANS_VIEW_DETAIL_QUERY)
+        await db.executescript(REPORT_VIEW_DETAIL_QUERY)
 
+        await db.execute(f"PRAGMA user_version = {SCHEMA_VERSION};")
         await db.commit()
 
 

@@ -648,6 +648,26 @@ END;
 """
 
 
+# Prevents a claim insert after cancellation has been durably marked.
+# This closes the final race even if application checks ran just before the
+# cancellation transaction acquired SQLite's write lock.
+CLAIM_TRIGGER_BLOCK_CANCELLING_SPOT_INSERT = "trg_claim_block_cancelling_spot_insert"
+CLAIM_TRIGGER_BLOCK_CANCELLING_SPOT_INSERT_QUERY = f"""
+CREATE TRIGGER IF NOT EXISTS {CLAIM_TRIGGER_BLOCK_CANCELLING_SPOT_INSERT}
+BEFORE INSERT ON {CLAIM_TABLE_NAME}
+FOR EACH ROW
+WHEN EXISTS (
+    SELECT 1
+    FROM {SPOT_TABLE_NAME}
+    WHERE {SPOT_ID} = NEW.{CLAIM_SPOT_ID}
+      AND {SPOT_CANCELLATION_STARTED_AT} IS NOT NULL
+)
+BEGIN
+    SELECT RAISE(ABORT, 'spot cancellation has started');
+END;
+"""
+
+
 
 # CLAIM_CODE #
 # A CLAIM_CODE stores a code/password that can be used for a particular SPOT.
@@ -879,6 +899,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS {TRANS_INDEX_CLAIM_ACTIVE_PAYOUT_UNIQUE}
 ON {TRANS_TABLE_NAME}({TRANS_CLAIM_ID})
 WHERE {TRANS_CLAIM_ID} IS NOT NULL
   AND {TRANS_TYPE} = {TRANS_TYPE_CLAIM}
+  AND {TRANS_STATUS} != {TRANS_STATUS_FAILED};
+"""
+
+
+# Prevents two requests from creating the same active cancellation leg.
+# A failed leg remains retryable because failed rows are outside the index.
+TRANS_INDEX_SPOT_ACTIVE_CANCELLATION_UNIQUE = "idx_trans_spot_active_cancellation_unique"
+TRANS_INDEX_SPOT_ACTIVE_CANCELLATION_UNIQUE_QUERY = f"""
+CREATE UNIQUE INDEX IF NOT EXISTS {TRANS_INDEX_SPOT_ACTIVE_CANCELLATION_UNIQUE}
+ON {TRANS_TABLE_NAME}({TRANS_SPOT_ID}, {TRANS_TYPE})
+WHERE {TRANS_SPOT_ID} IS NOT NULL
+  AND {TRANS_TYPE} IN ({TRANS_TYPE_CANCEL_SPOT}, {TRANS_TYPE_PLAT_FEE})
   AND {TRANS_STATUS} != {TRANS_STATUS_FAILED};
 """
 
@@ -1407,6 +1439,28 @@ async def _ensure_spot_cancellation_started_at_column(db) -> None:
     )
 
 
+async def _backfill_spot_cancellation_markers(db) -> None:
+    """Mark older Spots that already have cancellation transaction history."""
+    await db.execute(
+        f"""
+        UPDATE {SPOT_TABLE_NAME} AS s
+        SET {SPOT_CANCELLATION_STARTED_AT} = COALESCE(
+            s.{SPOT_CANCELLATION_STARTED_AT},
+            s.{SPOT_UPDATED_AT},
+            s.{SPOT_CREATED_AT},
+            unixepoch()
+        )
+        WHERE s.{SPOT_CANCELLATION_STARTED_AT} IS NULL
+          AND EXISTS (
+              SELECT 1
+              FROM {TRANS_TABLE_NAME} AS t
+              WHERE t.{TRANS_SPOT_ID} = s.{SPOT_ID}
+                AND t.{TRANS_TYPE} IN ({TRANS_TYPE_CANCEL_SPOT}, {TRANS_TYPE_PLAT_FEE})
+          );
+        """
+    )
+
+
 async def _ensure_claim_payout_address_column(db) -> None:
     """Add CLAIM.payout_address to older development databases.
 
@@ -1491,6 +1545,7 @@ async def init_db():
         await db.executescript(CLAIM_INDEX_SPOT_RECIPIENT_STATUS_QUERY)
         await db.executescript(CLAIM_INDEX_SPOT_STATUS_QUERY)
         await db.executescript(CLAIM_TRIGGER_STAMP_UPDATED_AT_QUERY)
+        await db.executescript(CLAIM_TRIGGER_BLOCK_CANCELLING_SPOT_INSERT_QUERY)
 
         await db.executescript(CREATE_CLAIM_CODE_TABLE)
         await db.executescript(CLAIM_CODE_INDEX_SPOT_QUERY)
@@ -1500,10 +1555,12 @@ async def init_db():
         await db.executescript(CLAIM_CODE_TRIGGER_MATCH_SPOT_UPDATE_QUERY)
 
         await db.executescript(CREATE_TRANS_TABLE)
+        await _backfill_spot_cancellation_markers(db)
         await db.executescript(TRANS_INDEX_USER_CREATED_QUERY)
         await db.executescript(TRANS_INDEX_SPOT_CREATED_QUERY)
         await db.executescript(TRANS_INDEX_CLAIM_QUERY)
         await db.executescript(TRANS_INDEX_CLAIM_ACTIVE_PAYOUT_UNIQUE_QUERY)
+        await db.executescript(TRANS_INDEX_SPOT_ACTIVE_CANCELLATION_UNIQUE_QUERY)
         await db.executescript(TRANS_INDEX_STATUS_CREATED_QUERY)
         await db.executescript(TRANS_INDEX_TYPE_STATUS_CREATED_QUERY)
         await db.executescript(TRANS_TRIGGER_SET_COMPLETED_AT_UPDATE_QUERY)

@@ -2734,11 +2734,13 @@ async def create_claim_attempt(
     # outside the Spot after the capped GPS mercy margin is applied.
     accuracy_score = 1.0
 
-    try:
-        await db.execute("BEGIN IMMEDIATE;")
-        if await has_spot_cancellation_started(db, spot_id=spot_id):
-            raise ValueError("This spot is being cancelled and can no longer be claimed.")
+    # Recheck immediately before writing for a friendly error. The SQLite
+    # trigger is the authoritative race-safe guard if cancellation begins after
+    # this check but before the INSERT obtains the write lock.
+    if await has_spot_cancellation_started(db, spot_id=spot_id):
+        raise ValueError("This spot is being cancelled and can no longer be claimed.")
 
+    try:
         claim_id = await create_claim(
             db,
             spot_id=spot_id,
@@ -2748,33 +2750,29 @@ async def create_claim_attempt(
             accuracy=accuracy_score,
             payout_address=payout_address,
         )
+    except sqlite3.IntegrityError as exc:
+        if "spot cancellation has started" in str(exc).lower():
+            raise ValueError("This spot is being cancelled and can no longer be claimed.") from exc
+        raise
 
-        if use_password and clean_code:
-            await claim_code_for_claim(
-                db,
-                spot_id=spot_id,
-                claim_code=clean_code,
-                claim_id=claim_id,
-            )
+    if use_password and clean_code:
+        await claim_code_for_claim(
+            db,
+            spot_id=spot_id,
+            claim_code=clean_code,
+            claim_id=claim_id,
+        )
 
-        # A zero-duration claim/entry succeeds immediately.
-        # For Prizedraws, SUCCESS means the user has successfully entered the draw;
-        # winning is later inferred from a related CLAIM payout transaction.
-        if claim_duration <= 0:
-            claim_after = await promote_pending_claim_to_success_if_capacity_available(db, claim_id=claim_id)
-            promotion = claim_after.get("capacity_promotion") if isinstance(claim_after, dict) else None
-            if isinstance(promotion, dict) and promotion.get("ok") is False:
-                raise ValueError("This spot has run out of rewards.")
-            if claim_after is not None:
-                await db.commit()
-                return claim_after
-
-        await db.commit()
-    except Exception:
-        try:
-            await db.rollback()
-        finally:
-            raise
+    # A zero-duration claim/entry succeeds immediately.
+    # For Prizedraws, SUCCESS means the user has successfully entered the draw;
+    # winning is later inferred from a related CLAIM payout transaction.
+    if claim_duration <= 0:
+        claim_after = await promote_pending_claim_to_success_if_capacity_available(db, claim_id=claim_id)
+        promotion = claim_after.get("capacity_promotion") if isinstance(claim_after, dict) else None
+        if isinstance(promotion, dict) and promotion.get("ok") is False:
+            raise ValueError("This spot has run out of rewards.")
+        if claim_after is not None:
+            return claim_after
 
     claim = await get_claim(db, claim_id=claim_id)
     if claim is None:

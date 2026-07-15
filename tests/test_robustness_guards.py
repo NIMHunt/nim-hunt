@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from contextlib import asynccontextmanager
@@ -457,3 +458,114 @@ class AtomicCancellationInitiationGuardTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["cancellation_pending"])
         fee.assert_awaited_once()
         refund.assert_awaited_once()
+
+
+class RealDatabaseCancellationInvariantTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=True)
+        self._old_db_path = schema.DB_PATH
+        schema.DB_PATH = self._tmp.name
+        await schema.init_db()
+
+    async def asyncTearDown(self):
+        schema.DB_PATH = self._old_db_path
+        self._tmp.close()
+
+    async def _fixture(self):
+        async with schema.get_db() as db:
+            owner_id = await db_access.create_user(db, device_id_hash="owner-device")
+            claimant_id = await db_access.create_user(db, device_id_hash="claimant-device")
+            spot_id = await db_access.create_spot(db, created_by=owner_id, title="Guarded Spot")
+            await db.execute(
+                f"""
+                UPDATE {schema.SPOT_TABLE_NAME}
+                SET {schema.SPOT_STATUS} = ?,
+                    {schema.SPOT_CLAIM_DURATION} = 1
+                WHERE {schema.SPOT_ID} = ?;
+                """,
+                (const.SPOT_STATUS_PUBLISHED, spot_id),
+            )
+            await db.commit()
+        return owner_id, claimant_id, spot_id
+
+    async def test_claim_attempt_works_inside_existing_route_transaction(self):
+        _owner_id, claimant_id, spot_id = await self._fixture()
+        with mock.patch.object(db_access, "get_claim_rule_check", mock.AsyncMock(return_value={"allowed": True})), \
+             mock.patch.object(db_access, "is_prizedraw", mock.AsyncMock(return_value=False)):
+            async with schema.get_db() as db:
+                async with db_access.transaction(db):
+                    claim = await db_access.create_claim_attempt(
+                        db,
+                        spot_id=spot_id,
+                        user_id=claimant_id,
+                        lat=1.0,
+                        long=2.0,
+                    )
+        self.assertGreater(int(claim[schema.CLAIM_ID]), 0)
+
+    async def test_database_trigger_blocks_claim_if_marker_appears_after_app_check(self):
+        _owner_id, claimant_id, spot_id = await self._fixture()
+        async with schema.get_db() as db:
+            await db.execute(
+                f"""
+                UPDATE {schema.SPOT_TABLE_NAME}
+                SET {schema.SPOT_CANCELLATION_STARTED_AT} = unixepoch()
+                WHERE {schema.SPOT_ID} = ?;
+                """,
+                (spot_id,),
+            )
+            await db.commit()
+
+        with mock.patch.object(db_access, "get_claim_rule_check", mock.AsyncMock(return_value={"allowed": True})), \
+             mock.patch.object(db_access, "is_prizedraw", mock.AsyncMock(return_value=False)), \
+             mock.patch.object(db_access, "has_spot_cancellation_started", mock.AsyncMock(return_value=False)):
+            async with schema.get_db() as db:
+                with self.assertRaisesRegex(ValueError, "being cancelled"):
+                    async with db_access.transaction(db):
+                        await db_access.create_claim_attempt(
+                            db,
+                            spot_id=spot_id,
+                            user_id=claimant_id,
+                            lat=1.0,
+                            long=2.0,
+                        )
+
+    async def test_duplicate_active_cancellation_leg_is_rejected_but_failed_leg_retries(self):
+        owner_id, _claimant_id, spot_id = await self._fixture()
+        async with schema.get_db() as db:
+            first_id = await db_access.create_spot_refund_transaction(
+                db,
+                user_id=owner_id,
+                spot_id=spot_id,
+                amount=90,
+                from_address="from",
+                to_address="to",
+                tx_hash="refund-intent-1",
+            )
+            await db.commit()
+
+            with self.assertRaises(sqlite3.IntegrityError):
+                await db_access.create_spot_refund_transaction(
+                    db,
+                    user_id=owner_id,
+                    spot_id=spot_id,
+                    amount=90,
+                    from_address="from",
+                    to_address="to",
+                    tx_hash="refund-intent-2",
+                )
+            await db.rollback()
+
+            await db_access.set_transaction_status_to_failed(db, trans_id=first_id)
+            retry_id = await db_access.create_spot_refund_transaction(
+                db,
+                user_id=owner_id,
+                spot_id=spot_id,
+                amount=90,
+                from_address="from",
+                to_address="to",
+                tx_hash="refund-intent-3",
+            )
+            await db.commit()
+
+        self.assertNotEqual(first_id, retry_id)

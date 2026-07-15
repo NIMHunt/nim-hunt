@@ -27,6 +27,7 @@ import shlex
 import subprocess
 import time
 import secrets
+import sqlite3
 import urllib.error
 from pathlib import Path
 import urllib.request
@@ -1442,19 +1443,28 @@ async def submit_spot_cancellation_transactions(
         finally:
             raise
 
-    fee_result = await submit_platform_fee_transaction(
-        db,
-        spot_id=int(spot_id),
-        amount=fee_amount,
-        fee_address=fee_address,
-    ) if fee_amount > 0 else {"ok": True, "skipped": True, "reason": "no_fee", "trans_id": None}
+    try:
+        fee_result = await submit_platform_fee_transaction(
+            db,
+            spot_id=int(spot_id),
+            amount=fee_amount,
+            fee_address=fee_address,
+        ) if fee_amount > 0 else {"ok": True, "skipped": True, "reason": "no_fee", "trans_id": None}
 
-    refund_result = await submit_spot_refund_transaction(
-        db,
-        spot_id=int(spot_id),
-        to_address=str(refund_address),
-        amount=refund_amount,
-    ) if refund_amount > 0 else {"ok": True, "skipped": True, "reason": "no_refund", "trans_id": None}
+        refund_result = await submit_spot_refund_transaction(
+            db,
+            spot_id=int(spot_id),
+            to_address=str(refund_address),
+            amount=refund_amount,
+        ) if refund_amount > 0 else {"ok": True, "skipped": True, "reason": "no_refund", "trans_id": None}
+    except sqlite3.IntegrityError as exc:
+        message = str(exc).lower()
+        if "trans.spot_id" in message and "trans.type" in message:
+            raise ValueError(
+                "This spot already has an active cancellation transaction. "
+                "Wait for it to confirm or fail before retrying."
+            ) from exc
+        raise
 
     await cache.notify_spot_changed(db, spot_id=int(spot_id))
     await cache.notify_user_changed(db, user_id=int(spot[schema.SPOT_CREATED_BY]))

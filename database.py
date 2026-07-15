@@ -40,6 +40,9 @@ from constants import (
     TRANS_STATUS_PENDING,
     TRANS_STATUS_CONFIRMED,
     TRANS_STATUS_FAILED,
+    TRANS_TYPE_CANCEL_SPOT,
+    TRANS_TYPE_CLAIM,
+    TRANS_TYPE_PLAT_FEE,
 
     REPORT_STATUS_PENDING,
     REPORT_STATUS_APPROVED,
@@ -864,6 +867,17 @@ WHERE {TRANS_CLAIM_ID} IS NOT NULL;
 """
 
 
+# Prevents duplicate active claim payouts while keeping failed payouts retryable.
+TRANS_INDEX_CLAIM_ACTIVE_PAYOUT_UNIQUE = "idx_trans_claim_active_payout_unique"
+TRANS_INDEX_CLAIM_ACTIVE_PAYOUT_UNIQUE_QUERY = f"""
+CREATE UNIQUE INDEX IF NOT EXISTS {TRANS_INDEX_CLAIM_ACTIVE_PAYOUT_UNIQUE}
+ON {TRANS_TABLE_NAME}({TRANS_CLAIM_ID})
+WHERE {TRANS_CLAIM_ID} IS NOT NULL
+  AND {TRANS_TYPE} = {TRANS_TYPE_CLAIM}
+  AND {TRANS_STATUS} != {TRANS_STATUS_FAILED};
+"""
+
+
 # Helps queue/review pending, confirmed, and failed transactions.
 TRANS_INDEX_STATUS_CREATED = "idx_trans_status_created"
 TRANS_INDEX_STATUS_CREATED_QUERY = f"""
@@ -1103,6 +1117,12 @@ code_counts AS (
         SUM(CASE WHEN {CLAIM_CODE_USED_BY} IS NOT NULL THEN 1 ELSE 0 END) AS used_code_count
     FROM {CLAIM_CODE_TABLE_NAME}
     GROUP BY {CLAIM_CODE_SPOT_ID}
+),
+started_cancellations AS (
+    SELECT DISTINCT {TRANS_SPOT_ID} AS spot_id
+    FROM {TRANS_TABLE_NAME}
+    WHERE {TRANS_TYPE} IN ({TRANS_TYPE_CANCEL_SPOT}, {TRANS_TYPE_PLAT_FEE})
+      AND {TRANS_SPOT_ID} IS NOT NULL
 )
 SELECT
     s.*,
@@ -1137,7 +1157,10 @@ LEFT JOIN claim_counts cc
     ON cc.spot_id = s.{SPOT_ID}
 LEFT JOIN code_counts cdc
     ON cdc.spot_id = s.{SPOT_ID}
+LEFT JOIN started_cancellations sc
+    ON sc.spot_id = s.{SPOT_ID}
 WHERE s.{SPOT_STATUS} = {SPOT_STATUS_PUBLISHED}
+  AND sc.spot_id IS NULL
   AND s.{SPOT_LAT} IS NOT NULL
   AND s.{SPOT_LONG} IS NOT NULL
   AND (s.{SPOT_STARTS_AT} IS NULL OR (s.{SPOT_STARTS_AT} + s.{SPOT_ENDS_AT}) > unixepoch());
@@ -1461,6 +1484,7 @@ async def init_db():
         await db.executescript(TRANS_INDEX_USER_CREATED_QUERY)
         await db.executescript(TRANS_INDEX_SPOT_CREATED_QUERY)
         await db.executescript(TRANS_INDEX_CLAIM_QUERY)
+        await db.executescript(TRANS_INDEX_CLAIM_ACTIVE_PAYOUT_UNIQUE_QUERY)
         await db.executescript(TRANS_INDEX_STATUS_CREATED_QUERY)
         await db.executescript(TRANS_INDEX_TYPE_STATUS_CREATED_QUERY)
         await db.executescript(TRANS_TRIGGER_SET_COMPLETED_AT_UPDATE_QUERY)

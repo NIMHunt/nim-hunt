@@ -2301,6 +2301,25 @@ async def has_nonfailed_claim_payout_transaction(db, *, claim_id: int) -> bool:
     return await cur.fetchone() is not None
 
 
+async def has_spot_cancellation_started(db, *, spot_id: int) -> bool:
+    """Return True once a standard Spot cancellation refund or fee send exists."""
+    cur = await db.execute(
+        f"""
+        SELECT 1
+        FROM {schema.TRANS_TABLE_NAME}
+        WHERE {schema.TRANS_SPOT_ID} = ?
+          AND {schema.TRANS_TYPE} IN (?, ?)
+        LIMIT 1;
+        """,
+        (
+            int(spot_id),
+            const.TRANS_TYPE_CANCEL_SPOT,
+            const.TRANS_TYPE_PLAT_FEE,
+        ),
+    )
+    return await cur.fetchone() is not None
+
+
 async def has_confirmed_claim_payout_transaction(db, *, claim_id: int) -> bool:
     """Return True if a CLAIM payout transaction is confirmed on-chain."""
     cur = await db.execute(
@@ -2561,6 +2580,7 @@ async def get_claim_rule_check(
     )
     capacity_ok = await is_spot_claim_capacity_available(db, spot_id=spot_id)
     user_limit_ok = not await has_user_reached_claim_limit(db, spot_id=spot_id, user_id=user_id)
+    cancellation_pending = await has_spot_cancellation_started(db, spot_id=spot_id)
 
     spot_current = bool(public and int(public.get("availability_rank", 1)) == 0)
     within_radius = bool(distance_check and distance_check["within_radius"])
@@ -2573,6 +2593,9 @@ async def get_claim_rule_check(
     elif own_spot:
         reason = "own_spot"
         message = "You cannot claim your own spot."
+    elif cancellation_pending:
+        reason = "cancellation_pending"
+        message = "This spot is being cancelled and can no longer be claimed."
     elif not spot_current:
         reason = "not_active"
         message = "This spot is not active right now."
@@ -2586,7 +2609,15 @@ async def get_claim_rule_check(
         reason = "user_limit_reached"
         message = "You have already reached your claim limit for this spot."
 
-    allowed = bool(user_ok and not own_spot and spot_current and within_radius and capacity_ok and user_limit_ok)
+    allowed = bool(
+        user_ok
+        and not own_spot
+        and not cancellation_pending
+        and spot_current
+        and within_radius
+        and capacity_ok
+        and user_limit_ok
+    )
 
     return {
         "allowed": allowed,
@@ -2595,6 +2626,7 @@ async def get_claim_rule_check(
         "user_ok": user_ok,
         "own_spot": own_spot,
         "spot_current": spot_current,
+        "cancellation_pending": cancellation_pending,
         "within_radius": within_radius,
         "capacity_ok": capacity_ok,
         "user_limit_ok": user_limit_ok,
@@ -3253,17 +3285,22 @@ async def create_claim_transaction(
     if await has_nonfailed_claim_payout_transaction(db, claim_id=claim_id):
         raise RuntimeError(f"Claim id={claim_id} already has a non-failed payout transaction")
 
-    return await _create_transaction(
-        db,
-        user_id=user_id,
-        spot_id=int(claim[schema.CLAIM_SPOT_ID]),
-        claim_id=claim_id,
-        trans_type=const.TRANS_TYPE_CLAIM,
-        amount=amount,
-        from_address=from_address,
-        to_address=to_address,
-        tx_hash=tx_hash,
-    )
+    try:
+        return await _create_transaction(
+            db,
+            user_id=user_id,
+            spot_id=int(claim[schema.CLAIM_SPOT_ID]),
+            claim_id=claim_id,
+            trans_type=const.TRANS_TYPE_CLAIM,
+            amount=amount,
+            from_address=from_address,
+            to_address=to_address,
+            tx_hash=tx_hash,
+        )
+    except sqlite3.IntegrityError as exc:
+        if await has_nonfailed_claim_payout_transaction(db, claim_id=claim_id):
+            raise RuntimeError(f"Claim id={claim_id} already has a non-failed payout transaction") from exc
+        raise
 
 
 async def create_platform_fee_transaction(

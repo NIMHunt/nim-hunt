@@ -31,6 +31,36 @@ except Exception:  # transaction polling is optional while bootstrapping
     trans_updater = None  # type: ignore[assignment]
 
 
+def validate_production_safety() -> None:
+    """Refuse unsafe test/development settings in explicit production mode."""
+    if not bool(getattr(const, "PRODUCTION_MODE", False)):
+        return
+
+    unsafe_settings: list[str] = []
+    for name in (
+        "DEFAULT_TO_TEST_USER",
+        "ALLOW_DEV_WALLET_PLACEHOLDERS",
+        "ALLOW_DEV_WALLET_SENDS",
+    ):
+        if bool(getattr(const, name, False)):
+            unsafe_settings.append(name)
+
+    if str(getattr(const, "NIMIQ_NETWORK", "")).strip() != "MainAlbatross":
+        unsafe_settings.append("NIMIQ_NETWORK must be MainAlbatross")
+
+    hub_url = str(getattr(const, "NIMIQ_HUB_URL", "")).strip().lower()
+    if "testnet" in hub_url or "hub.nimiq-testnet" in hub_url:
+        unsafe_settings.append("NIMIQ_HUB_URL must not point at testnet")
+
+    fee_address = str(getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "")).strip().upper()
+    if not fee_address or "DEV" in fee_address or "PLACEHOLDER" in fee_address or fee_address.startswith("NQ00 NIMHUNT"):
+        unsafe_settings.append("SPOT_CANCELLATION_FEE_ADDRESS must be a production address")
+
+    if unsafe_settings:
+        joined = ", ".join(unsafe_settings)
+        raise RuntimeError(f"Unsafe production configuration: {joined}")
+
+
 app = FastAPI(title=const.APP_NAME)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(public_router)
@@ -86,6 +116,7 @@ async def nimhunt_http_exception_handler(request: Request, exc: StarletteHTTPExc
 
 @app.on_event("startup")
 async def startup() -> None:
+    validate_production_safety()
     await init_db()
 
     if cache is not None:

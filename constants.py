@@ -8,6 +8,8 @@ Shared constants for NimHunt.
 ─────────────────────────────────────────────
 """
 
+import os
+
 
 # -----------------------------
 # APP Settings
@@ -26,6 +28,10 @@ NIMIQ_PAY_URL = "https://nimpay.app"
 # -----------------------------
 # Development / test settings
 # -----------------------------
+
+# Set NIMHUNT_PRODUCTION=1 in public deployments. Startup then refuses
+# unsafe local-development settings instead of silently serving with them.
+PRODUCTION_MODE = os.getenv("NIMHUNT_PRODUCTION", "").strip().lower() in {"1", "true", "yes", "on"}
 
 # Development helper: when True, the home/session API can return TEST_USER_ID
 # if the webview is opened outside Nimiq Pay and no device hash is available.

@@ -1008,21 +1008,28 @@ function claimStatusForSpot(spot) {
     const inRange = spotWithinRadius(spot);
     const ownSpot = currentUserOwnsSpot(spot);
     const active = spot.status_label === 'active';
+    const participantCount = Number(spot.success_claim_count || 0)
+        + (spot.is_prizedraw ? Number(spot.pending_claim_count || 0) : 0);
+    const maxParticipants = Number(spot.max_total_claims || 0);
+    const capacityFull = maxParticipants > 0 && participantCount >= maxParticipants;
     let reason = 'outside_radius';
     let message = 'Move inside the spot radius to claim.';
 
-    if (!state.hasUserLocation) {
-        reason = 'location_unknown';
-        message = 'Your location is unknown.';
+    if (ownSpot) {
+        reason = 'own_spot';
+        message = 'You cannot claim your own spot.';
     } else if (!state.user) {
         reason = 'user_unknown';
         message = `Open ${APP_NAME} in Nimiq Pay to identify this device.`;
-    } else if (ownSpot) {
-        reason = 'own_spot';
-        message = 'You cannot claim your own spot.';
     } else if (!active) {
         reason = 'not_active';
         message = 'This spot is not active right now.';
+    } else if (capacityFull) {
+        reason = 'capacity_full';
+        message = 'This spot has no remaining claim capacity.';
+    } else if (!state.hasUserLocation) {
+        reason = 'location_unknown';
+        message = 'Your location is unknown.';
     } else if (inRange) {
         reason = 'unknown';
         message = 'This Spot cannot be claimed right now.';
@@ -1033,13 +1040,18 @@ function claimStatusForSpot(spot) {
         action: 'unavailable',
         kind: 'unavailable',
         reason,
+        user_ok: Boolean(state.user),
+        own_spot: ownSpot,
+        location_known: state.hasUserLocation,
         within_radius: inRange,
+        capacity_ok: !capacityFull,
+        user_limit_ok: true,
         requires_password: Boolean(spot.use_password),
         requires_duration: Number(spot.claim_duration || 0) > 0,
         is_prizedraw: Boolean(spot.is_prizedraw),
         reward_amount: Number(spot.total_value || 0) / Math.max(1, Number(spot.is_prizedraw ? spot.prize_count || 1 : spot.max_total_claims || 1)),
-        participant_count: Number(spot.success_claim_count || 0) + (spot.is_prizedraw ? Number(spot.pending_claim_count || 0) : 0),
-        max_participants: Number(spot.max_total_claims || 0),
+        participant_count: participantCount,
+        max_participants: maxParticipants,
         prize_count: Number(spot.prize_count || 1),
         message,
     };
@@ -1052,8 +1064,7 @@ function shouldShowClaimAction(spot) {
     if (status.allowed || status.within_radius) return true;
 
     const reason = String(status.reason || '').toLowerCase();
-    if (!state.hasUserLocation || !state.user || currentUserOwnsSpot(spot)) return true;
-    if (status.own_spot || status.user_ok === false || status.capacity_ok === false || status.user_limit_ok === false) return true;
+    if (status.own_spot || status.capacity_ok === false || status.user_limit_ok === false) return true;
 
     return new Set([
         'own_spot',
@@ -1063,6 +1074,7 @@ function shouldShowClaimAction(spot) {
         'claim_code_unavailable',
         'already_claimed',
         'already_entered',
+        'cancellation_pending',
     ]).has(reason);
 }
 
@@ -1076,14 +1088,16 @@ function claimUnavailableMessage(status, spot) {
     const reason = String(status?.reason || '').trim();
     const message = String(status?.message || '').trim();
 
-    if (!state.hasUserLocation || reason === 'location_unknown') return 'Your location is unknown.';
-    if (!state.user || reason === 'user_unknown') return `Open ${APP_NAME} in Nimiq Pay to identify this device.`;
     if (status?.own_spot || reason === 'own_spot' || currentUserOwnsSpot(spot)) return 'You cannot claim your own spot.';
-    if (status?.user_ok === false || reason === 'user_not_allowed') return 'This device account cannot claim spots.';
-    if (reason === 'not_active') return 'This spot is not active right now.';
+    if (status?.user_ok === false && reason === 'user_not_allowed') return 'This device account cannot claim spots.';
     if (status?.capacity_ok === false || reason === 'capacity_full') return 'This spot has no remaining claim capacity.';
     if (status?.user_limit_ok === false || reason === 'user_limit_reached') return 'You have already reached your claim limit for this spot.';
     if (reason === 'claim_code_unavailable') return 'There are no unused claim codes left for this spot.';
+    if (reason === 'already_claimed' || reason === 'already_entered') return message || 'You have already used your available claim for this spot.';
+    if (reason === 'cancellation_pending') return 'This spot is being cancelled and can no longer be claimed.';
+    if (!state.user || reason === 'user_unknown') return `Open ${APP_NAME} in Nimiq Pay to identify this device.`;
+    if (!state.hasUserLocation || reason === 'location_unknown') return 'Your location is unknown.';
+    if (reason === 'not_active') return 'This spot is not active right now.';
     if (reason === 'outside_radius' || status?.within_radius === false) return 'Move inside the spot radius to claim.';
     if (message && message !== 'This spot cannot be claimed right now.') return message;
 
@@ -1114,7 +1128,7 @@ function eventStartedOnInteractiveElement(event) {
 
 async function refreshClaimStatusesForSpots(spots) {
     state.claimStatusBySpotId = new Map();
-    if (!Array.isArray(spots) || spots.length <= 0 || !state.hasUserLocation) return;
+    if (!Array.isArray(spots) || spots.length <= 0) return;
 
     await identifyReportUser();
     if (!state.user) return;

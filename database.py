@@ -8,47 +8,45 @@ The back-end of the system. Handles the database.
 ─────────────────────────────────────────────
 """
 
+from contextlib import asynccontextmanager, suppress
+
 import aiosqlite
-from contextlib import asynccontextmanager
 
 from constants import (
-    USER_STATUS_ACTIVE,
-    MIN_SPOT_RADIUS_METRES,
-    MAX_SPOT_RADIUS_METRES,
-    MIN_SPOT_CLAIM_DURATION_SECONDS,
-    MAX_SPOT_CLAIM_DURATION_SECONDS,
-    MIN_SPOT_MAX_CLAIMS_PER_USER,
-    MAX_SPOT_MAX_CLAIMS_PER_USER,
-    MIN_PRIZEDRAW_MAX_TOTAL_CLAIMS,
-    MIN_SPOT_MAX_TOTAL_CLAIMS,
-    MAX_SPOT_MAX_TOTAL_CLAIMS,
-    MIN_SPOT_TOTAL_VALUE,
-    MIN_SPOT_ENDS_AFTER_SECONDS,
-    MAX_SPOT_ENDS_AFTER_SECONDS,
-    DEFAULT_DRAFT_SPOT_ENDS_AFTER_SECONDS,
-    SPOT_DEPOSIT_KEY_VERSION as DEFAULT_SPOT_DEPOSIT_KEY_VERSION,
-    MIN_PRIZEDRAW_PRIZE_COUNT,
-    MAX_PRIZEDRAW_PRIZE_COUNT,
-
-    SPOT_STATUS_DRAFT,
-    SPOT_STATUS_PUBLISHED,
-
+    CLAIM_STATUS_FAILED,
     CLAIM_STATUS_PENDING,
     CLAIM_STATUS_SUCCESS,
-    CLAIM_STATUS_FAILED,
-
-    TRANS_STATUS_PENDING,
+    DEFAULT_DRAFT_SPOT_ENDS_AFTER_SECONDS,
+    MAX_PRIZEDRAW_PRIZE_COUNT,
+    MAX_SPOT_CLAIM_DURATION_SECONDS,
+    MAX_SPOT_ENDS_AFTER_SECONDS,
+    MAX_SPOT_MAX_CLAIMS_PER_USER,
+    MAX_SPOT_MAX_TOTAL_CLAIMS,
+    MAX_SPOT_RADIUS_METRES,
+    MIN_PRIZEDRAW_MAX_TOTAL_CLAIMS,
+    MIN_PRIZEDRAW_PRIZE_COUNT,
+    MIN_SPOT_CLAIM_DURATION_SECONDS,
+    MIN_SPOT_ENDS_AFTER_SECONDS,
+    MIN_SPOT_MAX_CLAIMS_PER_USER,
+    MIN_SPOT_MAX_TOTAL_CLAIMS,
+    MIN_SPOT_RADIUS_METRES,
+    MIN_SPOT_TOTAL_VALUE,
+    REPORT_STATUS_APPROVED,
+    REPORT_STATUS_DISMISSED,
+    REPORT_STATUS_PENDING,
+    SPOT_STATUS_DRAFT,
+    SPOT_STATUS_PUBLISHED,
     TRANS_STATUS_CONFIRMED,
     TRANS_STATUS_FAILED,
+    TRANS_STATUS_PENDING,
     TRANS_TYPE_CANCEL_SPOT,
     TRANS_TYPE_CLAIM,
     TRANS_TYPE_PLAT_FEE,
-
-    REPORT_STATUS_PENDING,
-    REPORT_STATUS_APPROVED,
-    REPORT_STATUS_DISMISSED,
+    USER_STATUS_ACTIVE,
 )
-
+from constants import (
+    SPOT_DEPOSIT_KEY_VERSION as DEFAULT_SPOT_DEPOSIT_KEY_VERSION,
+)
 
 # Where the SQLite database is stored.
 DB_PATH = "records.db"
@@ -1564,11 +1562,8 @@ async def get_db():
     except Exception:
         # If something goes wrong halfway through a transaction,
         # roll back safely.
-        try:
+        with suppress(Exception):
             await db.rollback()
-        except Exception:
-            pass
-
         raise
 
     finally:

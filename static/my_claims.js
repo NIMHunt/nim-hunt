@@ -4,12 +4,16 @@ import {
     appendDetailDescription,
     appendSpotTitleWithLock,
     buildSpotLinkControl,
-    durationText,
     nimFromLunaText,
     spotPlaceText,
     unixToText,
-} from './spot_ui.js?v=small-polish-v1-20260705';
+} from './spot_ui.js?v=refactor-v1-20260716';
 import { createReusableSpotMap } from './spot_map.js';
+import {
+    createNoticePresenter,
+    getLanguage,
+    requestDeviceIdentifierHash,
+} from './browser_utils.js?v=refactor-v1-20260716';
 
 const APP_NAME = document.body.dataset.appName || 'NimHunt';
 const NIMIQ_PAY_URL = document.body.dataset.nimiqPayUrl || 'https://nimpay.app';
@@ -37,39 +41,16 @@ const els = {
     empty: document.getElementById('empty-my-claims'),
 };
 
-function getLanguage() {
-    const payLanguage = window.nimiqPay?.language;
-    if (typeof payLanguage === 'string' && payLanguage.length > 0) return payLanguage;
-    const browserLanguage = navigator.language || navigator.userLanguage;
-    return typeof browserLanguage === 'string' && browserLanguage ? browserLanguage.split('-')[0] : 'en';
-}
-
-function showNotice({ title, body, href = null, linkText = 'Read more', buttonText = 'OK' }) {
-    els.noticeTitle.textContent = title;
-    els.noticeBody.textContent = body;
-    els.noticeOk.textContent = buttonText;
-
-    if (href) {
-        els.noticeLink.textContent = linkText;
-        els.noticeLink.href = href;
-        els.noticeLink.hidden = false;
-    } else {
-        els.noticeLink.hidden = true;
-        els.noticeLink.removeAttribute('href');
-    }
-
-    els.noticeBackdrop.hidden = false;
-}
+const showNotice = createNoticePresenter(els);
 
 async function requestWalletDeviceId() {
     try {
-        const id = await requestDeviceIdentifier({ reason: `View the ${APP_NAME} claims made by this device.` });
-        if (typeof id === 'string' && /^[0-9a-fA-F]{64}$/.test(id)) {
-            state.walletAvailable = true;
-            state.deviceIdHash = id.toLowerCase();
-            return true;
-        }
-        throw new Error('Nimiq Pay returned an invalid device identifier.');
+        state.deviceIdHash = await requestDeviceIdentifierHash(
+            requestDeviceIdentifier,
+            `View the ${APP_NAME} claims made by this device.`,
+        );
+        state.walletAvailable = true;
+        return true;
     } catch (err) {
         state.walletAvailable = false;
         state.deviceIdHash = null;

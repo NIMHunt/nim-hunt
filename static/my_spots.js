@@ -11,13 +11,18 @@ import {
     nimFromLunaText,
     spotPlaceText,
     publicSpotUrl,
-    spotStatusText,
+    setCopyButtonIcon,
     spotScheduleSummary,
     unixToText,
-} from './spot_ui.js?v=small-polish-v1-20260705';
+} from './spot_ui.js?v=refactor-v1-20260716';
 import { createReusableSpotMap } from './spot_map.js';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { COMMON_TEXT, makeMySpotsText, SPOT_TEXT } from './interface_text.js?v=claim-polish-v2-20260704';
+import {
+    createNoticePresenter,
+    getLanguage,
+    requestDeviceIdentifierHash,
+} from './browser_utils.js?v=refactor-v1-20260716';
 
 const state = {
     deviceIdHash: null,
@@ -109,34 +114,10 @@ const els = {
     empty: document.getElementById('empty-my-spots'),
 };
 
-function getLanguage() {
-    const payLanguage = window.nimiqPay?.language;
-    if (typeof payLanguage === 'string' && payLanguage.length > 0) return payLanguage;
-
-    const browserLanguage = navigator.language || navigator.userLanguage;
-    if (typeof browserLanguage === 'string' && browserLanguage.length > 0) {
-        return browserLanguage.split('-')[0];
-    }
-
-    return 'en';
-}
-
-function showNotice({ title, body, href = null, linkText = COMMON_TEXT.notice.readMore, buttonText = COMMON_TEXT.notice.ok }) {
-    els.noticeTitle.textContent = title;
-    els.noticeBody.textContent = body;
-    els.noticeOk.textContent = buttonText;
-
-    if (href) {
-        els.noticeLink.textContent = linkText;
-        els.noticeLink.href = href;
-        els.noticeLink.hidden = false;
-    } else {
-        els.noticeLink.hidden = true;
-        els.noticeLink.removeAttribute('href');
-    }
-
-    els.noticeBackdrop.hidden = false;
-}
+const showNotice = createNoticePresenter(els, {
+    defaultLinkText: COMMON_TEXT.notice.readMore,
+    defaultButtonText: COMMON_TEXT.notice.ok,
+});
 
 function ensureMySpotsTooltip() {
     let tooltip = document.getElementById('my-spots-lock-tooltip');
@@ -456,17 +437,11 @@ async function submitCreateSpotForm(event) {
 
 async function requestWalletDeviceId() {
     try {
-        const id = await requestDeviceIdentifier({
-            reason: TEXT.nimiqPay.deviceIdReason,
-        });
-
-        if (typeof id === 'string' && /^[0-9a-fA-F]{64}$/.test(id)) {
-            state.walletAvailable = true;
-            state.deviceIdHash = id.toLowerCase();
-            return;
-        }
-
-        throw new Error('Nimiq Pay returned an invalid device identifier.');
+        state.deviceIdHash = await requestDeviceIdentifierHash(
+            requestDeviceIdentifier,
+            TEXT.nimiqPay.deviceIdReason,
+        );
+        state.walletAvailable = true;
     } catch (err) {
         state.walletAvailable = false;
         state.deviceIdHash = null;
@@ -682,30 +657,6 @@ function withFromMySpotsParam(url) {
 function spotHrefFromMySpots(spot) {
     if (!spot?.href || spot.status_label === 'draft') return spot?.href || '';
     return withFromMySpotsParam(spot.href);
-}
-
-const NIMIQ_ICON_SVG_NS = 'http://www.w3.org/2000/svg';
-const NIMIQ_ICON_SPRITE_PATH = '/static/nimiq-style.icons.svg';
-
-function createNimiqInlineIcon(iconName) {
-    const safeIconName = String(iconName || '').trim();
-    const svg = document.createElementNS(NIMIQ_ICON_SVG_NS, 'svg');
-    svg.classList.add('nq-icon', safeIconName, 'nh-inline-nimiq-icon');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('focusable', 'false');
-
-    const use = document.createElementNS(NIMIQ_ICON_SVG_NS, 'use');
-    const href = `${NIMIQ_ICON_SPRITE_PATH}#${safeIconName}`;
-    use.setAttribute('href', href);
-    use.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', href);
-    svg.append(use);
-
-    return svg;
-}
-
-function setCopyButtonIcon(button, iconName) {
-    if (!button) return;
-    button.replaceChildren(createNimiqInlineIcon(iconName));
 }
 
 function buildMySpotsSpotLinkControl(spot) {

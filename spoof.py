@@ -16,15 +16,15 @@ from __future__ import annotations
 
 import asyncio
 import time
-from pathlib import Path
+from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import constants as const
 import database as schema
-from database import get_db, init_db
 import db_access
-
+from database import get_db, init_db
 
 TEST_COUNTRY = "United Kingdom"
 
@@ -63,10 +63,8 @@ def _remove_existing_database_files() -> None:
         Path(f"{db_path}-wal"),
         Path(f"{db_path}-shm"),
     ):
-        try:
+        with suppress(FileNotFoundError):
             candidate.unlink()
-        except FileNotFoundError:
-            pass
 
 
 async def _insert_mock_user(db, user: MockUser, *, now: int) -> None:

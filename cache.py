@@ -31,13 +31,13 @@ from __future__ import annotations
 import asyncio
 import copy
 import time
+from collections.abc import Iterable
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 import constants as const
 import database as schema
-
 
 # ---------------------------------------------------------------------------
 # Types and cache state
@@ -1326,13 +1326,11 @@ async def _cache_refresher_loop() -> None:
         except Exception as e:
             _REFRESH_LAST_ERROR = repr(e)
 
-        try:
+        with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
                 _REFRESH_STOP_EVENT.wait(),
                 timeout=max(60, int(_REFRESH_INTERVAL_SECONDS)),
             )
-        except asyncio.TimeoutError:
-            pass
 
 
 async def start_cache_refresher(

@@ -16,14 +16,12 @@ import secrets
 from contextlib import suppress
 from typing import Any
 
+import cache
 import constants as const
 import database as schema
-from database import get_db
-
-import cache
 import db_access
 import trans_updater
-
+from database import get_db
 
 RowDict = dict[str, Any]
 

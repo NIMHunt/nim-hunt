@@ -2455,6 +2455,50 @@ async def get_prizedraw_winner_claim_ids(db, *, spot_id: int) -> list[int]:
     return [int(row["claim_id"]) for row in rows]
 
 
+async def get_unpaid_successful_standard_claim_ids(
+    db,
+    *,
+    spot_id: int | None = None,
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+) -> list[int]:
+    """Return successful standard claims without an active/confirmed payout.
+
+    Failed payout rows remain retryable and therefore do not exclude a claim.
+    A pending local intent or confirmed payout does exclude it, preserving the
+    database-backed idempotency guarantee across worker processes.
+    """
+    params: list[Any] = [const.CLAIM_STATUS_SUCCESS, const.TRANS_TYPE_CLAIM, const.TRANS_STATUS_FAILED]
+    spot_filter = ""
+    if spot_id is not None:
+        spot_filter = f"AND c.{schema.CLAIM_SPOT_ID} = ?"
+        params.append(int(spot_id))
+    params.extend([_clamp_limit(limit), _normalise_offset(offset)])
+
+    rows = await db.execute_fetchall(
+        f"""
+        SELECT c.{schema.CLAIM_ID} AS claim_id
+        FROM {schema.CLAIM_TABLE_NAME} c
+        LEFT JOIN {schema.PRIZEDRAW_TABLE_NAME} pd
+            ON pd.{schema.PRIZEDRAW_SPOT_ID} = c.{schema.CLAIM_SPOT_ID}
+        WHERE c.{schema.CLAIM_STATUS} = ?
+          AND pd.{schema.PRIZEDRAW_SPOT_ID} IS NULL
+          AND NOT EXISTS (
+                SELECT 1
+                FROM {schema.TRANS_TABLE_NAME} t
+                WHERE t.{schema.TRANS_CLAIM_ID} = c.{schema.CLAIM_ID}
+                  AND t.{schema.TRANS_TYPE} = ?
+                  AND t.{schema.TRANS_STATUS} != ?
+          )
+          {spot_filter}
+        ORDER BY c.{schema.CLAIM_CLAIMED_AT} ASC, c.{schema.CLAIM_ID} ASC
+        LIMIT ? OFFSET ?;
+        """,
+        tuple(params),
+    )
+    return [int(row["claim_id"]) for row in rows]
+
+
 async def get_completed_prizedraw_spot_ids_with_pending_winners(
     db,
     *,
@@ -3432,11 +3476,17 @@ async def modify_transaction_status(db, *, trans_id: int, status: int) -> None:
         f"""
         UPDATE {schema.TRANS_TABLE_NAME}
         SET {schema.TRANS_STATUS} = ?
-        WHERE {schema.TRANS_ID} = ?;
+        WHERE {schema.TRANS_ID} = ?
+          AND {schema.TRANS_STATUS} = ?;
         """,
-        (int(status), int(trans_id)),
+        (int(status), int(trans_id), const.TRANS_STATUS_PENDING),
     )
-    _require_one(cur.rowcount, f"Failed to update transaction status id={trans_id}")
+    if cur.rowcount == 1:
+        return
+    current = await get_transaction(db, trans_id=int(trans_id))
+    if current is not None and int(current[schema.TRANS_STATUS]) == int(status):
+        return
+    _require_one(cur.rowcount, f"Failed to update pending transaction status id={trans_id}")
 
 
 async def set_transaction_status_to_confirmed(
@@ -3451,11 +3501,22 @@ async def set_transaction_status_to_confirmed(
         SET {schema.TRANS_STATUS} = ?,
             {schema.TRANS_BLOCK_NUMBER} = ?,
             {schema.TRANS_COMPLETED_AT} = COALESCE({schema.TRANS_COMPLETED_AT}, unixepoch())
-        WHERE {schema.TRANS_ID} = ?;
+        WHERE {schema.TRANS_ID} = ?
+          AND {schema.TRANS_STATUS} = ?;
         """,
-        (const.TRANS_STATUS_CONFIRMED, int(block_number), int(trans_id)),
+        (
+            const.TRANS_STATUS_CONFIRMED,
+            int(block_number),
+            int(trans_id),
+            const.TRANS_STATUS_PENDING,
+        ),
     )
-    _require_one(cur.rowcount, f"Failed to confirm transaction id={trans_id}")
+    if cur.rowcount == 1:
+        return
+    current = await get_transaction(db, trans_id=int(trans_id))
+    if current is not None and int(current[schema.TRANS_STATUS]) == const.TRANS_STATUS_CONFIRMED:
+        return
+    _require_one(cur.rowcount, f"Failed to confirm pending transaction id={trans_id}")
 
 
 async def set_transaction_status_to_failed(db, *, trans_id: int) -> None:
@@ -3464,11 +3525,17 @@ async def set_transaction_status_to_failed(db, *, trans_id: int) -> None:
         UPDATE {schema.TRANS_TABLE_NAME}
         SET {schema.TRANS_STATUS} = ?,
             {schema.TRANS_COMPLETED_AT} = COALESCE({schema.TRANS_COMPLETED_AT}, unixepoch())
-        WHERE {schema.TRANS_ID} = ?;
+        WHERE {schema.TRANS_ID} = ?
+          AND {schema.TRANS_STATUS} = ?;
         """,
-        (const.TRANS_STATUS_FAILED, int(trans_id)),
+        (const.TRANS_STATUS_FAILED, int(trans_id), const.TRANS_STATUS_PENDING),
     )
-    _require_one(cur.rowcount, f"Failed to fail transaction id={trans_id}")
+    if cur.rowcount == 1:
+        return
+    current = await get_transaction(db, trans_id=int(trans_id))
+    if current is not None and int(current[schema.TRANS_STATUS]) == const.TRANS_STATUS_FAILED:
+        return
+    _require_one(cur.rowcount, f"Failed to fail pending transaction id={trans_id}")
 
 
 # ---------------------------------------------------------------------------

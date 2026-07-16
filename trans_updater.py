@@ -207,6 +207,18 @@ def _is_local_intent_hash(tx_hash: str) -> bool:
     return str(tx_hash or "").startswith(LOCAL_TRANSACTION_INTENT_PREFIX)
 
 
+_SERVER_INITIATED_TRANSACTION_TYPES = frozenset({
+    const.TRANS_TYPE_CANCEL_SPOT,
+    const.TRANS_TYPE_CLAIM,
+    const.TRANS_TYPE_PLAT_FEE,
+})
+
+
+def _is_server_initiated_transaction(trans: RowDict) -> bool:
+    """Return True when retrying this row could send NimHunt funds twice."""
+    return int(trans.get(schema.TRANS_TYPE) or -1) in _SERVER_INITIATED_TRANSACTION_TYPES
+
+
 def _normalise_address_for_compare(value: Any) -> str | None:
     """Return a comparable canonical address, or None if value is unusable."""
     raw = str(value or "").strip()
@@ -222,6 +234,46 @@ def _normalise_address_for_compare(value: Any) -> str | None:
         )
     except ValueError:
         return None
+
+
+def _validate_submitted_chain_send(
+    result: SubmittedChainTransaction,
+    *,
+    expected_from_address: str,
+    expected_to_address: str,
+    expected_amount: int,
+) -> SubmittedChainTransaction:
+    """Require the helper result to match the payment NimHunt intended.
+
+    The durable outbox row is created from NimHunt's own expected values. A
+    helper is allowed to return canonical formatting, but it must not be able to
+    replace the recipient or amount before later blockchain verification.
+    """
+    tx_hash = str(result.tx_hash or "").strip()
+    if not tx_hash or _is_local_intent_hash(tx_hash):
+        raise RuntimeError("Nimiq helper returned an invalid transaction hash")
+
+    expected_from = _validate_nimiq_address(expected_from_address, field_name="expected from_address")
+    expected_to = _validate_nimiq_address(expected_to_address, field_name="expected to_address")
+    actual_from = _validate_nimiq_address(result.from_address, field_name="helper from_address")
+    actual_to = _validate_nimiq_address(result.to_address, field_name="helper to_address")
+    actual_amount = int(result.amount)
+    expected_amount = int(expected_amount)
+
+    if actual_from != expected_from:
+        raise RuntimeError("Nimiq helper returned a sender that does not match the intended payment")
+    if actual_to != expected_to:
+        raise RuntimeError("Nimiq helper returned a recipient that does not match the intended payment")
+    if actual_amount != expected_amount:
+        raise RuntimeError("Nimiq helper returned an amount that does not match the intended payment")
+
+    return SubmittedChainTransaction(
+        tx_hash=tx_hash,
+        from_address=actual_from,
+        to_address=actual_to,
+        amount=actual_amount,
+        raw=result.raw,
+    )
 
 
 def _walk_json(value: Any):
@@ -356,8 +408,16 @@ def _verify_chain_details_for_record(trans: RowDict, status: ChainTransactionSta
     if chain_to != expected_to:
         return VerifiedChainDetails(ok=False, reason="confirmed transaction recipient does not match expected recipient")
 
-    if int(chain_amount) < expected_amount:
-        return VerifiedChainDetails(ok=False, reason="confirmed transaction amount is lower than recorded amount")
+    trans_type = int(trans.get(schema.TRANS_TYPE) or -1)
+    if trans_type == const.TRANS_TYPE_FILL_SPOT:
+        # A creator may deliberately overfund a Spot. The confirmed chain amount
+        # becomes the authoritative deposited value after verification.
+        if int(chain_amount) < expected_amount:
+            return VerifiedChainDetails(ok=False, reason="confirmed transaction amount is lower than recorded amount")
+    elif int(chain_amount) != expected_amount:
+        # Outgoing claim/refund/fee sends must match the exact recorded intent.
+        # Accepting an overpayment would make a bad helper result look legitimate.
+        return VerifiedChainDetails(ok=False, reason="confirmed outgoing transaction amount does not match recorded amount")
 
     return VerifiedChainDetails(
         ok=True,
@@ -494,6 +554,12 @@ async def _submit_recorded_chain_send(
             to_address=clean_to_address,
             amount=amount,
             memo=memo,
+        )
+        result = _validate_submitted_chain_send(
+            result,
+            expected_from_address=from_address,
+            expected_to_address=clean_to_address,
+            expected_amount=amount,
         )
     except Exception as exc:
         # Do not mark the intent failed automatically. With real chain sends, a
@@ -876,11 +942,18 @@ async def check_pending_transaction(
         return chain_status
 
     if _transaction_age_seconds(trans) >= int(fail_after_seconds):
+        # A missing RPC result is not proof that a broadcast transaction failed.
+        # Marking the database row FAILED would release the uniqueness guard and
+        # could permit a second payment/deposit while the first later confirms.
+        # Keep the row pending and surface it for manual reconciliation instead.
         return ChainTransactionStatus(
-            status="failed",
+            status="unknown",
             tx_hash=tx_hash,
             raw=chain_status.raw,
-            reason=f"hash not confirmed after {int(fail_after_seconds)} seconds",
+            reason=(
+                f"hash is still not visible after {int(fail_after_seconds)} seconds; "
+                "transaction remains pending until failure is proven or an administrator reconciles it"
+            ),
         )
 
     return chain_status
@@ -1094,7 +1167,23 @@ async def check_pending_transactions(
                     timeout_seconds=int(timeout_seconds),
                 )
                 if not verified.ok:
-                    finalised.append(await mark_trans_as_failed(db, trans, reason=verified.reason))
+                    reason = verified.reason or "confirmed transaction details could not be verified"
+                    uncertain_proof = (
+                        _verification_failed_because_unstructured(reason)
+                        or "proof failed" in reason.lower()
+                        or "not found in expected address transaction history" in reason.lower()
+                    )
+                    if _is_server_initiated_transaction(trans) or uncertain_proof:
+                        # The hash was found on-chain. Never release an outgoing
+                        # payment's uniqueness guard merely because an RPC shape
+                        # or helper detail is unexpected; that could double-pay.
+                        checked[-1]["status"] = "unknown"
+                        checked[-1]["reason"] = reason
+                        unknown.append({"trans_id": _transaction_id(trans), "reason": reason})
+                    else:
+                        # A definitively wrong user deposit does not fund the
+                        # Spot and may safely be rejected.
+                        finalised.append(await mark_trans_as_failed(db, trans, reason=reason))
                     continue
 
                 finalised.append(
@@ -1339,12 +1428,26 @@ async def submit_spot_cancellation_transactions(
 
     try:
         await db.execute("BEGIN IMMEDIATE;")
-        await db_access.mark_spot_cancellation_started(db, spot_id=int(spot_id))
         spot = await db_access.get_spot(db, spot_id=int(spot_id))
         if spot is None:
             raise ValueError(f"spot id={spot_id} does not exist")
         if int(spot[schema.SPOT_STATUS]) != const.SPOT_STATUS_PUBLISHED:
             raise ValueError("only published spots can be cancelled")
+
+        unpaid_claim_ids = await db_access.get_unpaid_successful_standard_claim_ids(
+            db,
+            spot_id=int(spot_id),
+            limit=db_access.MAX_LIMIT,
+        )
+        if unpaid_claim_ids:
+            raise ValueError(
+                "This spot has successful claims whose reward payment has not yet been safely recorded. "
+                "Wait for settlement to create or retry those payouts before cancelling."
+            )
+
+        # The write lock prevents a claim from slipping between this check and
+        # the durable marker. Once marked, the database trigger rejects inserts.
+        await db_access.mark_spot_cancellation_started(db, spot_id=int(spot_id))
 
         transactions = await db_access.get_transactions_by_spot(db, spot_id=int(spot_id), limit=db_access.MAX_LIMIT)
         confirmed_deposits = [

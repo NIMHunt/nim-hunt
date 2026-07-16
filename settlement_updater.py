@@ -30,6 +30,7 @@ RowDict = dict[str, Any]
 DEFAULT_SETTLEMENT_INTERVAL_SECONDS = int(getattr(const, "SETTLEMENT_INTERVAL_SECONDS", 60))
 DEFAULT_MAX_SETTLEMENTS_PER_RUN = int(getattr(const, "MAX_SETTLEMENTS_PER_RUN", 50))
 DEFAULT_MAX_DURATION_CLAIMS_PER_RUN = int(getattr(const, "MAX_DURATION_CLAIMS_PER_RUN", 200))
+DEFAULT_MAX_STANDARD_PAYOUTS_PER_RUN = int(getattr(const, "MAX_STANDARD_PAYOUTS_PER_RUN", 200))
 
 _SETTLEMENT_TASK: asyncio.Task | None = None
 _SETTLEMENT_STOP_EVENT: asyncio.Event | None = None
@@ -82,6 +83,98 @@ def _prize_amounts_by_claim_id(*, total_value: int, prize_count: int, winner_cla
         winner_count=len(clean_ids),
     )
     return {claim_id: int(amount) for claim_id, amount in zip(clean_ids, amounts)}
+
+
+def _standard_claim_payout_amount(spot: RowDict) -> int:
+    """Return the fixed Luna reward for one standard Spot claim."""
+    max_total_claims = int(spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) or 0)
+    if max_total_claims <= 0:
+        return 0
+    return int(spot.get(schema.SPOT_TOTAL_VALUE) or 0) // max_total_claims
+
+
+async def payout_standard_claim_if_ready(*, claim_id: int) -> RowDict:
+    """Create/broadcast the missing payout for one successful standard claim.
+
+    The query and the TRANSACTION partial unique index make this safe to call
+    from the HTTP route and background recovery workers at the same time.
+    """
+    claim_id = int(claim_id)
+    try:
+        async with get_db() as db:
+            claim = await db_access.get_claim(db, claim_id=claim_id)
+            if claim is None:
+                return {"ok": False, "claim_id": claim_id, "paid": False, "reason": "claim_missing"}
+            if int(claim.get(schema.CLAIM_STATUS) or -1) != const.CLAIM_STATUS_SUCCESS:
+                return {"ok": True, "claim_id": claim_id, "paid": False, "reason": "claim_not_successful"}
+
+            spot = await db_access.get_spot(db, spot_id=int(claim[schema.CLAIM_SPOT_ID]))
+            if spot is None:
+                return {"ok": False, "claim_id": claim_id, "paid": False, "reason": "spot_missing"}
+            if await db_access.is_prizedraw(db, spot_id=int(spot[schema.SPOT_ID])):
+                return {"ok": True, "claim_id": claim_id, "paid": False, "reason": "prizedraw_managed_separately"}
+            if await db_access.has_nonfailed_claim_payout_transaction(db, claim_id=claim_id):
+                return {"ok": True, "claim_id": claim_id, "paid": False, "already_exists": True}
+
+            retry_amount = await db_access.latest_failed_claim_payout_amount(db, claim_id=claim_id)
+            amount = int(retry_amount or _standard_claim_payout_amount(spot))
+            if amount <= 0:
+                return {"ok": False, "claim_id": claim_id, "paid": False, "reason": "invalid_payout_amount"}
+
+        async with get_db() as send_db:
+            try:
+                result = await trans_updater.submit_claim_reward_transaction(
+                    send_db,
+                    claim_id=claim_id,
+                    amount=amount,
+                )
+            except RuntimeError as exc:
+                # Only a uniqueness-guard failure proves that another worker
+                # won the race. A helper/broadcast failure may leave our own
+                # local intent pending and must remain visible as an error.
+                duplicate_guard_hit = "already has a non-failed payout transaction" in str(exc)
+                if (
+                    duplicate_guard_hit
+                    and await db_access.has_nonfailed_claim_payout_transaction(send_db, claim_id=claim_id)
+                ):
+                    return {
+                        "ok": True,
+                        "claim_id": claim_id,
+                        "paid": False,
+                        "already_exists": True,
+                        "reason": "concurrent_payout_already_recorded",
+                    }
+                raise
+
+        return {
+            **result,
+            "ok": bool(result.get("ok")),
+            "claim_id": claim_id,
+            "paid": bool(result.get("ok") and not result.get("already_exists")),
+        }
+    except Exception as exc:
+        return {"ok": False, "claim_id": claim_id, "paid": False, "reason": repr(exc)}
+
+
+async def retry_unpaid_standard_claim_payouts(
+    *,
+    max_claims: int = DEFAULT_MAX_STANDARD_PAYOUTS_PER_RUN,
+) -> RowDict:
+    """Recover successful standard claims left unpaid by a crash or send failure."""
+    async with get_db() as db:
+        claim_ids = await db_access.get_unpaid_successful_standard_claim_ids(
+            db,
+            limit=int(max_claims),
+        )
+
+    results = [await payout_standard_claim_if_ready(claim_id=claim_id) for claim_id in claim_ids]
+    return {
+        "ok": all(bool(result.get("ok")) for result in results),
+        "checked_count": len(claim_ids),
+        "submitted_count": sum(1 for result in results if result.get("paid")),
+        "failed_count": sum(1 for result in results if not result.get("ok")),
+        "results": results,
+    }
 
 
 async def _ready_prizedraw_spot_ids(db, *, limit: int = DEFAULT_MAX_SETTLEMENTS_PER_RUN) -> list[int]:
@@ -416,15 +509,18 @@ async def settle_pending_duration_claims(*, max_claims: int = DEFAULT_MAX_DURATI
 async def run_settlement_pass() -> RowDict:
     """Run all app-level settlement work once."""
     duration_result = await settle_pending_duration_claims()
+    standard_payout_result = await retry_unpaid_standard_claim_payouts()
     prizedraw_result = await settle_ready_prizedraws()
     payout_retry_result = await retry_pending_prizedraw_payouts()
     return {
         "ok": (
             bool(duration_result.get("ok"))
+            and bool(standard_payout_result.get("ok"))
             and bool(prizedraw_result.get("ok"))
             and bool(payout_retry_result.get("ok"))
         ),
         "duration_claims": duration_result,
+        "standard_claim_payouts": standard_payout_result,
         "prizedraws": prizedraw_result,
         "prizedraw_payout_retries": payout_retry_result,
     }

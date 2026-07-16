@@ -1252,7 +1252,7 @@ def _claim_reward_amount(spot: dict[str, Any], *, is_prizedraw: bool) -> int:
         divisor = max(1, int(spot.get(schema.PRIZEDRAW_PRIZE_COUNT) or 1))
     else:
         divisor = max(1, int(spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) or 1))
-    return int(total_value / divisor)
+    return total_value // divisor
 
 
 def _claim_payout_summary(claim_transactions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -1640,6 +1640,9 @@ async def claim_spot_api(spot_id: int, payload: ClaimSpotRequest) -> JSONRespons
         await _notify_capacity_cleanup_cache(db, cleanup=claim.get("capacity_cleanup") if isinstance(claim, dict) else None)
 
         if settlement_updater is not None:
+            await settlement_updater.payout_standard_claim_if_ready(
+                claim_id=int(claim[schema.CLAIM_ID])
+            )
             await settlement_updater.settle_prizedraw_spot_if_ready(spot_id=int(spot_id))
 
         refreshed_claim = await db_access.get_claim(db, claim_id=int(claim[schema.CLAIM_ID]))
@@ -1746,6 +1749,7 @@ async def claim_location_heartbeat_api(claim_id: int, payload: HomeSessionReques
         await _notify_capacity_cleanup_cache(db, cleanup=claim.get("capacity_cleanup") if isinstance(claim, dict) else None)
 
     if settlement_updater is not None and int(claim.get(schema.CLAIM_STATUS) or const.CLAIM_STATUS_PENDING) == const.CLAIM_STATUS_SUCCESS:
+        await settlement_updater.payout_standard_claim_if_ready(claim_id=int(claim_id))
         await settlement_updater.settle_prizedraw_spot_if_ready(spot_id=int(claim[schema.CLAIM_SPOT_ID]))
 
     async with get_db() as db:

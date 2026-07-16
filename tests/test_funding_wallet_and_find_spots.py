@@ -77,6 +77,7 @@ class FundingWalletDatabaseTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("original funding wallet", result["reason"])
             self.assertEqual(int(wrong_after[schema.TRANS_STATUS]), const.TRANS_STATUS_FAILED)
             self.assertEqual(wrong_after[schema.TRANS_FROM_ADDRESS], "wallet-b")
+            self.assertEqual(int(wrong_after[schema.TRANS_BLOCK_NUMBER]), 2)
             self.assertEqual(
                 await db_access.get_confirmed_spot_funding_address(db, spot_id=spot_id),
                 "wallet-a",

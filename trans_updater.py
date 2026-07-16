@@ -1077,6 +1077,7 @@ async def mark_trans_as_confirmed(
                 from_address=verified_details.from_address,
                 to_address=verified_details.to_address,
                 amount=verified_details.amount,
+                block_number=block_number,
             )
 
         if funding_mismatch_reason is not None:

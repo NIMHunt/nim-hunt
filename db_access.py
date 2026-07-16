@@ -3296,6 +3296,7 @@ async def update_transaction_chain_details(
     from_address: str | None = None,
     to_address: str | None = None,
     amount: int | None = None,
+    block_number: int | None = None,
 ) -> None:
     """Update chain-facing TRANSACTION details before final status changes.
 
@@ -3332,6 +3333,13 @@ async def update_transaction_chain_details(
             raise ValueError("amount must be non-negative")
         updates.append(f"{schema.TRANS_AMOUNT} = ?")
         params.append(amount_i)
+
+    if block_number is not None:
+        block_number_i = int(block_number)
+        if block_number_i < 0:
+            raise ValueError("block_number must be non-negative")
+        updates.append(f"{schema.TRANS_BLOCK_NUMBER} = ?")
+        params.append(block_number_i)
 
     if not updates:
         return

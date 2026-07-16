@@ -30,6 +30,7 @@ jobs:
           install_status=$?
 
           if [ "$install_status" -eq 0 ]; then
+            sed -i 's/title="Funding Wallet Spot"/title="Funding Spot"/' .nimhunt_patch_wallet_availability.py
             python .nimhunt_patch_wallet_availability.py >> "$log" 2>&1
             patch_status=$?
           else

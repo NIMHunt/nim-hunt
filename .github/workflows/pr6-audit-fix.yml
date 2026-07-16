@@ -1,0 +1,40 @@
+name: Verify PR 6 audit detail
+
+on: push
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/restrict-funding-wallet-and-spot-availability
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply, test, and publish
+        shell: bash
+        run: |
+          set -e
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python .pr6_audit_patch.py
+          python -m py_compile database.py db_access.py trans_updater.py public_html.py tests/test_funding_wallet_and_find_spots.py
+          node --check static/find_spots.js
+          bash -n nimhunt_start_dev.sh
+          bash -n nimhunt_reset_mock_data.sh
+          git diff --check
+          python -m unittest discover -s tests -v
+
+          rm -f .github/workflows/pr6-audit-fix.yml .pr6_audit_patch.py .pr6-audit-trigger
+          git config user.name "NimHunt Review Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Preserve rejected deposit block details"
+          git push origin HEAD:agent/restrict-funding-wallet-and-spot-availability

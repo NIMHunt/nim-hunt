@@ -1,16 +1,12 @@
 name: Apply wallet and availability fixes
 
-on:
-  push:
-    branches:
-      - agent/restrict-funding-wallet-and-spot-availability
+on: push
 
 permissions:
   contents: write
 
 jobs:
   verify:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +41,7 @@ jobs:
         shell: bash
         run: |
           rm -f .github/workflows/apply-wallet-availability-fix.yml
-          rm -f .nimhunt_patch_wallet_availability.py .wallet-availability-trigger
+          rm -f .nimhunt_patch_wallet_availability.py .wallet-availability-trigger .wallet-availability-trigger-2
           git config user.name "NimHunt Review Bot"
           git config user.email "actions@users.noreply.github.com"
           git add -A

@@ -1515,6 +1515,31 @@ async def get_confirmed_spot_deposit_total(db, *, spot_id: int) -> int:
     return int(row["amount"] or 0)
 
 
+async def get_confirmed_spot_funding_address(db, *, spot_id: int) -> str | None:
+    """Return the first confirmed on-chain sender for a Spot's deposits.
+
+    This address becomes the Spot's funding wallet. Later top-ups must come from
+    the same wallet so cancellation can safely refund one known contributor.
+    """
+    cur = await db.execute(
+        f"""
+        SELECT {schema.TRANS_FROM_ADDRESS} AS from_address
+        FROM {schema.TRANS_TABLE_NAME}
+        WHERE {schema.TRANS_SPOT_ID} = ?
+          AND {schema.TRANS_TYPE} = ?
+          AND {schema.TRANS_STATUS} = ?
+          AND TRIM({schema.TRANS_FROM_ADDRESS}) != ''
+        ORDER BY {schema.TRANS_CREATED_AT} ASC, {schema.TRANS_ID} ASC
+        LIMIT 1;
+        """,
+        (int(spot_id), const.TRANS_TYPE_FILL_SPOT, const.TRANS_STATUS_CONFIRMED),
+    )
+    row = await cur.fetchone()
+    if row is None or not row["from_address"]:
+        return None
+    return str(row["from_address"]).strip()
+
+
 async def count_spot_deposit_transactions(db, *, spot_id: int) -> int:
     """Return how many FILL_SPOT transactions have ever been submitted."""
     cur = await db.execute(
@@ -2643,22 +2668,30 @@ async def get_claim_rule_check(
     *,
     spot_id: int,
     user_id: int,
-    lat: float,
-    long: float,
+    lat: float | None,
+    long: float | None,
     location_accuracy_metres: float | None = None,
 ) -> RowDict:
-    """Return a compact claim outcome check without writing anything."""
+    """Return a compact claim outcome check without writing anything.
+
+    Location is optional so Find Spots can still report permanent blockers such
+    as ownership, exhausted capacity, or the user's claim limit. Those blockers
+    deliberately take precedence over the temporary absence of a GPS reading.
+    """
     user_ok = await can_user_claim(db, user_id=user_id)
     public = await get_public_spot(db, spot_id=spot_id)
     spot = await get_spot(db, spot_id=spot_id)
     own_spot = bool(spot and int(spot[schema.SPOT_CREATED_BY]) == int(user_id))
-    distance_check = await get_claim_distance_check(
-        db,
-        spot_id=spot_id,
-        lat=lat,
-        long=long,
-        location_accuracy_metres=location_accuracy_metres,
-    )
+    location_known = lat is not None and long is not None
+    distance_check = None
+    if location_known:
+        distance_check = await get_claim_distance_check(
+            db,
+            spot_id=spot_id,
+            lat=float(lat),
+            long=float(long),
+            location_accuracy_metres=location_accuracy_metres,
+        )
     capacity_ok = await is_spot_claim_capacity_available(db, spot_id=spot_id)
     user_limit_ok = not await has_user_reached_claim_limit(db, spot_id=spot_id, user_id=user_id)
     cancellation_pending = await has_spot_cancellation_started(db, spot_id=spot_id)
@@ -2680,24 +2713,28 @@ async def get_claim_rule_check(
     elif not spot_current:
         reason = "not_active"
         message = "This spot is not active right now."
-    elif not within_radius:
-        reason = "outside_radius"
-        message = "Move inside the spot radius to claim."
     elif not capacity_ok:
         reason = "capacity_full"
         message = "This spot has no remaining claim capacity."
     elif not user_limit_ok:
         reason = "user_limit_reached"
         message = "You have already reached your claim limit for this spot."
+    elif not location_known:
+        reason = "location_unknown"
+        message = "Your location is unknown."
+    elif not within_radius:
+        reason = "outside_radius"
+        message = "Move inside the spot radius to claim."
 
     allowed = bool(
         user_ok
         and not own_spot
         and not cancellation_pending
         and spot_current
-        and within_radius
         and capacity_ok
         and user_limit_ok
+        and location_known
+        and within_radius
     )
 
     return {
@@ -2708,6 +2745,7 @@ async def get_claim_rule_check(
         "own_spot": own_spot,
         "spot_current": spot_current,
         "cancellation_pending": cancellation_pending,
+        "location_known": location_known,
         "within_radius": within_radius,
         "capacity_ok": capacity_ok,
         "user_limit_ok": user_limit_ok,

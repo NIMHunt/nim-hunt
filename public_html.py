@@ -1542,9 +1542,6 @@ async def spots_claim_status_api(payload: ClaimStatusRequest) -> JSONResponse:
         if user is None:
             return JSONResponse({**meta, "statuses": {}}, status_code=http_status)
 
-        if payload.lat is None or payload.long is None:
-            return JSONResponse({**meta, "ok": True, "user": _public_user(user), "statuses": {}})
-
         now = await db_access.get_unixepoch(db)
         statuses: dict[str, Any] = {}
         for spot_id in ids:
@@ -1555,8 +1552,8 @@ async def spots_claim_status_api(payload: ClaimStatusRequest) -> JSONResponse:
                 db,
                 spot_id=spot_id,
                 user_id=int(user[schema.USER_ID]),
-                lat=float(payload.lat),
-                long=float(payload.long),
+                lat=None if payload.lat is None else float(payload.lat),
+                long=None if payload.long is None else float(payload.long),
                 location_accuracy_metres=payload.accuracy,
             )
             allowed = bool(rule.get("allowed"))
@@ -1572,6 +1569,7 @@ async def spots_claim_status_api(payload: ClaimStatusRequest) -> JSONResponse:
                 "message": rule.get("message"),
                 "action": _claim_action_label_for_spot(spot, allowed=allowed),
                 "kind": _claim_kind_for_spot(spot, allowed=allowed),
+                "location_known": bool(rule.get("location_known")),
                 "within_radius": bool(rule.get("within_radius")),
                 "requires_password": bool(int(spot.get(schema.SPOT_USE_PASSWORD) or 0)),
                 "requires_duration": int(spot.get(schema.SPOT_CLAIM_DURATION) or 0) > 0,

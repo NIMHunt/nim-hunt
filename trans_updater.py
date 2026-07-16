@@ -1036,13 +1036,41 @@ async def mark_trans_as_confirmed(
     block_number: int | None = None,
     verified_details: VerifiedChainDetails | None = None,
 ) -> RowDict:
-    """Mark a TRANSACTION confirmed in the DB, then remove it from pending cache."""
+    """Mark a TRANSACTION confirmed without permitting mixed-wallet deposits.
+
+    A BEGIN IMMEDIATE lock serialises confirmation of competing deposits. The
+    first confirmed on-chain sender becomes the Spot's funding wallet; a later
+    deposit from another sender is retained for audit but marked FAILED so it
+    cannot fund claims or be included in the creator's cancellation refund.
+    """
     trans_id = _transaction_id(trans)
     completed_prizedraw_payout = await _claim_transaction_is_completed_prizedraw_payout(db, trans)
     claim_id = trans.get(schema.TRANS_CLAIM_ID)
+    trans_type = int(trans.get(schema.TRANS_TYPE) or -1)
+    spot_id = trans.get(schema.TRANS_SPOT_ID)
+    funding_mismatch_reason: str | None = None
+    cancelled_finalized = False
 
-    async with db_access.transaction(db):
+    try:
+        await db.execute("BEGIN IMMEDIATE;")
+
         if verified_details is not None and verified_details.ok:
+            if trans_type == const.TRANS_TYPE_FILL_SPOT and spot_id is not None:
+                funding_address = await db_access.get_confirmed_spot_funding_address(
+                    db,
+                    spot_id=int(spot_id),
+                )
+                if funding_address is not None:
+                    established_sender = _normalise_address_for_compare(funding_address)
+                    confirmed_sender = _normalise_address_for_compare(verified_details.from_address)
+                    if established_sender is None or confirmed_sender != established_sender:
+                        funding_mismatch_reason = (
+                            "confirmed deposit used a different wallet than the Spot's original funding wallet"
+                        )
+
+            # Keep the actual chain facts even when the funding-policy check
+            # rejects this deposit. That leaves a complete audit trail for any
+            # manual recovery of funds sent from the wrong wallet.
             await db_access.update_transaction_chain_details(
                 db,
                 trans_id=trans_id,
@@ -1051,42 +1079,56 @@ async def mark_trans_as_confirmed(
                 amount=verified_details.amount,
             )
 
-        if block_number is None:
-            await db_access.modify_transaction_status(
-                db,
-                trans_id=trans_id,
-                status=const.TRANS_STATUS_CONFIRMED,
-            )
+        if funding_mismatch_reason is not None:
+            await db_access.set_transaction_status_to_failed(db, trans_id=trans_id)
         else:
-            await db_access.set_transaction_status_to_confirmed(
-                db,
-                trans_id=trans_id,
-                block_number=int(block_number),
+            if block_number is None:
+                await db_access.modify_transaction_status(
+                    db,
+                    trans_id=trans_id,
+                    status=const.TRANS_STATUS_CONFIRMED,
+                )
+            else:
+                await db_access.set_transaction_status_to_confirmed(
+                    db,
+                    trans_id=trans_id,
+                    block_number=int(block_number),
+                )
+
+            # In the revised Prizedraw model, selected winners stay PENDING until
+            # their payout transaction confirms. Losers are already SUCCESS.
+            if completed_prizedraw_payout and claim_id is not None:
+                await db_access.set_claim_status_to_success(db, claim_id=int(claim_id))
+            cancelled_finalized = await _finalize_cancelled_spot_if_ready(
+                db, spot_id=spot_id
             )
 
-        # In the revised Prizedraw model, selected winners stay PENDING until
-        # their payout transaction confirms. Losers are already SUCCESS.
-        if completed_prizedraw_payout and claim_id is not None:
-            await db_access.set_claim_status_to_success(db, claim_id=int(claim_id))
-        cancelled_finalized = await _finalize_cancelled_spot_if_ready(
-            db, spot_id=trans.get(schema.TRANS_SPOT_ID)
-        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
 
     await cache.notify_transaction_changed(
         db,
         trans_id=trans_id,
-        spot_id=trans.get(schema.TRANS_SPOT_ID),
+        spot_id=spot_id,
         user_id=trans.get(schema.TRANS_USER_ID),
     )
-    if completed_prizedraw_payout and claim_id is not None:
+    if completed_prizedraw_payout and claim_id is not None and funding_mismatch_reason is None:
         await cache.notify_claim_changed(
             db,
-            spot_id=trans.get(schema.TRANS_SPOT_ID),
+            spot_id=spot_id,
             user_id=trans.get(schema.TRANS_USER_ID),
         )
     if cancelled_finalized:
-        await cache.notify_spot_changed(db, spot_id=trans.get(schema.TRANS_SPOT_ID))
+        await cache.notify_spot_changed(db, spot_id=spot_id)
 
+    if funding_mismatch_reason is not None:
+        return {
+            "trans_id": trans_id,
+            "status": "failed",
+            "reason": funding_mismatch_reason,
+        }
     return {"trans_id": trans_id, "status": "confirmed", "block_number": block_number}
 
 
@@ -1320,6 +1362,18 @@ async def record_spot_deposit_transaction(
         if not getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False):
             raise
         clean_from_address = str(from_address or "Nimiq Pay").strip() or "Nimiq Pay"
+
+    funding_address = await db_access.get_confirmed_spot_funding_address(
+        db,
+        spot_id=int(spot_id),
+    )
+    if funding_address is not None:
+        established_sender = _normalise_address_for_compare(funding_address)
+        submitted_sender = _normalise_address_for_compare(clean_from_address)
+        if established_sender is None or submitted_sender != established_sender:
+            raise ValueError(
+                "Additional deposits for this Spot must come from its original funding wallet."
+            )
 
     trans_id = await db_access.create_spot_deposit_transaction(
         db,

@@ -1,9 +1,9 @@
 name: QoL Snapshot
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/readme-prizedraw-localisation
+      - main
 
 permissions:
   contents: read

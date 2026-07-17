@@ -1,0 +1,33 @@
+name: Public Testnet Snapshot
+
+on:
+  push:
+    branches:
+      - agent/public-testnet-deployment
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create source archive
+        run: |
+          tar \
+            --exclude=.git \
+            --exclude=venv \
+            --exclude='**/__pycache__' \
+            --exclude='*.pyc' \
+            --exclude=records.db \
+            -czf /tmp/nimhunt-public-testnet-source.tar.gz .
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: nimhunt-public-testnet-source
+          path: /tmp/nimhunt-public-testnet-source.tar.gz
+          retention-days: 1

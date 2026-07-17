@@ -70,10 +70,11 @@ jobs:
           for file in helpers/*.mjs; do node --check "$file"; done
           for file in *.sh; do bash -n "$file"; done
 
-      - name: Check Python dependencies
-        run: |
-          python -m pip check
-          python -m pip_audit
+      - name: Check installed Python dependencies
+        run: python -m pip check
+
+      - name: Audit Python dependencies
+        run: python -m pip_audit
 
       - name: Audit Nimiq helper dependencies
         run: npm audit --omit=dev --prefix helpers

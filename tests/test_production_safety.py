@@ -372,9 +372,13 @@ class DevelopmentScriptGuardTest(unittest.IsolatedAsyncioTestCase):
                 connection.execute(
                     "CREATE TABLE app_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
                 )
-                connection.execute(
+                connection.executemany(
                     "INSERT INTO app_metadata (key, value) VALUES (?, ?)",
-                    ("deployment_mode", "public-testnet"),
+                    (
+                        ("nimiq_network", "TestAlbatross"),
+                        ("nimiq_network_id", "5"),
+                        ("deployment_mode", "public-testnet"),
+                    ),
                 )
                 connection.commit()
             finally:
@@ -386,6 +390,31 @@ class DevelopmentScriptGuardTest(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(spoof, "_remove_existing_database_files") as remove_database,
             ):
                 with self.assertRaisesRegex(RuntimeError, "bound to public deployment mode"):
+                    await spoof.seed_mock_data()
+            remove_database.assert_not_called()
+
+    async def test_mock_seed_refuses_incomplete_deployment_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "records.db"
+            connection = sqlite3.connect(path)
+            try:
+                connection.execute(
+                    "CREATE TABLE app_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "INSERT INTO app_metadata (key, value) VALUES (?, ?)",
+                    ("deployment_mode", "development"),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            with (
+                mock.patch.object(const, "PUBLIC_DEPLOYMENT", False),
+                mock.patch.object(spoof.schema, "DB_PATH", str(path)),
+                mock.patch.object(spoof, "_remove_existing_database_files") as remove_database,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "metadata is incomplete"):
                     await spoof.seed_mock_data()
             remove_database.assert_not_called()
 
@@ -463,6 +492,7 @@ class ApplicationLifespanTest(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
             mock.patch.object(main, "validate_deployment_safety"),
             mock.patch.object(main, "verify_public_signing_access"),
+            mock.patch.object(main, "verify_public_rpc_network", mock.AsyncMock()),
             mock.patch.object(main.database, "init_db", mock.AsyncMock()),
             mock.patch.object(main.cache, "start_cache_refresher", mock.AsyncMock()),
             mock.patch.object(
@@ -519,6 +549,7 @@ class ApplicationLifespanTest(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
             mock.patch.object(main, "validate_deployment_safety"),
             mock.patch.object(main, "verify_public_signing_access"),
+            mock.patch.object(main, "verify_public_rpc_network", mock.AsyncMock()),
             mock.patch.object(main.database, "init_db", mock.AsyncMock()),
             mock.patch.object(main.cache, "start_cache_refresher", mock.AsyncMock()),
             mock.patch.object(

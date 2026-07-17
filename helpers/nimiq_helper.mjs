@@ -59,19 +59,64 @@ function mnemonicForNetwork(network) {
   throw new Error('Set NIMHUNT_NIMIQ_MNEMONIC before deriving or sending real Nimiq transactions. For TestAlbatross-only experiments, you may set NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC=1.');
 }
 
+const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
+const FALSE_VALUES = new Set(['0', 'false', 'no', 'off']);
+const NETWORK_IDS = { TestAlbatross: 5, MainAlbatross: 24, DevAlbatross: 6 };
+
+function optionalEnvBoolean(name) {
+  const raw = process.env[name];
+  if (raw === undefined || String(raw).trim() === '') return null;
+  const value = String(raw).trim().toLowerCase();
+  if (TRUE_VALUES.has(value)) return true;
+  if (FALSE_VALUES.has(value)) return false;
+  throw new Error(`${name} must be one of: 1, 0, true, false, yes, no, on, off`);
+}
+
 function envEnabled(name) {
-  return ['1', 'true', 'yes', 'on'].includes(String(env(name, '0')).trim().toLowerCase());
+  return optionalEnvBoolean(name) === true;
 }
 
 function normalisedDeploymentMode() {
-  const explicitMode = String(env('NIMHUNT_DEPLOYMENT_MODE', '')).trim().toLowerCase().replaceAll('_', '-');
-  if (explicitMode) return explicitMode;
+  const explicitMode = String(env('NIMHUNT_DEPLOYMENT_MODE', ''))
+    .trim()
+    .toLowerCase()
+    .replaceAll('_', '-');
+  const legacyProduction = optionalEnvBoolean('NIMHUNT_PRODUCTION');
 
-  return envEnabled('NIMHUNT_PRODUCTION') ? 'production' : 'development';
+  if (explicitMode) {
+    if (!['development', 'public-testnet', 'production'].includes(explicitMode)) {
+      throw new Error('NIMHUNT_DEPLOYMENT_MODE must be development, public-testnet, or production');
+    }
+    const modeIsProduction = explicitMode === 'production';
+    if (legacyProduction !== null && legacyProduction !== modeIsProduction) {
+      throw new Error(`NIMHUNT_DEPLOYMENT_MODE=${explicitMode} conflicts with NIMHUNT_PRODUCTION=${Number(legacyProduction)}`);
+    }
+    return explicitMode;
+  }
+
+  return legacyProduction ? 'production' : 'development';
 }
 
-function ensureNotUnsafeDefault(network) {
+function validateNetworkConfiguration(payload, network) {
+  if (!(network in NETWORK_IDS)) throw new Error(`Unsupported Nimiq network: ${network}`);
+  const expectedId = NETWORK_IDS[network];
+  const configuredId = Number(payload.network_id ?? expectedId);
+  if (!Number.isInteger(configuredId) || configuredId !== expectedId) {
+    throw new Error(`network_id must be ${expectedId} for ${network}`);
+  }
+
   const deploymentMode = normalisedDeploymentMode();
+  if (deploymentMode === 'public-testnet' && network !== 'TestAlbatross') {
+    throw new Error('public-testnet requires TestAlbatross with network ID 5');
+  }
+  if (deploymentMode === 'production' && network !== 'MainAlbatross') {
+    throw new Error('production requires MainAlbatross with network ID 24');
+  }
+  return deploymentMode;
+}
+
+function ensureNotUnsafeDefault(network, payload = {}) {
+  const deploymentMode = validateNetworkConfiguration(payload, network);
   const publicDeployment = deploymentMode === 'public-testnet' || deploymentMode === 'production';
   const configuredMnemonic = String(env('NIMHUNT_NIMIQ_MNEMONIC', '')).trim().replace(/\s+/g, ' ');
   const defaultEnabled = envEnabled('NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC');
@@ -80,7 +125,7 @@ function ensureNotUnsafeDefault(network) {
   if (publicDeployment && (defaultEnabled || explicitlyDefault)) {
     throw new Error('Refusing to use the public default test mnemonic in a public NimHunt deployment. Configure a private deployment-specific mnemonic.');
   }
-  if (network === 'MainAlbatross' && defaultEnabled && !configuredMnemonic) {
+  if (network === 'MainAlbatross' && (defaultEnabled || explicitlyDefault)) {
     throw new Error('Refusing to use the public default test mnemonic on MainAlbatross. Set a private NIMHUNT_NIMIQ_MNEMONIC.');
   }
 }
@@ -119,7 +164,7 @@ function userFriendlyAddress(address) {
 
 function keyPairForPath(payload) {
   const network = networkFromPayload(payload);
-  ensureNotUnsafeDefault(network);
+  ensureNotUnsafeDefault(network, payload);
 
   const mnemonic = mnemonicForNetwork(network);
   const password = env('NIMHUNT_NIMIQ_MNEMONIC_PASSWORD', undefined);
@@ -173,6 +218,21 @@ async function deriveSpotDepositAddress(payload) {
 
   ok({
     action: 'derive_spot_deposit_address',
+    network,
+    address,
+    key_index: Number(payload.key_index ?? payload.deposit_key_index ?? 0),
+    key_path: keyPath,
+    key_version: Number(payload.key_version ?? payload.deposit_key_version ?? 1),
+  });
+}
+
+async function validateSignerConfiguration(payload) {
+  const { address, keyPath, network } = keyPairForPath({
+    ...payload,
+    deposit_key_path: payload.key_path || payload.deposit_key_path,
+  });
+  ok({
+    action: 'validate_signer_configuration',
     network,
     address,
     key_index: Number(payload.key_index ?? payload.deposit_key_index ?? 0),
@@ -255,6 +315,10 @@ async function main() {
 
   if (action === 'derive_spot_deposit_address') {
     await deriveSpotDepositAddress(payload);
+    return;
+  }
+  if (action === 'validate_signer_configuration') {
+    await validateSignerConfiguration(payload);
     return;
   }
 

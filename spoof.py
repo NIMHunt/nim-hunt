@@ -71,12 +71,18 @@ def _refuse_public_database_reset() -> None:
             ).fetchone()
             if table is None:
                 return
-            row = connection.execute(
-                f"SELECT {schema.APP_METADATA_VALUE} "
-                f"FROM {schema.APP_METADATA_TABLE_NAME} "
-                f"WHERE {schema.APP_METADATA_KEY} = ?",
-                (schema.METADATA_DEPLOYMENT_MODE,),
-            ).fetchone()
+            rows = dict(
+                connection.execute(
+                    f"SELECT {schema.APP_METADATA_KEY}, {schema.APP_METADATA_VALUE} "
+                    f"FROM {schema.APP_METADATA_TABLE_NAME} "
+                    f"WHERE {schema.APP_METADATA_KEY} IN (?, ?, ?)",
+                    (
+                        schema.METADATA_NIMIQ_NETWORK,
+                        schema.METADATA_NIMIQ_NETWORK_ID,
+                        schema.METADATA_DEPLOYMENT_MODE,
+                    ),
+                ).fetchall()
+            )
         finally:
             connection.close()
     except sqlite3.DatabaseError as exc:
@@ -84,10 +90,24 @@ def _refuse_public_database_reset() -> None:
             "Refusing to reset a database whose deployment metadata could not be read"
         ) from exc
 
-    stored_mode = str(row[0]).strip() if row else ""
-    if stored_mode in {"public-testnet", "production"}:
+    required_keys = {
+        schema.METADATA_NIMIQ_NETWORK,
+        schema.METADATA_NIMIQ_NETWORK_ID,
+        schema.METADATA_DEPLOYMENT_MODE,
+    }
+    if set(rows) != required_keys:
         raise RuntimeError(
-            f"Refusing to reset a database bound to public deployment mode {stored_mode}"
+            "Refusing to reset a database whose deployment metadata is incomplete"
+        )
+
+    stored_mode = str(rows[schema.METADATA_DEPLOYMENT_MODE]).strip()
+    if stored_mode != "development":
+        if stored_mode in {"public-testnet", "production"}:
+            raise RuntimeError(
+                f"Refusing to reset a database bound to public deployment mode {stored_mode}"
+            )
+        raise RuntimeError(
+            "Refusing to reset a database with an unknown deployment-mode marker"
         )
 
 

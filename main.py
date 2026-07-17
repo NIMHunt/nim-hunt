@@ -198,15 +198,32 @@ def validate_production_safety() -> None:
 
 
 def verify_public_signing_access() -> None:
-    """Prove that a public deployment can derive from its configured private key."""
+    """Prove both public signer commands can access the same private key."""
     if not bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
         return
     try:
-        wallet.derive_spot_deposit_address(0)
+        wallet.validate_public_signer_configuration()
     except Exception:
         raise RuntimeError(
-            "Public deployment signer validation failed; check the private mnemonic "
-            "or external signer configuration"
+            "Public deployment signer validation failed; check the private mnemonic, "
+            "external signer, and both helper commands"
+        ) from None
+
+
+async def verify_public_rpc_network() -> None:
+    """Prove that the configured public RPC actually serves the selected network."""
+    if not bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
+        return
+    try:
+        await trans_updater.verify_configured_rpc_network(
+            expected_network_id=int(getattr(const, "NIMIQ_NETWORK_ID", 0)),
+            rpc_url=str(getattr(const, "NIMIQ_RPC_URL", "")),
+            timeout_seconds=int(getattr(const, "NIMIQ_RPC_TIMEOUT_SECONDS", 12)),
+        )
+    except Exception:
+        raise RuntimeError(
+            "Public deployment RPC network validation failed; check the selected "
+            "Nimiq network and RPC endpoint"
         ) from None
 
 
@@ -249,6 +266,7 @@ async def startup() -> None:
     """Initialise storage, caches, settlement work, and transaction polling."""
     validate_deployment_safety()
     verify_public_signing_access()
+    await verify_public_rpc_network()
     await database.init_db()
 
     derive_env = getattr(

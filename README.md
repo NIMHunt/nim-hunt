@@ -144,6 +144,9 @@ Network-specific RPC and Hub defaults are selected automatically:
 | DevAlbatross | none; configure explicitly | testnet Hub default |
 
 A deployment may replace the public RPC with its own node or trusted provider.
+The listed public RPCs are convenient community infrastructure rather than a
+service-level guarantee; use a provider you trust for real funds. Public startup
+checks the RPC's reported network ID, not merely the hostname.
 The selected network ID and deployment mode are also stored durably in the SQLite
 database so changing environment variables cannot reinterpret old chain data or
 expose a development/mock database as a public service.
@@ -313,8 +316,12 @@ export NIMHUNT_NIMIQ_SEND_COMMAND='node /absolute/path/to/nim-hunt/helpers/nimiq
 ```
 
 A custom local signer may replace either command as long as it honours the JSON
-contract documented in `wallet.py`. This allows a deployment to keep key access
-inside a separate process or hardware-backed service.
+contract documented in `wallet.py`. In public modes, **both** configured commands
+must support the non-broadcast `validate_signer_configuration` action and return
+the same derived address for the supplied key path. NimHunt performs that check at
+startup, so a missing or inconsistent send-side key fails before a payout is due.
+This allows a deployment to keep key access inside a separate process or
+hardware-backed service without giving NimHunt the private key itself.
 
 In `development`, `trans_updater.py` may find the bundled helper automatically if
 a permitted development mnemonic is available. Both public modes require explicit
@@ -480,7 +487,10 @@ export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ... operator testnet fee address
 ```
 
 This mode is public software using test NIM: it has production-style safety and
-background-service strictness, but it deliberately remains on TestAlbatross.
+background-service strictness, but it deliberately remains on TestAlbatross. On
+every public startup NimHunt also calls the configured RPC's `getNetworkId` method
+and requires the live response to be `5`; a custom hostname cannot bypass the
+network check merely because its URL looks plausible.
 
 ### MainAlbatross production environment
 
@@ -509,6 +519,8 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
 Place HTTPS in front of Uvicorn. The app itself does not manage TLS certificates.
+Public startup validates both signer commands and asks the configured RPC for its
+actual network ID before opening the database or starting background services.
 
 ### Database network and deployment identity
 
@@ -552,28 +564,70 @@ environment variables while retaining the testnet or development database fails 
 ### Railway deployment
 
 The repository includes `railway.json` and `mise.toml`. They configure Railpack,
-Python 3.11, Node.js 20, installation of both dependency sets, one Uvicorn worker,
-Railway's `$PORT`, restart-on-failure and `/healthz` deployment health checks.
+Python 3.11, Node.js 20, installation of both dependency sets, Railway's `$PORT`,
+exactly one Uvicorn worker, restart-on-failure, `/healthz`, and 30 seconds for
+graceful shutdown after Railway sends `SIGTERM`. Keep Railway's deployment overlap
+at zero: two live NimHunt processes must not share one SQLite volume.
 
-In Railway:
+Railway builds the repository under `/app`, while a volume mounted at `/data` is
+available only when the service runs. Create one service, attach one `/data` volume,
+set the service to exactly one replica, and never run database work in a build or
+pre-deploy command.
 
-1. Create one service from this repository.
-2. Attach one persistent volume, for example at `/data`.
-3. Set `NIMHUNT_DB_PATH=/data/records.db`.
-4. Keep exactly one service replica and one Uvicorn worker. SQLite and the in-process
-   settlement/transaction loops must not run concurrently in multiple replicas.
-5. Add either the public-testnet or production environment checklist above, using
-   Railway secret variables for the mnemonic and passphrase.
-6. Generate a public domain and keep the service continuously running. Do not enable
-   serverless sleeping: settlement and transaction reconciliation must continue even
-   when no visitor is making requests.
-7. Confirm `/healthz` returns HTTP 200 after startup. It reports only deployment mode
-   and network, never secrets or database contents.
-8. Configure and test Railway volume backups before accepting meaningful funds.
+#### Railway variables: public TestAlbatross
 
-A Railway volume is mounted only at runtime. Do not write the production database
-during the build or pre-deploy phase. Services using a volume should expect a brief
-redeployment interruption; this is acceptable for NimHunt's intended scale.
+Use these service variables. Values marked `SECRET` must be supplied by the operator:
+
+```text
+NIMHUNT_DEPLOYMENT_MODE=public-testnet
+NIMHUNT_DB_PATH=/data/records.db
+NIMHUNT_NIMIQ_NETWORK=TestAlbatross
+NIMHUNT_NIMIQ_NETWORK_ID=5
+NIMHUNT_NIMIQ_RPC_URL=https://rpc.testnet.nimiqwatch.com/
+NIMHUNT_NIMIQ_HUB_URL=https://hub.nimiq-testnet.com
+NIMHUNT_NIMIQ_MNEMONIC=SECRET_PRIVATE_TESTNET_MNEMONIC
+NIMHUNT_NIMIQ_MNEMONIC_PASSWORD=SECRET_OPTIONAL_PASSPHRASE
+NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND=node /app/helpers/nimiq_helper.mjs
+NIMHUNT_NIMIQ_SEND_COMMAND=node /app/helpers/nimiq_helper.mjs
+NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
+NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS=OPERATOR_TESTNET_NQ_ADDRESS
+```
+
+Do not set `NIMHUNT_PRODUCTION`, `NIMHUNT_DEV_MASTER_SEED`, or
+`NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC`. Do not reuse the public development
+mnemonic. `NIMHUNT_NIMIQ_EXTERNAL_SIGNER` is unnecessary when using the bundled
+helper.
+
+#### Railway variables: MainAlbatross production
+
+Use a fresh volume or a different `/data/records.db` on a separate Railway service
+and a separately generated mainnet signer:
+
+```text
+NIMHUNT_DEPLOYMENT_MODE=production
+NIMHUNT_DB_PATH=/data/records.db
+NIMHUNT_NIMIQ_NETWORK=MainAlbatross
+NIMHUNT_NIMIQ_NETWORK_ID=24
+NIMHUNT_NIMIQ_RPC_URL=https://rpc.nimiqwatch.com
+NIMHUNT_NIMIQ_HUB_URL=https://hub.nimiq.com
+NIMHUNT_NIMIQ_MNEMONIC=SECRET_PRIVATE_MAINNET_MNEMONIC
+NIMHUNT_NIMIQ_MNEMONIC_PASSWORD=SECRET_OPTIONAL_PASSPHRASE
+NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND=node /app/helpers/nimiq_helper.mjs
+NIMHUNT_NIMIQ_SEND_COMMAND=node /app/helpers/nimiq_helper.mjs
+NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
+NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS=OPERATOR_MAINNET_NQ_ADDRESS
+```
+
+Generate a public Railway domain and keep the service continuously running. Do not
+enable serverless sleeping: settlement and transaction reconciliation must continue
+when no visitor is making requests. `/healthz` is used by Railway while a deployment
+starts; it is not continuous monitoring. Add an external uptime check if continuous
+monitoring is wanted.
+
+A Railway service with an attached volume may have brief redeployment downtime.
+The configured drain period gives FastAPI time to stop its transaction, settlement
+and cache loops cleanly before the process is force-killed. Configure and test
+Railway volume backups before accepting meaningful funds.
 
 ### Public storage and launch checklist
 

@@ -161,17 +161,27 @@ def _run_json_command_sync(command: list[str], payload: dict[str, Any]) -> dict[
     if completed.returncode != 0:
         stderr = (completed.stderr or "").strip()
         stdout = (completed.stdout or "").strip()
-        raise RuntimeError(f"Nimiq helper command failed: {stderr or stdout or completed.returncode}")
+        raise RuntimeError(
+            "Nimiq helper command failed: "
+            f"{wallet.redact_secret_values(stderr or stdout or completed.returncode)}"
+        )
 
     try:
         data = json.loads(completed.stdout or "{}")
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Nimiq helper command returned invalid JSON: {(completed.stdout or '').strip()[:500]}") from exc
+        raise RuntimeError(
+            "Nimiq helper command returned invalid JSON: "
+            f"{wallet.redact_secret_values((completed.stdout or '').strip()[:500])}"
+        ) from exc
 
     if not isinstance(data, dict):
         raise RuntimeError("Nimiq helper command returned non-object JSON")
     if data.get("ok") is False:
-        raise RuntimeError(str(data.get("message") or data.get("error") or "Nimiq helper failed"))
+        raise RuntimeError(
+            wallet.redact_secret_values(
+                data.get("message") or data.get("error") or "Nimiq helper failed"
+            )
+        )
     return data
 
 
@@ -704,6 +714,65 @@ def _json_rpc_post_sync(
         raise RuntimeError(f"Nimiq RPC error: {error!r}")
 
     return data.get("result")
+
+
+def _extract_rpc_network_id(result: Any) -> int:
+    """Extract a numeric network ID from common Nimiq RPC result shapes."""
+    data, _metadata = _unwrap_rpc_result(result)
+    if isinstance(data, bool):
+        raise RuntimeError("Nimiq RPC getNetworkId returned a boolean")
+    if isinstance(data, (int, str)):
+        try:
+            return int(data)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("Nimiq RPC getNetworkId returned an invalid value") from exc
+    if isinstance(data, dict):
+        for key in ("networkId", "network_id", "id"):
+            if key in data:
+                try:
+                    return int(data[key])
+                except (TypeError, ValueError) as exc:
+                    raise RuntimeError("Nimiq RPC getNetworkId returned an invalid value") from exc
+    raise RuntimeError("Nimiq RPC getNetworkId did not expose a network ID")
+
+
+async def get_configured_rpc_network_id(
+    *,
+    rpc_url: str = DEFAULT_NIMIQ_RPC_URL,
+    timeout_seconds: int = DEFAULT_RPC_TIMEOUT_SECONDS,
+) -> int:
+    """Ask the configured RPC which Nimiq network it actually serves."""
+    result = await asyncio.to_thread(
+        _json_rpc_post_sync,
+        rpc_url=str(rpc_url),
+        method="getNetworkId",
+        params=[],
+        timeout_seconds=int(timeout_seconds),
+    )
+    return _extract_rpc_network_id(result)
+
+
+async def verify_configured_rpc_network(
+    *,
+    expected_network_id: int | None = None,
+    rpc_url: str = DEFAULT_NIMIQ_RPC_URL,
+    timeout_seconds: int = DEFAULT_RPC_TIMEOUT_SECONDS,
+) -> int:
+    """Fail startup when the configured RPC serves a different Nimiq network."""
+    expected = int(
+        expected_network_id
+        if expected_network_id is not None
+        else getattr(const, "NIMIQ_NETWORK_ID", 0)
+    )
+    actual = await get_configured_rpc_network_id(
+        rpc_url=rpc_url,
+        timeout_seconds=timeout_seconds,
+    )
+    if actual != expected:
+        raise RuntimeError(
+            f"Configured Nimiq RPC serves network ID {actual}, expected {expected}"
+        )
+    return actual
 
 
 def _normalise_chain_hash(value: Any) -> str:

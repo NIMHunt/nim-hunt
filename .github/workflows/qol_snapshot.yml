@@ -23,7 +23,10 @@ jobs:
           cat \
             .github/qol-patch/chunk-00 \
             .github/qol-patch/chunk-01 \
-            .github/qol-patch/chunk-02 \
+            .github/qol-patch/chunk-02-part-00 \
+            .github/qol-patch/chunk-02-part-01 \
+            .github/qol-patch/chunk-02-part-02 \
+            .github/qol-patch/chunk-02-part-03 \
             > /tmp/qol.patch.gz.b64
           echo "1d7fad40c67f72d6f0dd1863397f2fa678a5835c75a2aebf6097c7ae3b5e7e7e  /tmp/qol.patch.gz.b64" | sha256sum --check
           base64 --decode /tmp/qol.patch.gz.b64 > /tmp/qol.patch.gz

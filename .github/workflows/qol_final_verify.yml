@@ -1,0 +1,108 @@
+name: Verify final QoL branch
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pull request branch
+        uses: actions/checkout@v4
+
+      - name: Confirm required new files are tracked
+        run: |
+          test -f static/localisation.js
+          test -f static/localise_page.js
+          test -f static/prizedraw_rules.js
+          test -f helpers/localisation.test.mjs
+          test -f helpers/prizedraw_rules.test.mjs
+          test -f helpers/static_localisation.test.mjs
+          test -f tests/test_prizedraw_constraints.py
+          git ls-files --error-unmatch \
+            static/localisation.js \
+            static/localise_page.js \
+            static/prizedraw_rules.js \
+            helpers/localisation.test.mjs \
+            helpers/prizedraw_rules.test.mjs \
+            helpers/static_localisation.test.mjs \
+            tests/test_prizedraw_constraints.py
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest ruff pip-audit
+          npm ci --prefix helpers
+
+      - name: Run Python tests
+        run: PYTHONPATH=. python -W error::ResourceWarning -m pytest -q
+
+      - name: Run JavaScript tests
+        run: npm --prefix helpers test
+
+      - name: Run static and dependency checks
+        run: |
+          python -m py_compile *.py tests/*.py
+          ruff check .
+          for file in static/*.js; do node --check --input-type=module < "$file"; done
+          for file in helpers/*.mjs; do node --check "$file"; done
+          for file in *.sh; do bash -n "$file"; done
+          python -m pip check
+          python -m pip_audit
+          npm audit --omit=dev --prefix helpers
+          git diff --check
+
+      - name: Compile all templates
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import constants as const
+          from jinja2 import Environment, FileSystemLoader
+
+          environment = Environment(loader=FileSystemLoader(str(const.TEMPLATES_DIR)))
+          for path in sorted(const.TEMPLATES_DIR.glob("*.html")):
+              environment.get_template(path.name)
+          PY
+
+      - name: Seed a fresh mock database
+        run: |
+          TMPDIR="$(mktemp -d)"
+          NIMHUNT_DB_PATH="$TMPDIR/records.db" PYTHONPATH=. python spoof.py
+          test -s "$TMPDIR/records.db"
+          rm -rf "$TMPDIR"
+
+      - name: Run application startup smoke test
+        run: |
+          TMPDIR="$(mktemp -d)"
+          NIMHUNT_DB_PATH="$TMPDIR/records.db" PYTHONPATH=. python - <<'PY'
+          import asyncio
+          import os
+          from pathlib import Path
+
+          import main
+
+          async def run() -> None:
+              await main.startup()
+              try:
+                  assert Path(os.environ["NIMHUNT_DB_PATH"]).exists()
+              finally:
+                  await main.shutdown()
+
+          asyncio.run(run())
+          PY
+          rm -rf "$TMPDIR"

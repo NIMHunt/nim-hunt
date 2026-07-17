@@ -1,0 +1,33 @@
+name: Release Candidate Snapshot
+
+on:
+  push:
+    branches:
+      - agent/release-candidate-final-pass
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create source archive
+        run: |
+          tar \
+            --exclude=.git \
+            --exclude=venv \
+            --exclude='**/__pycache__' \
+            --exclude='*.pyc' \
+            --exclude=records.db \
+            -czf /tmp/nimhunt-release-candidate-source.tar.gz .
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: nimhunt-release-candidate-source
+          path: /tmp/nimhunt-release-candidate-source.tar.gz
+          retention-days: 1

@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+case "${NIMHUNT_PRODUCTION:-}" in
+    1|true|TRUE|yes|YES|on|ON)
+        echo "Refusing to start the development server while NIMHUNT_PRODUCTION is enabled."
+        exit 1
+        ;;
+esac
+
 # NimHunt development launcher
 # Starts the FastAPI server with the Nimiq TestAlbatross helper enabled.
 

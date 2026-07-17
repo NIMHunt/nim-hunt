@@ -40,6 +40,7 @@ import constants as const
 import database as schema
 import db_access
 import wallet
+from transaction_descriptions import build_transaction_description
 from database import get_db
 
 RowDict = dict[str, Any]
@@ -1412,7 +1413,7 @@ async def submit_platform_fee_transaction(
         spot=spot,
         to_address=clean_fee_address,
         amount=amount,
-        memo=f"NimHunt platform fee spot {int(spot_id)}",
+        memo=build_transaction_description("Refund Fee", spot.get(schema.SPOT_TITLE)),
         intent_kind="platform_fee",
         intent_primary_id=int(spot_id),
         create_transaction=db_access.create_platform_fee_transaction,
@@ -1445,7 +1446,7 @@ async def submit_spot_refund_transaction(
         spot=spot,
         to_address=to_address,
         amount=amount,
-        memo=f"NimHunt spot refund {int(spot_id)}",
+        memo=build_transaction_description("Cancelled Spot", spot.get(schema.SPOT_TITLE)),
         intent_kind="spot_refund",
         intent_primary_id=int(spot_id),
         create_transaction=db_access.create_spot_refund_transaction,
@@ -1683,12 +1684,18 @@ async def submit_claim_reward_transaction(
     if not clean_to_address:
         raise ValueError("claim has no payout_address; ask the user to enter through Nimiq Pay again")
 
+    transaction_kind = (
+        "Prizedraw"
+        if await db_access.is_prizedraw(db, spot_id=int(claim[schema.CLAIM_SPOT_ID]))
+        else "Claim"
+    )
+
     result = await _submit_recorded_chain_send(
         db,
         spot=spot,
         to_address=clean_to_address,
         amount=amount,
-        memo=f"NimHunt claim {int(claim_id)}",
+        memo=build_transaction_description(transaction_kind, spot.get(schema.SPOT_TITLE)),
         intent_kind="claim_reward",
         intent_primary_id=int(claim_id),
         create_transaction=db_access.create_claim_transaction,

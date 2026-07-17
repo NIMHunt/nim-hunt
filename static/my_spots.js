@@ -967,9 +967,10 @@ async function requestDepositPayment(intent) {
         console.warn('Could not read Nimiq account list before deposit.', err);
     }
 
-    const payment = await nimiq.sendBasicTransaction({
+    const payment = await nimiq.sendBasicTransactionWithData({
         recipient: intent.recipient,
         value: Number(intent.amount),
+        data: intent.transaction_description,
     });
 
     const txHash = (

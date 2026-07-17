@@ -162,6 +162,9 @@ async def _create_confirmed_deposit_for_spot(
 
 async def seed_mock_data() -> dict[str, Any]:
     """Recreate the database, seed a dynamic mock dataset, and return a summary."""
+    if bool(getattr(const, "PRODUCTION_MODE", False)):
+        raise RuntimeError("Refusing to reset or seed mock data in production mode")
+
     _remove_existing_database_files()
     await init_db()
     now = int(time.time())

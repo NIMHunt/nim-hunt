@@ -34,6 +34,7 @@ import constants as const
 import database as schema
 import db_access
 import trans_updater
+from transaction_descriptions import build_transaction_description
 from database import get_db
 
 try:
@@ -50,7 +51,7 @@ except Exception:  # pragma: no cover - settlement is optional while bootstrappi
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
-_ASSET_VERSION = "refactor-v1-20260716"
+_ASSET_VERSION = "production-hardening-v1-20260717"
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ALLOWED_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$")
@@ -372,6 +373,7 @@ def _shared_template_context(request: Request, *, page_title: str | None = None)
         "spot_title_min": const.SPOT_TITLE_MIN_CHARS,
         "spot_title_max": const.SPOT_TITLE_MAX_CHARS,
         "max_draft_spots_per_user": int(getattr(const, "MAX_DRAFT_SPOTS_PER_USER", 3)),
+        "test_features_enabled": bool(getattr(const, "TEST_FEATURES_ENABLED", False)),
         "min_standard_claim_payout_nim": int(getattr(const, "MIN_STANDARD_CLAIM_PAYOUT_NIM", 100)),
         "min_prizedraw_prize_payout_nim": int(getattr(const, "MIN_PRIZEDRAW_PRIZE_PAYOUT_NIM", 1000)),
         "claim_captcha_min": int(getattr(const, "CLAIM_CAPTCHA_MIN", 1)),
@@ -2665,6 +2667,10 @@ async def my_spots_deposit_intent_api(spot_id: int, payload: HomeSessionRequest)
             },
             "amount": amount_due,
             "recipient": spot.get(schema.SPOT_DEPOSIT_ADDRESS),
+            "transaction_description": build_transaction_description(
+                "Funding",
+                spot.get(schema.SPOT_TITLE),
+            ),
             "deposit": deposit,
         }
     )

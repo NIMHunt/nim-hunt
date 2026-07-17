@@ -121,10 +121,12 @@
                         <input id="filter-prizedraws" type="checkbox" checked>
                         <span>Incl. Prizedraws</span>
                     </label>
+                    {% if test_features_enabled %}
                     <label class="filter-toggle is-test-location" title="Use the centre of the map as your temporary test location.">
                         <input id="filter-test-location" type="checkbox">
                         <span>Test Location</span>
                     </label>
+                    {% endif %}
                 </fieldset>
             </div>
             <ol id="spot-list" class="spot-list"></ol>

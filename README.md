@@ -19,8 +19,8 @@ than high-volume financial infrastructure.
 - **Creator tools** — inspect drafts, deposits, publishing state, claim codes and history.
 - **Claim history** — users can review pending, successful and failed claims.
 - **On-chain descriptions** — NimHunt-generated transactions include short Spot labels.
-- **Production/test separation** — desktop shortcuts remain available locally but are
-  disabled automatically when production mode is enabled.
+- **Deployment/network separation** — desktop shortcuts remain available locally,
+  while public TestAlbatross and MainAlbatross deployments both use production-grade guards.
 - **Localisation-ready UI** — interface copy is centralised and selected from
   `window.nimiqPay.language`; English is currently the only bundled language.
 
@@ -32,7 +32,8 @@ traditional username/password login.
 
 For local development outside Nimiq Pay, NimHunt can fall back to the seeded
 **Desktop User**. This and the Find Spots **Test Location** control are development
-features only. They are not rendered or accepted when `NIMHUNT_PRODUCTION=1`.
+features only. They are not rendered or accepted in either `public-testnet` or
+`production` deployment mode.
 
 Display names and all Spot titles/descriptions are user-generated content. The
 localisation framework translates only NimHunt's own marked interface text; it
@@ -130,12 +131,11 @@ NimHunt recognises the official Albatross network names and protocol IDs:
 
 | Network | ID | Intended use |
 |---|---:|---|
-| `TestAlbatross` | `5` | normal development and test NIM |
-| `MainAlbatross` | `24` | production and real NIM |
-| `DevAlbatross` | `6` | advanced local/custom network development |
+| `TestAlbatross` | `5` | development and public testing with test NIM |
+| `MainAlbatross` | `24` | production with real NIM |
+| `DevAlbatross` | `6` | advanced local/custom-network development |
 
-The repository defaults to `TestAlbatross`. Network-specific RPC and Hub defaults
-are selected automatically:
+Network-specific RPC and Hub defaults are selected automatically:
 
 | Network | Default RPC | Default Hub |
 |---|---|---|
@@ -143,9 +143,33 @@ are selected automatically:
 | MainAlbatross | `https://rpc.nimiqwatch.com` | `https://hub.nimiq.com` |
 | DevAlbatross | none; configure explicitly | testnet Hub default |
 
-A deployment may replace the public RPC with its own node or a trusted provider.
-Production startup refuses inconsistent network IDs, a testnet endpoint, missing
-signing commands or other development-only settings.
+A deployment may replace the public RPC with its own node or trusted provider.
+The listed public RPCs are convenient community infrastructure rather than a
+service-level guarantee; use a provider you trust for real funds. Public startup
+checks the RPC's reported network ID, not merely the hostname.
+The selected network ID and deployment mode are also stored durably in the SQLite
+database so changing environment variables cannot reinterpret old chain data or
+expose a development/mock database as a public service.
+
+## Deployment modes
+
+`NIMHUNT_DEPLOYMENT_MODE` separates public safety from blockchain choice:
+
+| Mode | Required network | Test features | Intended use |
+|---|---|---|---|
+| `development` | normally TestAlbatross | enabled | local desktop and phone development |
+| `public-testnet` | TestAlbatross, ID `5` | disabled | public internet deployment using test NIM |
+| `production` | MainAlbatross, ID `24` | disabled | final real-NIM deployment |
+
+If no mode is set, NimHunt retains its existing `development` behaviour. For
+backwards compatibility, `NIMHUNT_PRODUCTION=1` maps to `production` when the new
+variable is absent. `NIMHUNT_DEPLOYMENT_MODE` is preferred. Contradictory old and
+new settings are rejected rather than silently resolved.
+
+Both public modes disable Desktop User, Test Location, mock data, placeholder
+addresses, fake sends, development seeds and the repository's public test mnemonic.
+They also require explicit signer commands, private signing material, HTTPS chain
+endpoints and a valid operator-controlled cancellation-fee address.
 
 ## Requirements
 
@@ -221,11 +245,11 @@ Stop the server first, then run:
 
 This deletes the selected development database and its SQLite sidecars, creates
 the current schema and inserts mock users, Spots, claims and transactions. The
-script and `spoof.py` refuse to run in production mode.
+script and `spoof.py` refuse to run in either public deployment mode.
 
 NimHunt currently follows a fresh-development-database policy rather than
 maintaining a general migration framework. Never use the reset script on a
-production database.
+public deployment database.
 
 ## Phone testing
 
@@ -277,7 +301,9 @@ export NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC=1
 ```
 
 This is enabled by the local development launcher. It is intentionally public and
-must never protect real funds. Production startup rejects it.
+must never protect a publicly reachable deployment, even one using test NIM. Both
+`public-testnet` and `production` reject the flag and the same mnemonic if supplied
+directly through `NIMHUNT_NIMIQ_MNEMONIC`.
 
 ### Derive and send commands
 
@@ -290,13 +316,20 @@ export NIMHUNT_NIMIQ_SEND_COMMAND='node /absolute/path/to/nim-hunt/helpers/nimiq
 ```
 
 A custom local signer may replace either command as long as it honours the JSON
-contract documented in `wallet.py`. This allows a deployment to keep key access
-inside a separate process or hardware-backed service.
+contract documented in `wallet.py`. In public modes, **both** configured commands
+must support the non-broadcast `validate_signer_configuration` action and return
+the same derived address for the supplied key path. NimHunt performs that check at
+startup, so a missing or inconsistent send-side key fails before a payout is due.
+This allows a deployment to keep key access inside a separate process or
+hardware-backed service without giving NimHunt the private key itself.
 
-When no explicit command is supplied outside production, `trans_updater.py` can
-find the bundled helper automatically if a permitted test mnemonic is available.
-Production nevertheless requires explicit derive and send commands so the
-operator's intent is unambiguous.
+In `development`, `trans_updater.py` may find the bundled helper automatically if
+a permitted development mnemonic is available. Both public modes require explicit
+derive and send commands so the operator's intent is unambiguous.
+
+A custom signer that manages its own keys may omit `NIMHUNT_NIMIQ_MNEMONIC`, but
+then it must use custom commands and set `NIMHUNT_NIMIQ_EXTERNAL_SIGNER=1`. The
+bundled helper always requires a private mnemonic in either public mode.
 
 Optional helper discovery variables:
 
@@ -315,8 +348,9 @@ Optional helper discovery variables:
 
 These support deterministic development placeholders and custom integrations;
 they are **not** the mnemonic consumed by the bundled official Nimiq helper.
-`NIMHUNT_DEV_MASTER_SEED` and placeholder-address behaviour are disabled in
-production. For the bundled helper, use `NIMHUNT_NIMIQ_MNEMONIC` instead.
+`NIMHUNT_DEV_MASTER_SEED` and placeholder-address behaviour are disabled in every
+public deployment. These Python seed helpers do not provide signing material to
+the bundled JavaScript helper. For that helper, use `NIMHUNT_NIMIQ_MNEMONIC`.
 
 ## Cancellation fee configuration
 
@@ -347,8 +381,8 @@ Set the checksummed Nimiq address that receives cancellation fees:
 export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ45 ... real address ...'
 ```
 
-The repository default is an obvious development placeholder. Production startup
-requires a real, checksum-valid address.
+The repository default is an obvious development placeholder. Both public modes
+require a real, checksum-valid address controlled by the operator.
 
 ## Environment variable reference
 
@@ -356,8 +390,9 @@ requires a real, checksum-valid address.
 
 | Variable | Default | Description |
 |---|---|---|
-| `NIMHUNT_PRODUCTION` | false | set to `1`/`true` to enable production safeguards |
-| `NIMHUNT_DB_PATH` | `records.db` | SQLite file; use an absolute persistent path in production |
+| `NIMHUNT_DEPLOYMENT_MODE` | `development` | preferred: `development`, `public-testnet`, or `production` |
+| `NIMHUNT_PRODUCTION` | unset | legacy compatibility flag; `1` maps to `production` only |
+| `NIMHUNT_DB_PATH` | `records.db` | SQLite file; public modes require a separate absolute persistent path |
 | `NIMHUNT_SPOT_CANCELLATION_FEE_NIM` | `1` | cancellation fee amount in NIM |
 | `NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS` | development placeholder | fee recipient |
 
@@ -366,6 +401,7 @@ requires a real, checksum-valid address.
 | Variable | Default | Description |
 |---|---|---|
 | `NIMHUNT_NIMIQ_NETWORK` | `TestAlbatross` | `TestAlbatross`, `MainAlbatross` or `DevAlbatross` |
+| `NIMHUNT_NIMIQ_NETWORK_ID` | selected by network | optional explicit protocol ID; must match the network |
 | `NIMHUNT_NIMIQ_RPC_URL` | selected by network | RPC used to verify transactions |
 | `NIMHUNT_NIMIQ_HUB_URL` | selected by network | Hub used for creator funding requests |
 | `NIMHUNT_NIMIQ_RPC_TIMEOUT_SECONDS` | `12` | RPC/helper timeout base |
@@ -382,9 +418,10 @@ server-generated transaction.
 |---|---|---|
 | `NIMHUNT_NIMIQ_MNEMONIC` | none | mnemonic used by bundled helper |
 | `NIMHUNT_NIMIQ_MNEMONIC_PASSWORD` | none | optional BIP39 passphrase |
-| `NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC` | `0` | permit public test mnemonic outside production |
+| `NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC` | `0` | permit the public mnemonic in local development only |
 | `NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND` | auto only in development | JSON address-derivation command |
 | `NIMHUNT_NIMIQ_SEND_COMMAND` | auto only in development | JSON signing/broadcast command |
+| `NIMHUNT_NIMIQ_EXTERNAL_SIGNER` | `0` | assert that custom signer commands manage private keys themselves |
 | `NIMHUNT_NIMIQ_HELPER_PATH` | bundled helper | override automatic helper path |
 | `NIMHUNT_NIMIQ_NODE_BINARY` | `node` | Node executable for automatic helper use |
 
@@ -421,76 +458,199 @@ shell, configure them in the process manager/hosting platform, or deliberately
 add a deployment tool that loads `.env`. The file is ignored by Git so local
 secrets are not committed accidentally.
 
-## Production deployment
+## Public deployment
 
-The development scripts refuse to run in production. Configure the environment,
-then start FastAPI through Uvicorn or a process manager.
+The development scripts refuse to run in either public mode. Configure the
+environment, then start FastAPI through Uvicorn or a process manager. Public
+startup performs strict initial cache, settlement and transaction-reconciliation
+passes before traffic is accepted.
 
-Minimal bundled-helper example:
+### Public TestAlbatross environment
+
+Use a newly generated **private testnet mnemonic**. Do not use the repository's
+public development mnemonic and do not plan to reuse this seed on mainnet.
 
 ```bash
-export NIMHUNT_PRODUCTION=1
-export NIMHUNT_DB_PATH=/srv/nimhunt/records.db
+export NIMHUNT_DEPLOYMENT_MODE=public-testnet
+export NIMHUNT_DB_PATH=/srv/nimhunt-testnet/records.db
 
-export NIMHUNT_NIMIQ_NETWORK=MainAlbatross
-export NIMHUNT_NIMIQ_RPC_URL=https://rpc.nimiqwatch.com
-export NIMHUNT_NIMIQ_HUB_URL=https://hub.nimiq.com
-export NIMHUNT_NIMIQ_MNEMONIC='private production mnemonic'
+export NIMHUNT_NIMIQ_NETWORK=TestAlbatross
+export NIMHUNT_NIMIQ_NETWORK_ID=5
+export NIMHUNT_NIMIQ_RPC_URL=https://rpc.testnet.nimiqwatch.com/
+export NIMHUNT_NIMIQ_HUB_URL=https://hub.nimiq-testnet.com
+export NIMHUNT_NIMIQ_MNEMONIC='private testnet mnemonic -- supply as a secret'
 export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
 export NIMHUNT_NIMIQ_SEND_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
 
 export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
-export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ45 ... real fee address ...'
-
-cd /srv/nimhunt
-source venv/bin/activate
-uvicorn main:app --host 127.0.0.1 --port 8000
+export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ... operator testnet fee address ...'
 ```
 
-Place an HTTPS reverse proxy in front of Uvicorn. The app itself does not manage
-TLS certificates.
+This mode is public software using test NIM: it has production-style safety and
+background-service strictness, but it deliberately remains on TestAlbatross. On
+every public startup NimHunt also calls the configured RPC's `getNetworkId` method
+and requires the live response to be `5`; a custom hostname cannot bypass the
+network check merely because its URL looks plausible.
 
-Production startup validates configuration and performs initial cache, settlement
-and transaction-reconciliation passes before accepting traffic. If startup fails,
-correct the configuration or chain access rather than bypassing the guard.
+### MainAlbatross production environment
 
-### Production storage
+Use a separate newly generated private mainnet mnemonic or signing service.
+
+```bash
+export NIMHUNT_DEPLOYMENT_MODE=production
+export NIMHUNT_DB_PATH=/srv/nimhunt-mainnet/records.db
+
+export NIMHUNT_NIMIQ_NETWORK=MainAlbatross
+export NIMHUNT_NIMIQ_NETWORK_ID=24
+export NIMHUNT_NIMIQ_RPC_URL=https://rpc.nimiqwatch.com
+export NIMHUNT_NIMIQ_HUB_URL=https://hub.nimiq.com
+export NIMHUNT_NIMIQ_MNEMONIC='private mainnet mnemonic -- supply as a secret'
+export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
+export NIMHUNT_NIMIQ_SEND_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
+
+export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
+export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ... operator mainnet fee address ...'
+```
+
+Start outside Railway with one worker:
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
+```
+
+Place HTTPS in front of Uvicorn. The app itself does not manage TLS certificates.
+Public startup validates both signer commands and asks the configured RPC for its
+actual network ID before opening the database or starting background services.
+
+### Database network and deployment identity
+
+Every database records `nimiq_network`, `nimiq_network_id` and `deployment_mode`
+in an additive `app_metadata` table. Once bound, it refuses another network or mode.
+
+- A fresh database is bound during first startup.
+- An existing local database without metadata is bound when opened in `development`
+  under the deliberately selected network.
+- A development database cannot later be exposed as `public-testnet`, even though both
+  normally use TestAlbatross; this prevents seeded mock users and Spots reaching the
+  public service.
+- An existing unbound database is rejected in either public mode; use a fresh public
+  database rather than guessing which chain or safety context its records belong to.
+- A public database is also protected from `spoof.py` resets if the process is
+  accidentally launched with development settings.
+- This additive metadata does not require resetting a current development database.
+
+### Testnet-to-mainnet cutover
+
+Mainnet is an environment and data-volume change, not a code rewrite:
+
+1. Stop accepting new public TestAlbatross activity.
+2. Allow pending testnet claims, settlements and transactions to finish, or resolve
+   them manually before shutdown.
+3. Back up the complete TestAlbatross SQLite database and sidecars consistently.
+4. Retain that database as a read-only testnet archive.
+5. Create a fresh database or fresh persistent volume for MainAlbatross.
+6. Do not copy testnet Spots, claims, transaction hashes, deposits or balances into
+   the mainnet database.
+7. Configure a separate private mainnet mnemonic or external signing setup.
+8. Configure the real mainnet cancellation-fee address.
+9. Set `NIMHUNT_DEPLOYMENT_MODE=production`, MainAlbatross, ID `24`, mainnet RPC
+   and mainnet Hub.
+10. Start the new service, allow validation to complete, then perform deliberately
+    small funding, claim, Prizedraw and cancellation smoke tests before advertising it.
+
+The database network and deployment markers are additional guards: merely changing
+environment variables while retaining the testnet or development database fails startup.
+
+### Railway deployment
+
+The repository includes `railway.json` and `mise.toml`. They configure Railpack,
+Python 3.11, Node.js 20, installation of both dependency sets, Railway's `$PORT`,
+exactly one Uvicorn worker, restart-on-failure, `/healthz`, and 30 seconds for
+graceful shutdown after Railway sends `SIGTERM`. Keep Railway's deployment overlap
+at zero: two live NimHunt processes must not share one SQLite volume.
+
+Railway builds the repository under `/app`, while a volume mounted at `/data` is
+available only when the service runs. Create one service, attach one `/data` volume,
+set the service to exactly one replica, and never run database work in a build or
+pre-deploy command.
+
+#### Railway variables: public TestAlbatross
+
+Use these service variables. Values marked `SECRET` must be supplied by the operator:
+
+```text
+NIMHUNT_DEPLOYMENT_MODE=public-testnet
+NIMHUNT_DB_PATH=/data/records.db
+NIMHUNT_NIMIQ_NETWORK=TestAlbatross
+NIMHUNT_NIMIQ_NETWORK_ID=5
+NIMHUNT_NIMIQ_RPC_URL=https://rpc.testnet.nimiqwatch.com/
+NIMHUNT_NIMIQ_HUB_URL=https://hub.nimiq-testnet.com
+NIMHUNT_NIMIQ_MNEMONIC=SECRET_PRIVATE_TESTNET_MNEMONIC
+NIMHUNT_NIMIQ_MNEMONIC_PASSWORD=SECRET_OPTIONAL_PASSPHRASE
+NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND=node /app/helpers/nimiq_helper.mjs
+NIMHUNT_NIMIQ_SEND_COMMAND=node /app/helpers/nimiq_helper.mjs
+NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
+NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS=OPERATOR_TESTNET_NQ_ADDRESS
+```
+
+Do not set `NIMHUNT_PRODUCTION`, `NIMHUNT_DEV_MASTER_SEED`, or
+`NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC`. Do not reuse the public development
+mnemonic. `NIMHUNT_NIMIQ_EXTERNAL_SIGNER` is unnecessary when using the bundled
+helper.
+
+#### Railway variables: MainAlbatross production
+
+Use a fresh volume or a different `/data/records.db` on a separate Railway service
+and a separately generated mainnet signer:
+
+```text
+NIMHUNT_DEPLOYMENT_MODE=production
+NIMHUNT_DB_PATH=/data/records.db
+NIMHUNT_NIMIQ_NETWORK=MainAlbatross
+NIMHUNT_NIMIQ_NETWORK_ID=24
+NIMHUNT_NIMIQ_RPC_URL=https://rpc.nimiqwatch.com
+NIMHUNT_NIMIQ_HUB_URL=https://hub.nimiq.com
+NIMHUNT_NIMIQ_MNEMONIC=SECRET_PRIVATE_MAINNET_MNEMONIC
+NIMHUNT_NIMIQ_MNEMONIC_PASSWORD=SECRET_OPTIONAL_PASSPHRASE
+NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND=node /app/helpers/nimiq_helper.mjs
+NIMHUNT_NIMIQ_SEND_COMMAND=node /app/helpers/nimiq_helper.mjs
+NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
+NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS=OPERATOR_MAINNET_NQ_ADDRESS
+```
+
+Generate a public Railway domain and keep the service continuously running. Do not
+enable serverless sleeping: settlement and transaction reconciliation must continue
+when no visitor is making requests. `/healthz` is used by Railway while a deployment
+starts; it is not continuous monitoring. Add an external uptime check if continuous
+monitoring is wanted.
+
+A Railway service with an attached volume may have brief redeployment downtime.
+The configured drain period gives FastAPI time to stop its transaction, settlement
+and cache loops cleanly before the process is force-killed. Configure and test
+Railway volume backups before accepting meaningful funds.
+
+### Public storage and launch checklist
 
 SQLite is appropriate for NimHunt's intended small audience, but the database is
-the durable record of:
+the durable record of derived addresses, submitted payments, claims, winners and
+payout/cancellation intent. Use persistent storage, restrict permissions, back up
+the database and its active sidecars consistently, and test restoration.
 
-- which derived addresses belong to which Spots;
-- submitted and confirmed payments;
-- claim outcomes;
-- Prizedraw winners;
-- cancellation and payout intent.
+Before public launch:
 
-Use persistent storage, restrict file permissions and back up the database and
-its active SQLite sidecars consistently. Test restoration before launch. Never
-replace a live database with mock data.
-
-### Production checklist
-
-Before accepting real funds:
-
-1. Install from the lock files (`pip install -r requirements.txt`, `npm ci --prefix helpers`).
-2. Store the mnemonic and optional passphrase in the host's secret manager.
+1. Install from the lock files.
+2. Store the private mnemonic and optional passphrase in the host's secret manager.
 3. Back up the mnemonic separately and verify recovery.
-4. Configure `MainAlbatross`, mainnet RPC and mainnet Hub.
-5. Configure a real cancellation-fee address and desired fee amount.
-6. Put `NIMHUNT_DB_PATH` on persistent backed-up storage.
-7. Serve NimHunt over HTTPS.
-8. Start once and confirm all initial background checks succeed.
-9. Complete one deliberately small-value live cycle:
-   - create and fund a Spot;
-   - make a standard claim;
-   - settle a Prizedraw;
-   - cancel another funded Spot and inspect refund/fee transactions.
-10. Stop and restart the service without replacing the database, then verify
-    transactions and Spot state remain correct.
+4. Configure the correct deployment mode, network, ID, RPC and Hub.
+5. Configure a real fee address and desired fee amount.
+6. Use a fresh network-specific persistent database.
+7. Serve over HTTPS with one application replica and worker.
+8. Confirm strict startup and `/healthz`.
+9. Complete a deliberately small-value end-to-end cycle.
+10. Restart without replacing the database and verify state remains correct.
 
-NimHunt has substantial automated coverage but has not received an independent
-security audit. Start with modest funding limits appropriate to the competition.
+NimHunt has substantial automated coverage but no independent security audit.
+Use modest values appropriate to the competition.
 
 ## Localisation
 
@@ -574,7 +734,7 @@ npm audit --omit=dev --prefix helpers
 
 | File/directory | Responsibility |
 |---|---|
-| `main.py` | FastAPI app, production validation and service lifecycle |
+| `main.py` | FastAPI app, deployment validation, health endpoint and service lifecycle |
 | `public_html.py` | page routes and JSON API endpoints |
 | `constants.py` | product and deployment configuration |
 | `database.py` | schema creation and database connections |

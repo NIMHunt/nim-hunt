@@ -166,6 +166,36 @@ def get_master_seed(*, required: bool = False) -> bytes | None:
 # External Nimiq bridge helpers
 # ---------------------------------------------------------------------------
 
+
+def _configured_secret_values() -> tuple[str, ...]:
+    """Return configured secret values that must never appear in errors or logs."""
+    names = (
+        getattr(const, "NIMHUNT_NIMIQ_MNEMONIC_ENV", "NIMHUNT_NIMIQ_MNEMONIC"),
+        "NIMHUNT_NIMIQ_MNEMONIC_PASSWORD",
+        getattr(const, "NIMHUNT_MASTER_SEED_ENV", "NIMHUNT_MASTER_SEED_ENC"),
+        getattr(const, "NIMHUNT_MASTER_SEED_SECRET_ENV", "NIMHUNT_MASTER_SEED_SECRET"),
+        getattr(const, "NIMHUNT_DEV_MASTER_SEED_ENV", "NIMHUNT_DEV_MASTER_SEED"),
+    )
+    values: list[str] = []
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            values.append(value)
+            normalised = " ".join(value.split())
+            if normalised and normalised != value:
+                values.append(normalised)
+    # Longest first prevents a short secret from partially masking a longer one.
+    return tuple(sorted(set(values), key=len, reverse=True))
+
+
+def redact_secret_values(value: Any) -> str:
+    """Return text with all configured wallet/signing secrets removed."""
+    text = str(value)
+    for secret in _configured_secret_values():
+        text = text.replace(secret, "[REDACTED]")
+    return text
+
+
 def _command_from_env(env_name: str) -> list[str] | None:
     value = os.getenv(env_name)
     if not value or not value.strip():
@@ -216,11 +246,11 @@ def _run_json_command(command: list[str], payload: dict[str, Any]) -> dict[str, 
                 or parsed_stdout.get("reason")
                 or parsed_stdout
             )
-            raise WalletConfigError(f"Nimiq helper command failed: {message}")
+            raise WalletConfigError(f"Nimiq helper command failed: {redact_secret_values(message)}")
         if stderr:
-            raise WalletConfigError(f"Nimiq helper command failed: {stderr}")
+            raise WalletConfigError(f"Nimiq helper command failed: {redact_secret_values(stderr)}")
         if stdout:
-            raise WalletConfigError(f"Nimiq helper command failed: {stdout}")
+            raise WalletConfigError(f"Nimiq helper command failed: {redact_secret_values(stdout)}")
         raise WalletConfigError(f"Nimiq helper command failed with exit code {completed.returncode}")
 
     if parsed_stdout is not None:
@@ -229,14 +259,14 @@ def _run_json_command(command: list[str], payload: dict[str, Any]) -> dict[str, 
         try:
             data = json.loads(stdout or "{}")
         except json.JSONDecodeError as exc:
-            detail = f" stdout={stdout!r}" if stdout else ""
-            detail += f" stderr={stderr!r}" if stderr else ""
+            detail = f" stdout={redact_secret_values(stdout)!r}" if stdout else ""
+            detail += f" stderr={redact_secret_values(stderr)!r}" if stderr else ""
             raise WalletConfigError(f"Nimiq helper command returned invalid JSON.{detail}") from exc
 
     if not isinstance(data, dict):
         raise WalletConfigError("Nimiq helper command returned non-object JSON")
     if data.get("ok") is False:
-        raise WalletConfigError(str(data.get("message") or data.get("error") or "Nimiq helper failed"))
+        raise WalletConfigError(redact_secret_values(data.get("message") or data.get("error") or "Nimiq helper failed"))
     return data
 
 
@@ -248,6 +278,77 @@ def _integration_payload_base() -> dict[str, Any]:
         "rpc_url": getattr(const, "NIMIQ_RPC_URL", None),
         "fee": int(getattr(const, "NIMIQ_TRANSACTION_FEE", 0)),
     }
+
+
+def validate_public_signer_configuration() -> DerivedSpotAddress:
+    """Prove that both configured public-deployment helper commands can access one key.
+
+    This invokes the non-broadcast ``validate_signer_configuration`` action on
+    both the address-derivation and transaction-send commands. Requiring the
+    same derived address from each command catches missing or inconsistent
+    signing material during startup, before a payout is ever attempted.
+    """
+    derive_env = getattr(
+        const,
+        "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND_ENV",
+        "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND",
+    )
+    send_env = getattr(
+        const,
+        "NIMHUNT_NIMIQ_SEND_COMMAND_ENV",
+        "NIMHUNT_NIMIQ_SEND_COMMAND",
+    )
+    commands = {
+        derive_env: _command_from_env(derive_env),
+        send_env: _command_from_env(send_env),
+    }
+    missing = [name for name, command in commands.items() if not command]
+    if missing:
+        raise WalletConfigError(f"Missing signer helper command: {', '.join(missing)}")
+
+    key_index = 0
+    key_version = int(getattr(const, "SPOT_DEPOSIT_KEY_VERSION", 1))
+    key_path = spot_deposit_key_path(key_index, key_version=key_version)
+    payload = {
+        **_integration_payload_base(),
+        "action": "validate_signer_configuration",
+        "key_index": key_index,
+        "key_path": key_path,
+        "key_version": key_version,
+    }
+
+    validated: list[DerivedSpotAddress] = []
+    for env_name, command in commands.items():
+        assert command is not None
+        data = _run_json_command(command, payload)
+        address = normalise_nimiq_address(
+            str(data.get("address") or ""),
+            field_name=f"{env_name} validation address",
+            allow_dev_placeholder=False,
+        )
+        returned_network = str(data.get("network") or "").strip()
+        if returned_network and returned_network != str(getattr(const, "NIMIQ_NETWORK", "")):
+            raise WalletConfigError(f"{env_name} validated the wrong Nimiq network")
+        validated.append(
+            DerivedSpotAddress(
+                address=address,
+                key_index=int(data.get("key_index", key_index)),
+                key_path=str(data.get("key_path") or key_path),
+                key_version=int(data.get("key_version", key_version)),
+            )
+        )
+
+    first, second = validated
+    if (
+        first.address != second.address
+        or first.key_index != second.key_index
+        or first.key_path != second.key_path
+        or first.key_version != second.key_version
+    ):
+        raise WalletConfigError(
+            "Configured derive and send helper commands do not use the same signer key"
+        )
+    return first
 
 
 NIMIQ_ADDRESS_ALPHABET = "0123456789ABCDEFGHJKLMNPQRSTUVXY"

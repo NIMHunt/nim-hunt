@@ -1,9 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-case "${NIMHUNT_PRODUCTION:-}" in
+DEPLOYMENT_MODE="${NIMHUNT_DEPLOYMENT_MODE:-}"
+LEGACY_PRODUCTION="${NIMHUNT_PRODUCTION:-}"
+
+case "$DEPLOYMENT_MODE" in
+    public-testnet|production)
+        echo "Refusing to start the development server in public deployment mode: $DEPLOYMENT_MODE."
+        exit 1
+        ;;
+    development|"")
+        ;;
+    *)
+        echo "Refusing to start the development server: unknown NIMHUNT_DEPLOYMENT_MODE=$DEPLOYMENT_MODE."
+        exit 1
+        ;;
+esac
+
+case "$LEGACY_PRODUCTION" in
     1|true|TRUE|yes|YES|on|ON)
-        echo "Refusing to start the development server while NIMHUNT_PRODUCTION is enabled."
+        echo "Refusing to start the development server while legacy NIMHUNT_PRODUCTION is enabled."
         exit 1
         ;;
 esac
@@ -42,6 +58,8 @@ if [ ! -d "$NIMIQ_CORE_PATH" ]; then
 fi
 
 source venv/bin/activate
+
+export NIMHUNT_DEPLOYMENT_MODE="${NIMHUNT_DEPLOYMENT_MODE:-development}"
 
 # Development/TestAlbatross settings.
 # Replace the default-test-mnemonic setting with NIMHUNT_NIMIQ_MNEMONIC before using real funds.

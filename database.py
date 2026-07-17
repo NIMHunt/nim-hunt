@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager, suppress
 
 import aiosqlite
 
+import constants as const
 from constants import (
     CLAIM_STATUS_FAILED,
     CLAIM_STATUS_PENDING,
@@ -58,6 +59,23 @@ DB_PATH = os.getenv("NIMHUNT_DB_PATH", "records.db").strip() or "records.db"
 # changes. Existing non-empty databases with another version are rejected
 # with a clear instruction to recreate them.
 SCHEMA_VERSION = 1
+
+# Durable chain and deployment identity prevents a TestAlbatross database from
+# being silently reinterpreted as MainAlbatross, and prevents a local/mock
+# development database from being exposed as a public service. This small
+# additive table is compatible with the current schema.
+APP_METADATA_TABLE_NAME = "app_metadata"
+APP_METADATA_KEY = "key"
+APP_METADATA_VALUE = "value"
+METADATA_NIMIQ_NETWORK = "nimiq_network"
+METADATA_NIMIQ_NETWORK_ID = "nimiq_network_id"
+METADATA_DEPLOYMENT_MODE = "deployment_mode"
+CREATE_APP_METADATA_TABLE = f"""
+CREATE TABLE IF NOT EXISTS {APP_METADATA_TABLE_NAME} (
+    {APP_METADATA_KEY} TEXT PRIMARY KEY,
+    {APP_METADATA_VALUE} TEXT NOT NULL
+);
+"""
 
 
 # --------------------------------------
@@ -1419,12 +1437,12 @@ JOIN {USER_TABLE_NAME} owner
 # Fresh-schema development policy
 # --------------------------------------
 
-async def _require_empty_or_current_schema(db) -> None:
-    """Reject old development databases instead of migrating them in place.
+async def _require_empty_or_current_schema(db) -> bool:
+    """Reject databases whose schema version this code cannot safely operate.
 
-    NimHunt has no production records yet, so schema changes are handled by
-    recreating records.db. An empty SQLite file is accepted and initialised
-    below. A non-empty database must already carry this exact SCHEMA_VERSION.
+    Local development can recreate its mock database. Public databases are
+    never reset automatically and instead require compatible code or an
+    explicit migration. An empty SQLite file is accepted and initialised below.
     """
     cur = await db.execute("PRAGMA user_version;")
     row = await cur.fetchone()
@@ -1447,9 +1465,70 @@ async def _require_empty_or_current_schema(db) -> None:
     has_app_tables = await cur.fetchone() is not None
 
     if has_app_tables and current_version != SCHEMA_VERSION:
+        if bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
+            raise RuntimeError(
+                "This public NimHunt database uses an unsupported schema. Do not reset it; "
+                "restore a compatible deployment or perform a deliberate migration."
+            )
         raise RuntimeError(
-            "This NimHunt database uses an unsupported development schema. "
+            "This NimHunt development database uses an unsupported schema. "
             "Stop the server and run ./nimhunt_reset_mock_data.sh to recreate records.db."
+        )
+    return has_app_tables
+
+
+async def _ensure_database_network_identity(db, *, had_app_tables: bool) -> None:
+    """Bind a database to one network/mode and reject unsafe later reuse."""
+    await db.executescript(CREATE_APP_METADATA_TABLE)
+    cur = await db.execute(
+        f"""
+        SELECT {APP_METADATA_KEY}, {APP_METADATA_VALUE}
+        FROM {APP_METADATA_TABLE_NAME}
+        WHERE {APP_METADATA_KEY} IN (?, ?, ?);
+        """,
+        (METADATA_NIMIQ_NETWORK, METADATA_NIMIQ_NETWORK_ID, METADATA_DEPLOYMENT_MODE),
+    )
+    metadata = {str(row[0]): str(row[1]) for row in await cur.fetchall()}
+    configured_network = str(getattr(const, "NIMIQ_NETWORK", "")).strip()
+    configured_network_id = str(int(getattr(const, "NIMIQ_NETWORK_ID", 0)))
+    configured_mode = str(getattr(const, "DEPLOYMENT_MODE", "development")).strip()
+
+    if not metadata:
+        if had_app_tables and bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
+            raise RuntimeError(
+                "This existing NimHunt database has no recorded Nimiq network identity. "
+                "Use a fresh database for a public deployment, or open it once in "
+                "development with the correct network to bind it deliberately."
+            )
+        await db.executemany(
+            f"""
+            INSERT INTO {APP_METADATA_TABLE_NAME} ({APP_METADATA_KEY}, {APP_METADATA_VALUE})
+            VALUES (?, ?);
+            """,
+            (
+                (METADATA_NIMIQ_NETWORK, configured_network),
+                (METADATA_NIMIQ_NETWORK_ID, configured_network_id),
+                (METADATA_DEPLOYMENT_MODE, configured_mode),
+            ),
+        )
+        return
+
+    stored_network = metadata.get(METADATA_NIMIQ_NETWORK)
+    stored_network_id = metadata.get(METADATA_NIMIQ_NETWORK_ID)
+    stored_mode = metadata.get(METADATA_DEPLOYMENT_MODE)
+    if stored_network is None or stored_network_id is None or stored_mode is None:
+        raise RuntimeError("NimHunt database deployment metadata is incomplete")
+    if stored_network != configured_network or stored_network_id != configured_network_id:
+        raise RuntimeError(
+            "NimHunt database network mismatch: database is bound to "
+            f"{stored_network} (ID {stored_network_id}), but this process is configured "
+            f"for {configured_network} (ID {configured_network_id}). Use a separate database."
+        )
+    if stored_mode != configured_mode:
+        raise RuntimeError(
+            "NimHunt database deployment-mode mismatch: database is bound to "
+            f"{stored_mode}, but this process is configured for {configured_mode}. "
+            "Use a separate database rather than exposing development or cross-mode data."
         )
 
 
@@ -1469,7 +1548,8 @@ async def init_db():
         await db.execute("PRAGMA journal_mode = WAL;")
         await db.execute("PRAGMA synchronous = NORMAL;")
         await db.execute("PRAGMA foreign_keys = ON;")
-        await _require_empty_or_current_schema(db)
+        had_app_tables = await _require_empty_or_current_schema(db)
+        await _ensure_database_network_identity(db, had_app_tables=had_app_tables)
 
         await db.executescript(CREATE_USER_TABLE)
         await db.executescript(USER_INDEX_STATUS_QUERY)

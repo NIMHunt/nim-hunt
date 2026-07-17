@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,9 @@ import wallet
 from starlette.requests import Request
 
 SAFE_PRODUCTION_SETTINGS = {
+    "DEPLOYMENT_MODE": "production",
+    "PUBLIC_DEPLOYMENT": True,
+    "PUBLIC_TESTNET_MODE": False,
     "PRODUCTION_MODE": True,
     "TEST_FEATURES_ENABLED": False,
     "DEFAULT_TO_TEST_USER": False,
@@ -56,18 +60,26 @@ def patched_settings(**overrides):
                     default_mnemonic_env: "",
                     derive_command_env: "configured-derive-helper",
                     send_command_env: "configured-send-helper",
+                    "NIMHUNT_NIMIQ_MNEMONIC": "private operator mnemonic words",
+                    "NIMHUNT_NIMIQ_EXTERNAL_SIGNER": "",
                 },
                 clear=False,
             )
         )
         for name, value in settings.items():
             stack.enter_context(mock.patch.object(const, name, value))
+        stack.enter_context(
+            mock.patch.object(main.database, "DB_PATH", "/srv/nimhunt/records.db")
+        )
         yield
 
 
 class ProductionSafetyValidationTest(unittest.TestCase):
     def test_local_development_settings_are_allowed_when_not_in_production(self):
         with patched_settings(
+            DEPLOYMENT_MODE="development",
+            PUBLIC_DEPLOYMENT=False,
+            PUBLIC_TESTNET_MODE=False,
             PRODUCTION_MODE=False,
             TEST_FEATURES_ENABLED=True,
             DEFAULT_TO_TEST_USER=True,
@@ -79,18 +91,18 @@ class ProductionSafetyValidationTest(unittest.TestCase):
             NIMIQ_HUB_URL="https://hub.nimiq-testnet.com",
             SPOT_CANCELLATION_FEE_ADDRESS="NQ00 NIMHUNT DEV CANCELLATION FEE POOL",
         ):
-            main.validate_production_safety()
+            main.validate_deployment_safety()
 
     def test_production_refuses_test_features_flag(self):
         with patched_settings(TEST_FEATURES_ENABLED=True):
             with self.assertRaisesRegex(RuntimeError, "TEST_FEATURES_ENABLED"):
-                main.validate_production_safety()
+                main.validate_deployment_safety()
 
     def test_production_refuses_unencrypted_dev_seed(self):
         dev_seed_env = getattr(const, "NIMHUNT_DEV_MASTER_SEED_ENV", "NIMHUNT_DEV_MASTER_SEED")
         with patched_settings(), mock.patch.dict(os.environ, {dev_seed_env: "unsafe seed"}, clear=False):
             with self.assertRaisesRegex(RuntimeError, dev_seed_env):
-                main.validate_production_safety()
+                main.validate_deployment_safety()
 
     def test_production_refuses_public_default_test_mnemonic(self):
         env_name = getattr(
@@ -100,12 +112,13 @@ class ProductionSafetyValidationTest(unittest.TestCase):
         )
         with patched_settings(), mock.patch.dict(os.environ, {env_name: "1"}, clear=False):
             with self.assertRaisesRegex(RuntimeError, env_name):
-                main.validate_production_safety()
+                main.validate_deployment_safety()
 
     def test_production_environment_disables_test_helpers_at_import(self):
         command = (
             "import constants; "
-            "print(int(constants.PRODUCTION_MODE), int(constants.TEST_FEATURES_ENABLED), "
+            "print(constants.DEPLOYMENT_MODE, int(constants.PUBLIC_DEPLOYMENT), "
+            "int(constants.PRODUCTION_MODE), int(constants.TEST_FEATURES_ENABLED), "
             "int(constants.DEFAULT_TO_TEST_USER), int(constants.ALLOW_DEV_WALLET_PLACEHOLDERS))"
         )
         environment = os.environ.copy()
@@ -117,15 +130,17 @@ class ProductionSafetyValidationTest(unittest.TestCase):
             text=True,
             env=environment,
         )
-        self.assertEqual(result.stdout.strip(), "1 0 0 0")
+        self.assertEqual(result.stdout.strip(), "production 1 1 0 0 0")
 
     def test_development_environment_keeps_test_helpers_at_import(self):
         command = (
             "import constants; "
-            "print(int(constants.PRODUCTION_MODE), int(constants.TEST_FEATURES_ENABLED), "
+            "print(constants.DEPLOYMENT_MODE, int(constants.PUBLIC_DEPLOYMENT), "
+            "int(constants.PRODUCTION_MODE), int(constants.TEST_FEATURES_ENABLED), "
             "int(constants.DEFAULT_TO_TEST_USER), int(constants.ALLOW_DEV_WALLET_PLACEHOLDERS))"
         )
         environment = os.environ.copy()
+        environment.pop("NIMHUNT_DEPLOYMENT_MODE", None)
         environment.pop("NIMHUNT_PRODUCTION", None)
         result = subprocess.run(
             [sys.executable, "-c", command],
@@ -134,7 +149,7 @@ class ProductionSafetyValidationTest(unittest.TestCase):
             text=True,
             env=environment,
         )
-        self.assertEqual(result.stdout.strip(), "0 1 1 1")
+        self.assertEqual(result.stdout.strip(), "development 0 0 1 1 1")
 
     def test_production_ignores_unencrypted_development_seed(self):
         dev_seed_env = getattr(const, "NIMHUNT_DEV_MASTER_SEED_ENV", "NIMHUNT_DEV_MASTER_SEED")
@@ -148,25 +163,20 @@ class ProductionSafetyValidationTest(unittest.TestCase):
     def test_production_refuses_test_user_fallback(self):
         with patched_settings(DEFAULT_TO_TEST_USER=True):
             with self.assertRaisesRegex(RuntimeError, "DEFAULT_TO_TEST_USER"):
-                main.validate_production_safety()
+                main.validate_deployment_safety()
 
     def test_production_refuses_dev_wallet_settings_and_testnet(self):
         with patched_settings(
             ALLOW_DEV_WALLET_PLACEHOLDERS=True,
             ALLOW_DEV_WALLET_SENDS=True,
-            NIMIQ_NETWORK="TestAlbatross",
-            NIMIQ_NETWORK_ID=5,
-            NIMIQ_RPC_URL="https://rpc.testnet.nimiqwatch.com/",
-            NIMIQ_HUB_URL="https://hub.nimiq-testnet.com",
-            SPOT_CANCELLATION_FEE_ADDRESS="NQ00 NIMHUNT DEV CANCELLATION FEE POOL",
         ):
             with self.assertRaisesRegex(RuntimeError, "ALLOW_DEV_WALLET_PLACEHOLDERS"):
-                main.validate_production_safety()
+                main.validate_deployment_safety()
 
     def test_production_refuses_malformed_fee_address(self):
         with patched_settings(SPOT_CANCELLATION_FEE_ADDRESS="NQ12 NOT A REAL ADDRESS"):
-            with self.assertRaisesRegex(RuntimeError, "valid production address"):
-                main.validate_production_safety()
+            with self.assertRaisesRegex(RuntimeError, "operator-controlled address"):
+                main.validate_deployment_safety()
 
     def test_production_refuses_testnet_hub_and_dev_fee_address(self):
         with patched_settings(
@@ -174,7 +184,7 @@ class ProductionSafetyValidationTest(unittest.TestCase):
             SPOT_CANCELLATION_FEE_ADDRESS="NQ00 NIMHUNT DEV CANCELLATION FEE POOL",
         ):
             with self.assertRaisesRegex(RuntimeError, "NIMIQ_HUB_URL"):
-                main.validate_production_safety()
+                main.validate_deployment_safety()
 
     def test_network_defaults_match_testalbatross(self):
         command = (
@@ -184,6 +194,7 @@ class ProductionSafetyValidationTest(unittest.TestCase):
         )
         environment = os.environ.copy()
         for name in (
+            "NIMHUNT_DEPLOYMENT_MODE",
             "NIMHUNT_PRODUCTION",
             "NIMHUNT_NIMIQ_NETWORK",
             "NIMHUNT_NIMIQ_RPC_URL",
@@ -274,13 +285,16 @@ class ProductionSafetyValidationTest(unittest.TestCase):
 
     def test_runtime_refuses_mismatched_network_id_even_in_development(self):
         with patched_settings(
+            DEPLOYMENT_MODE="development",
+            PUBLIC_DEPLOYMENT=False,
+            PUBLIC_TESTNET_MODE=False,
             PRODUCTION_MODE=False,
             NIMIQ_NETWORK="TestAlbatross",
             NIMIQ_NETWORK_ID=6,
             NIMIQ_RPC_URL="https://rpc.testnet.nimiqwatch.com/",
         ):
             with self.assertRaisesRegex(RuntimeError, "NIMIQ_NETWORK_ID must be 5"):
-                main.validate_production_safety()
+                main.validate_deployment_safety()
 
     def test_production_requires_signing_commands(self):
         derive_command_env = getattr(
@@ -294,7 +308,7 @@ class ProductionSafetyValidationTest(unittest.TestCase):
             clear=False,
         ):
             with self.assertRaisesRegex(RuntimeError, derive_command_env):
-                main.validate_production_safety()
+                main.validate_deployment_safety()
 
 
 class DesktopUserGatingTest(unittest.IsolatedAsyncioTestCase):
@@ -343,12 +357,66 @@ class DesktopUserGatingTest(unittest.IsolatedAsyncioTestCase):
 class DevelopmentScriptGuardTest(unittest.IsolatedAsyncioTestCase):
     async def test_mock_seed_refuses_production_before_deleting_database(self):
         with (
-            mock.patch.object(const, "PRODUCTION_MODE", True),
+            mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
             mock.patch.object(spoof, "_remove_existing_database_files") as remove_database,
         ):
-            with self.assertRaisesRegex(RuntimeError, "production mode"):
+            with self.assertRaisesRegex(RuntimeError, "public deployment mode"):
                 await spoof.seed_mock_data()
         remove_database.assert_not_called()
+
+    async def test_mock_seed_refuses_database_already_bound_to_public_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "records.db"
+            connection = sqlite3.connect(path)
+            try:
+                connection.execute(
+                    "CREATE TABLE app_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+                )
+                connection.executemany(
+                    "INSERT INTO app_metadata (key, value) VALUES (?, ?)",
+                    (
+                        ("nimiq_network", "TestAlbatross"),
+                        ("nimiq_network_id", "5"),
+                        ("deployment_mode", "public-testnet"),
+                    ),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            with (
+                mock.patch.object(const, "PUBLIC_DEPLOYMENT", False),
+                mock.patch.object(spoof.schema, "DB_PATH", str(path)),
+                mock.patch.object(spoof, "_remove_existing_database_files") as remove_database,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "bound to public deployment mode"):
+                    await spoof.seed_mock_data()
+            remove_database.assert_not_called()
+
+    async def test_mock_seed_refuses_incomplete_deployment_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "records.db"
+            connection = sqlite3.connect(path)
+            try:
+                connection.execute(
+                    "CREATE TABLE app_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "INSERT INTO app_metadata (key, value) VALUES (?, ?)",
+                    ("deployment_mode", "development"),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            with (
+                mock.patch.object(const, "PUBLIC_DEPLOYMENT", False),
+                mock.patch.object(spoof.schema, "DB_PATH", str(path)),
+                mock.patch.object(spoof, "_remove_existing_database_files") as remove_database,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "metadata is incomplete"):
+                    await spoof.seed_mock_data()
+            remove_database.assert_not_called()
 
     def test_shell_development_helpers_refuse_production(self):
         environment = os.environ.copy()
@@ -363,6 +431,21 @@ class DevelopmentScriptGuardTest(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Refusing to", result.stdout)
+
+    def test_shell_development_helpers_refuse_public_testnet(self):
+        environment = os.environ.copy()
+        environment["NIMHUNT_DEPLOYMENT_MODE"] = "public-testnet"
+        environment.pop("NIMHUNT_PRODUCTION", None)
+        for script_name in ("nimhunt_start_dev.sh", "nimhunt_reset_mock_data.sh"):
+            with self.subTest(script=script_name):
+                result = subprocess.run(
+                    ["bash", script_name],
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("public deployment mode", result.stdout)
 
     def test_shell_development_helpers_are_project_path_independent(self):
         for script_name in ("nimhunt_start_dev.sh", "nimhunt_reset_mock_data.sh"):
@@ -406,9 +489,11 @@ class TestFeatureRenderingTest(unittest.IsolatedAsyncioTestCase):
 class ApplicationLifespanTest(unittest.IsolatedAsyncioTestCase):
     async def test_production_startup_requires_successful_initial_financial_passes(self):
         with (
-            mock.patch.object(const, "PRODUCTION_MODE", True),
-            mock.patch.object(main, "validate_production_safety"),
-            mock.patch.object(main, "init_db", mock.AsyncMock()),
+            mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
+            mock.patch.object(main, "validate_deployment_safety"),
+            mock.patch.object(main, "verify_public_signing_access"),
+            mock.patch.object(main, "verify_public_rpc_network", mock.AsyncMock()),
+            mock.patch.object(main.database, "init_db", mock.AsyncMock()),
             mock.patch.object(main.cache, "start_cache_refresher", mock.AsyncMock()),
             mock.patch.object(
                 main.settlement_updater,
@@ -461,9 +546,11 @@ class ApplicationLifespanTest(unittest.IsolatedAsyncioTestCase):
         failure = RuntimeError("settlement startup failed")
         shutdown = mock.AsyncMock()
         with (
-            mock.patch.object(const, "PRODUCTION_MODE", True),
-            mock.patch.object(main, "validate_production_safety"),
-            mock.patch.object(main, "init_db", mock.AsyncMock()),
+            mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
+            mock.patch.object(main, "validate_deployment_safety"),
+            mock.patch.object(main, "verify_public_signing_access"),
+            mock.patch.object(main, "verify_public_rpc_network", mock.AsyncMock()),
+            mock.patch.object(main.database, "init_db", mock.AsyncMock()),
             mock.patch.object(main.cache, "start_cache_refresher", mock.AsyncMock()),
             mock.patch.object(
                 main.settlement_updater,

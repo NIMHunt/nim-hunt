@@ -15,6 +15,7 @@ before running it, then restart the server so its cache uses the new database.
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import time
 from contextlib import suppress
 from dataclasses import dataclass
@@ -53,6 +54,61 @@ class MockSpot:
 def _device_hash_for_user(user_id: int) -> str:
     """Return a stable 64-character fake device hash for a mock USER."""
     return f"{int(user_id):064x}"[-64:]
+
+
+def _refuse_public_database_reset() -> None:
+    """Refuse to delete a database already marked for a public deployment."""
+    db_path = Path(schema.DB_PATH)
+    if not db_path.exists():
+        return
+
+    try:
+        connection = sqlite3.connect(db_path)
+        try:
+            table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (schema.APP_METADATA_TABLE_NAME,),
+            ).fetchone()
+            if table is None:
+                return
+            rows = dict(
+                connection.execute(
+                    f"SELECT {schema.APP_METADATA_KEY}, {schema.APP_METADATA_VALUE} "
+                    f"FROM {schema.APP_METADATA_TABLE_NAME} "
+                    f"WHERE {schema.APP_METADATA_KEY} IN (?, ?, ?)",
+                    (
+                        schema.METADATA_NIMIQ_NETWORK,
+                        schema.METADATA_NIMIQ_NETWORK_ID,
+                        schema.METADATA_DEPLOYMENT_MODE,
+                    ),
+                ).fetchall()
+            )
+        finally:
+            connection.close()
+    except sqlite3.DatabaseError as exc:
+        raise RuntimeError(
+            "Refusing to reset a database whose deployment metadata could not be read"
+        ) from exc
+
+    required_keys = {
+        schema.METADATA_NIMIQ_NETWORK,
+        schema.METADATA_NIMIQ_NETWORK_ID,
+        schema.METADATA_DEPLOYMENT_MODE,
+    }
+    if set(rows) != required_keys:
+        raise RuntimeError(
+            "Refusing to reset a database whose deployment metadata is incomplete"
+        )
+
+    stored_mode = str(rows[schema.METADATA_DEPLOYMENT_MODE]).strip()
+    if stored_mode != "development":
+        if stored_mode in {"public-testnet", "production"}:
+            raise RuntimeError(
+                f"Refusing to reset a database bound to public deployment mode {stored_mode}"
+            )
+        raise RuntimeError(
+            "Refusing to reset a database with an unknown deployment-mode marker"
+        )
 
 
 def _remove_existing_database_files() -> None:
@@ -162,9 +218,10 @@ async def _create_confirmed_deposit_for_spot(
 
 async def seed_mock_data() -> dict[str, Any]:
     """Recreate the database, seed a dynamic mock dataset, and return a summary."""
-    if bool(getattr(const, "PRODUCTION_MODE", False)):
-        raise RuntimeError("Refusing to reset or seed mock data in production mode")
+    if bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
+        raise RuntimeError("Refusing to reset or seed mock data in a public deployment mode")
 
+    _refuse_public_database_reset()
     _remove_existing_database_files()
     await init_db()
     now = int(time.time())

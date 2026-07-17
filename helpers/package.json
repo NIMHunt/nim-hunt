@@ -7,6 +7,6 @@
     "test": "node --test transaction_data.test.mjs"
   },
   "dependencies": {
-    "@nimiq/core": "latest"
+    "@nimiq/core": "2.7.1"
   }
 }

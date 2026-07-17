@@ -9,10 +9,40 @@ Shared constants for NimHunt.
 """
 
 import os
+from pathlib import Path
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an integer setting while keeping a clear import-time error."""
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        return int(default)
+    try:
+        return int(raw_value.strip())
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+
+
+def _canonical_nimiq_network(value: str) -> str:
+    """Normalise known Nimiq network names without hiding unknown values."""
+    clean_value = str(value or "").strip()
+    known_networks = {
+        "testalbatross": "TestAlbatross",
+        "mainalbatross": "MainAlbatross",
+        "devalbatross": "DevAlbatross",
+    }
+    return known_networks.get(clean_value.lower(), clean_value)
+
 
 # -----------------------------
 # APP Settings
 # -----------------------------
+
+# Absolute project paths keep static files and templates available even when
+# Uvicorn is launched from a different working directory.
+PROJECT_ROOT = Path(__file__).resolve().parent
+STATIC_DIR = PROJECT_ROOT / "static"
+TEMPLATES_DIR = PROJECT_ROOT / "templates"
 
 # Change this once if the app is ever renamed.
 APP_NAME = "NimHunt"
@@ -142,7 +172,10 @@ MIN_PRIZEDRAW_PRIZE_PAYOUT = MIN_PRIZEDRAW_PRIZE_PAYOUT_NIM * LUNA_PER_NIM
 # to NIM only at the UI boundary. The fee address is a development placeholder
 # until a real pooled-fee Nimiq address is configured.
 SPOT_CANCELLATION_FEE = 1 * LUNA_PER_NIM
-SPOT_CANCELLATION_FEE_ADDRESS = "NQ00 NIMHUNT DEV CANCELLATION FEE POOL"
+SPOT_CANCELLATION_FEE_ADDRESS = os.getenv(
+    "NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS",
+    "NQ00 NIMHUNT DEV CANCELLATION FEE POOL",
+).strip()
 
 # Draft SPOT defaults used when a creator has only entered the initial title.
 # These keep the row valid while the full Create Spot form is still incomplete.
@@ -160,16 +193,37 @@ DEFAULT_DRAFT_SPOT_USE_PASSWORD = 0
 # encrypted master seed or delegated to a configured signing command. It should
 # never be stored in SQLite.
 #
-# Network names match the Nimiq Web Client configuration names. TestAlbatross
-# should be used while developing. MainAlbatross is the production network.
-NIMIQ_NETWORK = "TestAlbatross"
-NIMIQ_NETWORK_ID = 6
-NIMIQ_RPC_URL = "https://rpc.nimiqwatch.com"
-NIMIQ_RPC_TIMEOUT_SECONDS = 12
+# Network names match the official Nimiq client configuration names. The
+# numeric IDs are protocol values used when constructing and verifying
+# transactions: TestAlbatross=5, MainAlbatross=24, DevAlbatross=6.
+NIMIQ_NETWORK_IDS = {
+    "TestAlbatross": 5,
+    "MainAlbatross": 24,
+    "DevAlbatross": 6,
+}
+NIMIQ_NETWORK = _canonical_nimiq_network(
+    os.getenv("NIMHUNT_NIMIQ_NETWORK", "TestAlbatross")
+)
+NIMIQ_NETWORK_ID = NIMIQ_NETWORK_IDS.get(NIMIQ_NETWORK, 0)
+
+# Public RPC endpoints are convenient defaults for this small application. A
+# deployment can override them with a trusted provider or its own node. Keeping
+# the default aligned with the selected network prevents test transactions from
+# accidentally being queried on mainnet (or vice versa).
+_DEFAULT_NIMIQ_RPC_URLS = {
+    "TestAlbatross": "https://rpc.testnet.nimiqwatch.com/",
+    "MainAlbatross": "https://rpc.nimiqwatch.com",
+    "DevAlbatross": "",
+}
+NIMIQ_RPC_URL = os.getenv(
+    "NIMHUNT_NIMIQ_RPC_URL",
+    _DEFAULT_NIMIQ_RPC_URLS.get(NIMIQ_NETWORK, ""),
+).strip()
+NIMIQ_RPC_TIMEOUT_SECONDS = _env_int("NIMHUNT_NIMIQ_RPC_TIMEOUT_SECONDS", 12)
 # How many recent address transactions to inspect when getTransactionByHash
 # returns an unstructured response that still needs from/to/amount proof.
-NIMIQ_ADDRESS_TX_LOOKUP_LIMIT = 500
-NIMIQ_TRANSACTION_FEE = 0
+NIMIQ_ADDRESS_TX_LOOKUP_LIMIT = _env_int("NIMHUNT_NIMIQ_ADDRESS_TX_LOOKUP_LIMIT", 500)
+NIMIQ_TRANSACTION_FEE = _env_int("NIMHUNT_NIMIQ_TRANSACTION_FEE", 0)
 # Keep human-readable transaction descriptions compact. The limit is measured
 # in UTF-8 bytes because that is what is placed in Nimiq transaction data.
 NIMIQ_TRANSACTION_DESCRIPTION_MAX_BYTES = 30
@@ -177,7 +231,15 @@ NIMIQ_TRANSACTION_DESCRIPTION_MAX_BYTES = 30
 # Nimiq Pay / Hub endpoints used by browser-side user deposits. The server does
 # not drive the user's Pay app directly; it returns deposit intents and records
 # the tx hash after Pay confirms the transaction.
-NIMIQ_HUB_URL = "https://hub.nimiq-testnet.com"
+_DEFAULT_NIMIQ_HUB_URLS = {
+    "TestAlbatross": "https://hub.nimiq-testnet.com",
+    "MainAlbatross": "https://hub.nimiq.com",
+    "DevAlbatross": "https://hub.nimiq-testnet.com",
+}
+NIMIQ_HUB_URL = os.getenv(
+    "NIMHUNT_NIMIQ_HUB_URL",
+    _DEFAULT_NIMIQ_HUB_URLS.get(NIMIQ_NETWORK, ""),
+).strip()
 NIMIQ_PAY_PROVIDER = "nimiq-pay-mini-app-sdk"
 
 # Address/signing integration. If NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND or

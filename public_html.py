@@ -37,19 +37,12 @@ import trans_updater
 from transaction_descriptions import build_transaction_description
 from database import get_db
 
-try:
-    import cache
-except Exception:  # pragma: no cover - cache is optional during early setup
-    cache = None  # type: ignore[assignment]
-
-try:
-    import settlement_updater
-except Exception:  # pragma: no cover - settlement is optional while bootstrapping
-    settlement_updater = None  # type: ignore[assignment]
+import cache
+import settlement_updater
 
 
 router = APIRouter()
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory=str(const.TEMPLATES_DIR))
 
 _ASSET_VERSION = "production-hardening-v1-20260717"
 
@@ -227,35 +220,13 @@ def _optional_float(value: Any) -> float | None:
 
 
 async def _notify_user_cache(db, *, user_id: int) -> None:
-    """Refresh/invalidate user cache when available.
-
-    cache.py has changed during development, so this intentionally uses a soft
-    lookup. If the cache module is not ready yet, the home page still works.
-    """
-    if cache is None:
-        return
-
-    notify = getattr(cache, "notify_user_changed", None)
-    mark_dirty = getattr(cache, "mark_user_cache_dirty", None)
-
-    if callable(notify):
-        await notify(db, user_id=int(user_id))
-    elif callable(mark_dirty):
-        mark_dirty()
+    """Refresh cached user data after a user-facing write."""
+    await cache.notify_user_changed(db, user_id=int(user_id))
 
 
 async def _notify_spot_cache(db, *, spot_id: int) -> None:
-    """Refresh/invalidate public SPOT cache when a SPOT lifecycle changes."""
-    if cache is None:
-        return
-
-    notify = getattr(cache, "notify_spot_changed", None)
-    mark_dirty = getattr(cache, "mark_spot_cache_dirty", None)
-
-    if callable(notify):
-        await notify(db, spot_id=int(spot_id))
-    elif callable(mark_dirty):
-        mark_dirty()
+    """Refresh cached public and owner data for one Spot."""
+    await cache.notify_spot_changed(db, spot_id=int(spot_id))
 
 
 async def _notify_all_cache_for_spot_owner_change(db, *, user_id: int, spot_id: int) -> None:
@@ -264,99 +235,26 @@ async def _notify_all_cache_for_spot_owner_change(db, *, user_id: int, spot_id: 
 
 
 async def _notify_capacity_cleanup_cache(db, *, cleanup: dict[str, Any] | None) -> None:
-    """Refresh/dirty cache after capacity cleanup fails other pending claims."""
-    if cache is None or not isinstance(cleanup, dict):
-        return
-    if int(cleanup.get("failed_count") or 0) <= 0:
+    """Refresh caches after capacity cleanup fails other pending claims."""
+    if not isinstance(cleanup, dict) or int(cleanup.get("failed_count") or 0) <= 0:
         return
 
     spot_id = cleanup.get("spot_id")
-    if spot_id is None:
-        return
-
-    notify_claim = getattr(cache, "notify_claim_changed", None)
-    mark_spot_dirty = getattr(cache, "mark_spot_cache_dirty", None)
-    mark_user_dirty = getattr(cache, "mark_user_cache_dirty", None)
-
-    if callable(notify_claim):
-        await notify_claim(db, spot_id=int(spot_id), user_id=None)
-    else:
-        if callable(mark_spot_dirty):
-            mark_spot_dirty()
-        if callable(mark_user_dirty):
-            mark_user_dirty()
+    if spot_id is not None:
+        await cache.notify_claim_changed(db, spot_id=int(spot_id), user_id=None)
 
 
 async def _notify_all_cache_if_user_display_changed(db, *, user_id: int) -> None:
-    """A display-name change can affect user cache and public spot creator names."""
-    if cache is None:
-        return
-
-    notify_user = getattr(cache, "notify_user_changed", None)
-    mark_user_dirty = getattr(cache, "mark_user_cache_dirty", None)
-    mark_spot_dirty = getattr(cache, "mark_spot_cache_dirty", None)
-
-    if callable(notify_user):
-        await notify_user(db, user_id=int(user_id))
-    elif callable(mark_user_dirty):
-        mark_user_dirty()
-
-    if callable(mark_spot_dirty):
-        mark_spot_dirty()
+    """Refresh user data and creator names after a display-name change."""
+    await cache.notify_user_changed(db, user_id=int(user_id))
 
 
 async def _home_metrics(db) -> dict[str, int]:
-    """Return small public homepage metrics.
-
-    Prefer cache.py when available so the Home page does not need bespoke SQL
-    for common counters. Fall back to direct SQLite counts if the cache module
-    is unavailable or still being developed.
-    """
-    if cache is not None:
-        cached_metrics = getattr(cache, "get_cached_home_metrics", None)
-        if callable(cached_metrics):
-            metrics = await cached_metrics(db)
-            return {
-                "active_spot_count": int(metrics.get("active_spot_count", 0) or 0),
-                "daily_user_count": int(metrics.get("daily_user_count", 0) or 0),
-            }
-
-        cached_spot_counts = getattr(cache, "get_cached_spot_counts", None)
-        cached_daily_users = getattr(cache, "get_cached_daily_user_count", None)
-        if callable(cached_spot_counts) and callable(cached_daily_users):
-            spot_counts = await cached_spot_counts(db)
-            daily_users = await cached_daily_users(db)
-            return {
-                "active_spot_count": int(spot_counts.get("current_spot_count", 0) or 0),
-                "daily_user_count": int(daily_users or 0),
-            }
-
-    cur = await db.execute(
-        f"""
-        SELECT COUNT(*) AS n
-        FROM {schema.SPOT_TABLE_NAME}
-        WHERE {schema.SPOT_STATUS} = ?
-          AND {schema.SPOT_LAT} IS NOT NULL
-          AND {schema.SPOT_LONG} IS NOT NULL
-          AND ({schema.SPOT_STARTS_AT} IS NULL OR {schema.SPOT_STARTS_AT} <= unixepoch())
-          AND ({schema.SPOT_STARTS_AT} IS NULL OR ({schema.SPOT_STARTS_AT} + {schema.SPOT_ENDS_AT}) > unixepoch());
-        """,
-        (const.SPOT_STATUS_PUBLISHED,),
-    )
-    active_row = await cur.fetchone()
-
-    cur = await db.execute(
-        f"""
-        SELECT COUNT(*) AS n
-        FROM {schema.USER_TABLE_NAME}
-        WHERE {schema.USER_LAST_SEEN_AT} >= unixepoch() - 86400;
-        """
-    )
-    daily_row = await cur.fetchone()
-
+    """Return small public homepage metrics from the cache layer."""
+    metrics = await cache.get_cached_home_metrics(db)
     return {
-        "active_spot_count": int(active_row["n"] or 0),
-        "daily_user_count": int(daily_row["n"] or 0),
+        "active_spot_count": int(metrics.get("active_spot_count", 0) or 0),
+        "daily_user_count": int(metrics.get("daily_user_count", 0) or 0),
     }
 
 
@@ -993,7 +891,7 @@ async def favicon() -> FileResponse:
     different icon path. Serving this route prevents harmless 404 noise in
     the Uvicorn terminal.
     """
-    return FileResponse("static/favicon.svg", media_type="image/svg+xml")
+    return FileResponse(const.STATIC_DIR / "favicon.svg", media_type="image/svg+xml")
 
 
 # ---------------------------------------------------------------------------
@@ -1639,11 +1537,10 @@ async def claim_spot_api(spot_id: int, payload: ClaimSpotRequest) -> JSONRespons
         )
         await _notify_capacity_cleanup_cache(db, cleanup=claim.get("capacity_cleanup") if isinstance(claim, dict) else None)
 
-        if settlement_updater is not None:
-            await settlement_updater.payout_standard_claim_if_ready(
-                claim_id=int(claim[schema.CLAIM_ID])
-            )
-            await settlement_updater.settle_prizedraw_spot_if_ready(spot_id=int(spot_id))
+        await settlement_updater.payout_standard_claim_if_ready(
+            claim_id=int(claim[schema.CLAIM_ID])
+        )
+        await settlement_updater.settle_prizedraw_spot_if_ready(spot_id=int(spot_id))
 
         refreshed_claim = await db_access.get_claim(db, claim_id=int(claim[schema.CLAIM_ID]))
         claim_transactions = await db_access.get_transactions_by_claim(db, claim_id=int(claim[schema.CLAIM_ID]))
@@ -1748,7 +1645,7 @@ async def claim_location_heartbeat_api(claim_id: int, payload: HomeSessionReques
         await _notify_all_cache_for_spot_owner_change(db, user_id=user_id, spot_id=int(claim[schema.CLAIM_SPOT_ID]))
         await _notify_capacity_cleanup_cache(db, cleanup=claim.get("capacity_cleanup") if isinstance(claim, dict) else None)
 
-    if settlement_updater is not None and int(claim.get(schema.CLAIM_STATUS) or const.CLAIM_STATUS_PENDING) == const.CLAIM_STATUS_SUCCESS:
+    if int(claim.get(schema.CLAIM_STATUS) or const.CLAIM_STATUS_PENDING) == const.CLAIM_STATUS_SUCCESS:
         await settlement_updater.payout_standard_claim_if_ready(claim_id=int(claim_id))
         await settlement_updater.settle_prizedraw_spot_if_ready(spot_id=int(claim[schema.CLAIM_SPOT_ID]))
 
@@ -1937,17 +1834,7 @@ async def initial_spots_for_map(
 
     async with get_db() as db:
         now = await db_access.get_unixepoch(db)
-        if cache is not None and hasattr(cache, "get_all_public_spots"):
-            raw_items = await cache.get_all_public_spots(db, limit=500)
-        else:
-            raw_items = await db_access.get_public_spots_in_bounds(
-                db,
-                min_lat=-90,
-                max_lat=90,
-                min_long=-180,
-                max_long=180,
-                limit=500,
-            )
+        raw_items = await cache.get_all_public_spots(db, limit=500)
 
     items = [
         _serialise_spot_for_map(
@@ -1991,28 +1878,16 @@ async def search_spots_for_map(
 
     async with get_db() as db:
         now = await db_access.get_unixepoch(db)
-        if cache is not None and hasattr(cache, "get_spots_in_bounds"):
-            raw_items = await cache.get_spots_in_bounds(
-                db,
-                min_lat=min_lat,
-                max_lat=max_lat,
-                min_long=min_long,
-                max_long=max_long,
-                current_only=current_only,
-                upcoming_only=upcoming_only,
-                limit=limit,
-            )
-        else:
-            raw_items = await db_access.get_public_spots_in_bounds(
-                db,
-                min_lat=min_lat,
-                max_lat=max_lat,
-                min_long=min_long,
-                max_long=max_long,
-                current_only=current_only,
-                upcoming_only=upcoming_only,
-                limit=limit,
-            )
+        raw_items = await cache.get_spots_in_bounds(
+            db,
+            min_lat=min_lat,
+            max_lat=max_lat,
+            min_long=min_long,
+            max_long=max_long,
+            current_only=current_only,
+            upcoming_only=upcoming_only,
+            limit=limit,
+        )
 
     spots = [
         _serialise_spot_for_map(
@@ -2436,10 +2311,7 @@ async def delete_draft_spot_api(spot_id: int, payload: HomeSessionRequest) -> JS
                 )
 
         await _notify_user_cache(db, user_id=user_id)
-        if cache is not None:
-            mark_spot_dirty = getattr(cache, "mark_spot_cache_dirty", None)
-            if callable(mark_spot_dirty):
-                mark_spot_dirty()
+        cache.mark_spot_cache_dirty()
 
     return JSONResponse(
         {
@@ -2507,10 +2379,8 @@ async def my_claims_api(
                 )
             )
 
-        if cache is not None and touched_spot_ids:
-            mark_spot_dirty = getattr(cache, "mark_spot_cache_dirty", None)
-            if callable(mark_spot_dirty):
-                mark_spot_dirty()
+        if touched_spot_ids:
+            cache.mark_spot_cache_dirty()
 
     return JSONResponse(
         {
@@ -2560,15 +2430,12 @@ async def my_spots_api(
                 status_code=status.HTTP_403_FORBIDDEN,
             )
 
-        if cache is not None and hasattr(cache, "get_cached_user_spots"):
-            raw_spots = await cache.get_cached_user_spots(
-                db,
-                user_id=user_id,
-                limit=limit,
-                offset=offset,
-            )
-        else:
-            raw_spots = None
+        raw_spots = await cache.get_cached_user_spots(
+            db,
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+        )
 
         if raw_spots is None:
             raw_spots = await db_access.get_spots_by_user(
@@ -2718,15 +2585,12 @@ async def my_spots_deposit_submitted_api(spot_id: int, payload: DepositSubmitted
                 to_address=spot.get(schema.SPOT_DEPOSIT_ADDRESS),
             )
 
-        if cache is not None:
-            await cache.notify_transaction_changed(
-                db,
-                trans_id=int(deposit_record["trans_id"]),
-                spot_id=spot_id,
-                user_id=user_id,
-            )
-        else:
-            await _notify_user_cache(db, user_id=user_id)
+        await cache.notify_transaction_changed(
+            db,
+            trans_id=int(deposit_record["trans_id"]),
+            spot_id=spot_id,
+            user_id=user_id,
+        )
         spot_summary = await db_access.get_spot_owner_summary(db, spot_id=spot_id)
         transactions = await db_access.get_transactions_by_spot(db, spot_id=spot_id, limit=50)
         now = await db_access.get_unixepoch(db)

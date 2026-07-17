@@ -244,7 +244,7 @@ def _integration_payload_base() -> dict[str, Any]:
     return {
         "app": getattr(const, "APP_NAME", "NimHunt"),
         "network": getattr(const, "NIMIQ_NETWORK", "TestAlbatross"),
-        "network_id": int(getattr(const, "NIMIQ_NETWORK_ID", 6)),
+        "network_id": int(getattr(const, "NIMIQ_NETWORK_ID", 5)),
         "rpc_url": getattr(const, "NIMIQ_RPC_URL", None),
         "fee": int(getattr(const, "NIMIQ_TRANSACTION_FEE", 0)),
     }

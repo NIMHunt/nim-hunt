@@ -1,8 +1,10 @@
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from contextlib import ExitStack, contextmanager
+from pathlib import Path
 from unittest import mock
 
 import constants as const
@@ -19,8 +21,10 @@ SAFE_PRODUCTION_SETTINGS = {
     "ALLOW_DEV_WALLET_PLACEHOLDERS": False,
     "ALLOW_DEV_WALLET_SENDS": False,
     "NIMIQ_NETWORK": "MainAlbatross",
+    "NIMIQ_NETWORK_ID": 24,
+    "NIMIQ_RPC_URL": "https://rpc.nimiqwatch.com",
     "NIMIQ_HUB_URL": "https://hub.nimiq.com",
-    "SPOT_CANCELLATION_FEE_ADDRESS": "NQ12 PRODUCTION CANCELLATION FEE ADDRESS",
+    "SPOT_CANCELLATION_FEE_ADDRESS": "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF",
 }
 
 
@@ -34,10 +38,25 @@ def patched_settings(**overrides):
         "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC",
     )
     with ExitStack() as stack:
+        derive_command_env = getattr(
+            const,
+            "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND_ENV",
+            "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND",
+        )
+        send_command_env = getattr(
+            const,
+            "NIMHUNT_NIMIQ_SEND_COMMAND_ENV",
+            "NIMHUNT_NIMIQ_SEND_COMMAND",
+        )
         stack.enter_context(
             mock.patch.dict(
                 os.environ,
-                {dev_seed_env: "", default_mnemonic_env: ""},
+                {
+                    dev_seed_env: "",
+                    default_mnemonic_env: "",
+                    derive_command_env: "configured-derive-helper",
+                    send_command_env: "configured-send-helper",
+                },
                 clear=False,
             )
         )
@@ -55,11 +74,12 @@ class ProductionSafetyValidationTest(unittest.TestCase):
             ALLOW_DEV_WALLET_PLACEHOLDERS=True,
             ALLOW_DEV_WALLET_SENDS=True,
             NIMIQ_NETWORK="TestAlbatross",
+            NIMIQ_NETWORK_ID=5,
+            NIMIQ_RPC_URL="https://rpc.testnet.nimiqwatch.com/",
             NIMIQ_HUB_URL="https://hub.nimiq-testnet.com",
             SPOT_CANCELLATION_FEE_ADDRESS="NQ00 NIMHUNT DEV CANCELLATION FEE POOL",
         ):
             main.validate_production_safety()
-
 
     def test_production_refuses_test_features_flag(self):
         with patched_settings(TEST_FEATURES_ENABLED=True):
@@ -135,10 +155,17 @@ class ProductionSafetyValidationTest(unittest.TestCase):
             ALLOW_DEV_WALLET_PLACEHOLDERS=True,
             ALLOW_DEV_WALLET_SENDS=True,
             NIMIQ_NETWORK="TestAlbatross",
+            NIMIQ_NETWORK_ID=5,
+            NIMIQ_RPC_URL="https://rpc.testnet.nimiqwatch.com/",
             NIMIQ_HUB_URL="https://hub.nimiq-testnet.com",
             SPOT_CANCELLATION_FEE_ADDRESS="NQ00 NIMHUNT DEV CANCELLATION FEE POOL",
         ):
             with self.assertRaisesRegex(RuntimeError, "ALLOW_DEV_WALLET_PLACEHOLDERS"):
+                main.validate_production_safety()
+
+    def test_production_refuses_malformed_fee_address(self):
+        with patched_settings(SPOT_CANCELLATION_FEE_ADDRESS="NQ12 NOT A REAL ADDRESS"):
+            with self.assertRaisesRegex(RuntimeError, "valid production address"):
                 main.validate_production_safety()
 
     def test_production_refuses_testnet_hub_and_dev_fee_address(self):
@@ -147,6 +174,126 @@ class ProductionSafetyValidationTest(unittest.TestCase):
             SPOT_CANCELLATION_FEE_ADDRESS="NQ00 NIMHUNT DEV CANCELLATION FEE POOL",
         ):
             with self.assertRaisesRegex(RuntimeError, "NIMIQ_HUB_URL"):
+                main.validate_production_safety()
+
+    def test_network_defaults_match_testalbatross(self):
+        command = (
+            "import constants; "
+            "print(constants.NIMIQ_NETWORK, constants.NIMIQ_NETWORK_ID, "
+            "constants.NIMIQ_RPC_URL, constants.NIMIQ_HUB_URL)"
+        )
+        environment = os.environ.copy()
+        for name in (
+            "NIMHUNT_PRODUCTION",
+            "NIMHUNT_NIMIQ_NETWORK",
+            "NIMHUNT_NIMIQ_RPC_URL",
+            "NIMHUNT_NIMIQ_HUB_URL",
+        ):
+            environment.pop(name, None)
+        result = subprocess.run(
+            [sys.executable, "-c", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        self.assertEqual(
+            result.stdout.strip(),
+            "TestAlbatross 5 https://rpc.testnet.nimiqwatch.com/ https://hub.nimiq-testnet.com",
+        )
+
+    def test_production_environment_can_configure_mainnet_without_source_edits(self):
+        command = (
+            "import constants; "
+            "print(constants.NIMIQ_NETWORK, constants.NIMIQ_NETWORK_ID, "
+            "constants.NIMIQ_RPC_URL, constants.NIMIQ_HUB_URL, "
+            "constants.SPOT_CANCELLATION_FEE_ADDRESS)"
+        )
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "NIMHUNT_PRODUCTION": "1",
+                "NIMHUNT_NIMIQ_NETWORK": "MainAlbatross",
+                "NIMHUNT_NIMIQ_RPC_URL": "https://rpc.example.invalid",
+                "NIMHUNT_NIMIQ_HUB_URL": "https://hub.nimiq.com",
+                "NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS": "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF",
+            }
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        self.assertEqual(
+            result.stdout.strip(),
+            "MainAlbatross 24 https://rpc.example.invalid https://hub.nimiq.com "
+            "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF",
+        )
+
+    def test_database_path_can_be_configured_for_persistent_storage(self):
+        command = "import database; print(database.DB_PATH)"
+        environment = os.environ.copy()
+        environment["NIMHUNT_DB_PATH"] = "/srv/nimhunt/records.db"
+        result = subprocess.run(
+            [sys.executable, "-c", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        self.assertEqual(result.stdout.strip(), "/srv/nimhunt/records.db")
+
+    def test_application_assets_resolve_outside_project_working_directory(self):
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        command = (
+            "import asyncio, constants, main, public_html; "
+            "favicon = asyncio.run(public_html.favicon()); "
+            "print(int(constants.STATIC_DIR.is_dir()), "
+            "int(constants.TEMPLATES_DIR.is_dir()), favicon.path)"
+        )
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = project_root
+        with tempfile.TemporaryDirectory() as working_directory:
+            result = subprocess.run(
+                [sys.executable, "-c", command],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+                cwd=working_directory,
+            )
+
+        static_ok, templates_ok, favicon_path = result.stdout.strip().split(" ", 2)
+        self.assertEqual((static_ok, templates_ok), ("1", "1"))
+        self.assertEqual(
+            os.path.realpath(favicon_path),
+            os.path.realpath(os.path.join(project_root, "static", "favicon.svg")),
+        )
+
+    def test_runtime_refuses_mismatched_network_id_even_in_development(self):
+        with patched_settings(
+            PRODUCTION_MODE=False,
+            NIMIQ_NETWORK="TestAlbatross",
+            NIMIQ_NETWORK_ID=6,
+            NIMIQ_RPC_URL="https://rpc.testnet.nimiqwatch.com/",
+        ):
+            with self.assertRaisesRegex(RuntimeError, "NIMIQ_NETWORK_ID must be 5"):
+                main.validate_production_safety()
+
+    def test_production_requires_signing_commands(self):
+        derive_command_env = getattr(
+            const,
+            "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND_ENV",
+            "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND",
+        )
+        with patched_settings(), mock.patch.dict(
+            os.environ,
+            {derive_command_env: ""},
+            clear=False,
+        ):
+            with self.assertRaisesRegex(RuntimeError, derive_command_env):
                 main.validate_production_safety()
 
 
@@ -217,6 +364,14 @@ class DevelopmentScriptGuardTest(unittest.IsolatedAsyncioTestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Refusing to", result.stdout)
 
+    def test_shell_development_helpers_are_project_path_independent(self):
+        for script_name in ("nimhunt_start_dev.sh", "nimhunt_reset_mock_data.sh"):
+            with self.subTest(script=script_name):
+                source = Path(script_name).read_text(encoding="utf-8")
+                self.assertIn("BASH_SOURCE", source)
+                self.assertIn("NIMHUNT_PROJECT_DIR", source)
+                self.assertNotIn("/home/jakorah", source)
+
 
 class TestFeatureRenderingTest(unittest.IsolatedAsyncioTestCase):
     @staticmethod
@@ -249,6 +404,153 @@ class TestFeatureRenderingTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ApplicationLifespanTest(unittest.IsolatedAsyncioTestCase):
+    async def test_production_startup_requires_successful_initial_financial_passes(self):
+        with (
+            mock.patch.object(const, "PRODUCTION_MODE", True),
+            mock.patch.object(main, "validate_production_safety"),
+            mock.patch.object(main, "init_db", mock.AsyncMock()),
+            mock.patch.object(main.cache, "start_cache_refresher", mock.AsyncMock()),
+            mock.patch.object(
+                main.settlement_updater,
+                "start_settlement_refresher",
+                mock.AsyncMock(),
+            ) as start_settlement,
+            mock.patch.object(
+                main.trans_updater,
+                "start_transaction_refresher",
+                mock.AsyncMock(),
+            ) as start_transactions,
+        ):
+            await main.startup()
+
+        start_settlement.assert_awaited_once_with(
+            run_immediately=True,
+            fail_on_initial_error=True,
+        )
+        start_transactions.assert_awaited_once_with(
+            run_immediately=True,
+            fail_on_initial_error=True,
+        )
+
+    async def test_shutdown_attempts_every_service_when_one_stop_fails(self):
+        with (
+            mock.patch.object(
+                main.trans_updater,
+                "stop_transaction_refresher",
+                mock.AsyncMock(side_effect=RuntimeError("stop failed")),
+            ) as stop_transactions,
+            mock.patch.object(
+                main.settlement_updater,
+                "stop_settlement_refresher",
+                mock.AsyncMock(),
+            ) as stop_settlement,
+            mock.patch.object(
+                main.cache,
+                "stop_cache_refresher",
+                mock.AsyncMock(),
+            ) as stop_cache,
+            mock.patch.object(main.logger, "exception"),
+        ):
+            await main.shutdown()
+
+        stop_transactions.assert_awaited_once_with()
+        stop_settlement.assert_awaited_once_with()
+        stop_cache.assert_awaited_once_with()
+
+    async def test_startup_cleans_up_services_after_partial_failure(self):
+        failure = RuntimeError("settlement startup failed")
+        shutdown = mock.AsyncMock()
+        with (
+            mock.patch.object(const, "PRODUCTION_MODE", True),
+            mock.patch.object(main, "validate_production_safety"),
+            mock.patch.object(main, "init_db", mock.AsyncMock()),
+            mock.patch.object(main.cache, "start_cache_refresher", mock.AsyncMock()),
+            mock.patch.object(
+                main.settlement_updater,
+                "start_settlement_refresher",
+                mock.AsyncMock(side_effect=failure),
+            ),
+            mock.patch.object(main, "shutdown", shutdown),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "settlement startup failed"):
+                await main.startup()
+
+        shutdown.assert_awaited_once_with()
+
+    async def test_strict_settlement_startup_propagates_initial_failure(self):
+        error = RuntimeError("settlement unavailable")
+        with (
+            mock.patch.object(
+                main.settlement_updater,
+                "run_settlement_pass",
+                mock.AsyncMock(side_effect=error),
+            ),
+            mock.patch.object(main.settlement_updater.logger, "exception"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "settlement unavailable"):
+                await main.settlement_updater.start_settlement_refresher(
+                    run_immediately=True,
+                    fail_on_initial_error=True,
+                )
+
+        self.assertIsNone(main.settlement_updater._SETTLEMENT_TASK)
+        main.settlement_updater._SETTLEMENT_STOP_EVENT = None
+
+    async def test_strict_settlement_startup_rejects_unsuccessful_result(self):
+        with (
+            mock.patch.object(
+                main.settlement_updater,
+                "run_settlement_pass",
+                mock.AsyncMock(return_value={"ok": False, "reason": "payout failed"}),
+            ),
+            mock.patch.object(main.settlement_updater.logger, "exception"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "reported failure"):
+                await main.settlement_updater.start_settlement_refresher(
+                    run_immediately=True,
+                    fail_on_initial_error=True,
+                )
+
+        self.assertIsNone(main.settlement_updater._SETTLEMENT_TASK)
+        main.settlement_updater._SETTLEMENT_STOP_EVENT = None
+
+    async def test_strict_transaction_startup_propagates_initial_failure(self):
+        error = RuntimeError("transaction RPC unavailable")
+        with (
+            mock.patch.object(
+                main.trans_updater,
+                "check_pending_transactions",
+                mock.AsyncMock(side_effect=error),
+            ),
+            mock.patch.object(main.trans_updater.logger, "exception"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "transaction RPC unavailable"):
+                await main.trans_updater.start_transaction_refresher(
+                    run_immediately=True,
+                    fail_on_initial_error=True,
+                )
+
+        self.assertIsNone(main.trans_updater._TRANS_CHECK_TASK)
+        main.trans_updater._TRANS_CHECK_STOP_EVENT = None
+
+    async def test_strict_transaction_startup_rejects_unsuccessful_result(self):
+        with (
+            mock.patch.object(
+                main.trans_updater,
+                "check_pending_transactions",
+                mock.AsyncMock(return_value={"ok": False, "reason": "RPC failed"}),
+            ),
+            mock.patch.object(main.trans_updater.logger, "exception"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "reported failure"):
+                await main.trans_updater.start_transaction_refresher(
+                    run_immediately=True,
+                    fail_on_initial_error=True,
+                )
+
+        self.assertIsNone(main.trans_updater._TRANS_CHECK_TASK)
+        main.trans_updater._TRANS_CHECK_STOP_EVENT = None
+
     async def test_lifespan_runs_startup_then_shutdown(self):
         calls = []
 

@@ -1,5 +1,5 @@
 import { init, requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { REPORT_REASON_OPTIONS, makeSpotDetailText } from './interface_text.js?v=claim-polish-v2-20260704';
+import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=qol-v1-20260717';
 import {
     appendBulletLine,
     appendDetailDescription,
@@ -11,7 +11,7 @@ import {
     metresToText,
     spotScheduleTooltip,
     unixToText,
-} from './spot_ui.js?v=refactor-v1-20260716';
+} from './spot_ui.js?v=qol-v1-20260717';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { formatNimFromLuna } from './nim_format.js';
 import {
@@ -19,7 +19,7 @@ import {
     getLanguage,
     requestDeviceIdentifierHash,
     responseErrorText as sharedResponseErrorText,
-} from './browser_utils.js?v=refactor-v1-20260716';
+} from './browser_utils.js?v=qol-v1-20260717';
 const state = {
     map: null,
     spotLayer: null,
@@ -74,33 +74,7 @@ const REPORT_TEXT = makeSpotDetailText({
 });
 const REPORT_DETAILS_MAX = Number.parseInt(document.body.dataset.reportDetailsMax || '300', 10);
 
-const UI_COPY = {
-    notices: {
-        locationUnavailable: {
-            title: 'Location unavailable',
-            body: `${APP_NAME} could not read your location. You can still move the map manually. Distances are hidden until location is available.`,
-        },
-        mapSetupFailed: {
-            title: 'Map setup failed',
-            body: 'The spot map could not be loaded. Reload the page and try again.',
-        },
-        spotLoadFailed: {
-            title: 'Could not load spots',
-            body: 'The visible spot list could not be refreshed. Move the map or reload the page.',
-        },
-    },
-    status: {
-        listTitle: 'Visible Spots',
-        listTitleWithCount: (n) => `Visible Spots (${n})`,
-        emptyBeforeLink: 'No spots meet your criteria. Be the first to ',
-        emptyLink: 'make one',
-        emptyAfterLink: '.',
-        ctaBeforeLink: "Not found what you're looking for? Try ",
-        ctaLink: 'making one',
-        ctaAfterLink: '.',
-    },
-};
-
+const UI_COPY = makeFindSpotsText({ appName: APP_NAME });
 const els = {
     noticeBackdrop: document.getElementById('notice-backdrop'),
     noticeTitle: document.getElementById('notice-title'),

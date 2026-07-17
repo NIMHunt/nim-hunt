@@ -268,6 +268,15 @@ def _validate_spot_max_total_claims(max_total_claims: int, *, is_prizedraw: bool
         raise ValueError("max_total_claims can only be 0/unlimited for Prizedraw spots")
     if max_total_claims < const.MIN_SPOT_MAX_TOTAL_CLAIMS and not is_prizedraw:
         raise ValueError(f"max_total_claims must be at least {const.MIN_SPOT_MAX_TOTAL_CLAIMS}")
+    if (
+        is_prizedraw
+        and max_total_claims > 0
+        and max_total_claims < const.MIN_FINITE_PRIZEDRAW_TOTAL_PARTICIPANTS
+    ):
+        raise ValueError(
+            "finite Prizedraw max_total_claims must be at least "
+            f"{const.MIN_FINITE_PRIZEDRAW_TOTAL_PARTICIPANTS}"
+        )
     return max_total_claims
 
 
@@ -282,6 +291,30 @@ def _validate_prizedraw_prize_count(prize_count: int) -> int:
     if options and prize_count not in options:
         raise ValueError("prize_count must be one of the allowed Prizedraw prize-count values")
     return prize_count
+
+
+def _validate_prizedraw_participant_limits(
+    *,
+    max_claims_per_user: int,
+    max_total_claims: int,
+    prize_count: int,
+) -> None:
+    """Validate relationships between finite Prizedraw participation limits."""
+    if max_total_claims == 0:
+        return
+    if max_total_claims < const.MIN_FINITE_PRIZEDRAW_TOTAL_PARTICIPANTS:
+        raise ValueError(
+            "finite Prizedraw max_total_claims must be at least "
+            f"{const.MIN_FINITE_PRIZEDRAW_TOTAL_PARTICIPANTS}"
+        )
+    if max_claims_per_user > 0 and max_claims_per_user >= max_total_claims:
+        raise ValueError(
+            "max_claims_per_user must be less than max_total_claims for a finite Prizedraw"
+        )
+    if prize_count >= max_total_claims:
+        raise ValueError(
+            "prize_count must be less than max_total_claims for a finite Prizedraw"
+        )
 
 
 def _format_nim_plain(luna: int) -> str:
@@ -898,6 +931,7 @@ async def modify_draft_spot(
     claim_duration: Any = _UNSET,
     max_claims_per_user: Any = _UNSET,
     max_total_claims: Any = _UNSET,
+    prize_count: Any = _UNSET,
     use_password: Any = _UNSET,
     total_value: Any = _UNSET,
     starts_at: Any = _UNSET,
@@ -928,7 +962,8 @@ async def modify_draft_spot(
         updates[schema.SPOT_CLAIM_DURATION] = _validate_spot_claim_duration(claim_duration)
     if max_claims_per_user is not _UNSET:
         updates[schema.SPOT_MAX_CLAIMS_PER_USER] = _validate_spot_max_claims_per_user(max_claims_per_user)
-    spot_is_prizedraw = await is_prizedraw(db, spot_id=spot_id)
+    prizedraw = await get_prizedraw(db, spot_id=spot_id)
+    spot_is_prizedraw = prizedraw is not None
     if max_total_claims is not _UNSET:
         updates[schema.SPOT_MAX_TOTAL_CLAIMS] = _validate_spot_max_total_claims(
             max_total_claims,
@@ -937,10 +972,37 @@ async def modify_draft_spot(
     if use_password is not _UNSET:
         updates[schema.SPOT_USE_PASSWORD] = _validate_bool_flag(use_password, field_name="use_password")
 
-    next_max_total_claims = int(updates.get(schema.SPOT_MAX_TOTAL_CLAIMS, existing.get(schema.SPOT_MAX_TOTAL_CLAIMS) or 0))
+    next_max_claims_per_user = int(
+        updates.get(
+            schema.SPOT_MAX_CLAIMS_PER_USER,
+            existing.get(schema.SPOT_MAX_CLAIMS_PER_USER) or 0,
+        )
+    )
+    next_max_total_claims = int(
+        updates.get(
+            schema.SPOT_MAX_TOTAL_CLAIMS,
+            existing.get(schema.SPOT_MAX_TOTAL_CLAIMS) or 0,
+        )
+    )
     next_use_password = int(updates.get(schema.SPOT_USE_PASSWORD, existing.get(schema.SPOT_USE_PASSWORD) or 0))
-    if spot_is_prizedraw and next_use_password:
-        raise ValueError("Prizedraw spots do not use passwords")
+    next_prize_count: int | None = None
+    if spot_is_prizedraw:
+        current_prize_count = int(prizedraw[schema.PRIZEDRAW_PRIZE_COUNT])
+        next_prize_count = (
+            current_prize_count
+            if prize_count is _UNSET
+            else _validate_prizedraw_prize_count(prize_count)
+        )
+        _validate_prizedraw_participant_limits(
+            max_claims_per_user=next_max_claims_per_user,
+            max_total_claims=next_max_total_claims,
+            prize_count=next_prize_count,
+        )
+        if next_use_password:
+            raise ValueError("Prizedraw spots do not use passwords")
+    elif prize_count is not _UNSET:
+        raise ValueError("spot is not a Prizedraw")
+
     if next_use_password and next_max_total_claims <= 0:
         raise ValueError("use_password requires a finite total participant count")
 
@@ -994,21 +1056,38 @@ async def modify_draft_spot(
         updates[schema.SPOT_CITY] = next_city
         updates[schema.SPOT_COUNTRY] = next_country
 
-    if not updates:
+    prize_count_changed = (
+        spot_is_prizedraw
+        and prize_count is not _UNSET
+        and next_prize_count != int(prizedraw[schema.PRIZEDRAW_PRIZE_COUNT])
+    )
+    if not updates and not prize_count_changed:
         return
 
-    assignments = ", ".join(f"{field} = ?" for field in updates)
-    params = [*updates.values(), int(spot_id), const.SPOT_STATUS_DRAFT]
-    cur = await db.execute(
-        f"""
-        UPDATE {schema.SPOT_TABLE_NAME}
-        SET {assignments}
-        WHERE {schema.SPOT_ID} = ?
-          AND {schema.SPOT_STATUS} = ?;
-        """,
-        tuple(params),
-    )
-    _require_one(cur.rowcount, f"Failed to update draft spot id={spot_id}")
+    if updates:
+        assignments = ", ".join(f"{field} = ?" for field in updates)
+        params = [*updates.values(), int(spot_id), const.SPOT_STATUS_DRAFT]
+        cur = await db.execute(
+            f"""
+            UPDATE {schema.SPOT_TABLE_NAME}
+            SET {assignments}
+            WHERE {schema.SPOT_ID} = ?
+              AND {schema.SPOT_STATUS} = ?;
+            """,
+            tuple(params),
+        )
+        _require_one(cur.rowcount, f"Failed to update draft spot id={spot_id}")
+
+    if prize_count_changed:
+        cur = await db.execute(
+            f"""
+            UPDATE {schema.PRIZEDRAW_TABLE_NAME}
+            SET {schema.PRIZEDRAW_PRIZE_COUNT} = ?
+            WHERE {schema.PRIZEDRAW_SPOT_ID} = ?;
+            """,
+            (int(next_prize_count), int(spot_id)),
+        )
+        _require_one(cur.rowcount, f"Failed to update Prizedraw spot_id={spot_id}")
 
     # Draft editing stores only the intent to require claim codes.
     # Codes themselves are generated at publish time, after the draft is funded
@@ -1650,9 +1729,19 @@ async def can_publish_spot(db, *, spot_id: int) -> bool:
         return False
 
     max_total_claims = int(spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) or 0)
-    spot_is_prizedraw = await is_prizedraw(db, spot_id=spot_id)
+    prizedraw = await get_prizedraw(db, spot_id=spot_id)
+    spot_is_prizedraw = prizedraw is not None
     if max_total_claims < const.MIN_SPOT_MAX_TOTAL_CLAIMS and not spot_is_prizedraw:
         return False
+    if spot_is_prizedraw:
+        try:
+            _validate_prizedraw_participant_limits(
+                max_claims_per_user=int(spot.get(schema.SPOT_MAX_CLAIMS_PER_USER) or 0),
+                max_total_claims=max_total_claims,
+                prize_count=int(prizedraw[schema.PRIZEDRAW_PRIZE_COUNT]),
+            )
+        except ValueError:
+            return False
 
     if not await spot_meets_minimum_payout(db, spot_id=spot_id):
         return False
@@ -1759,8 +1848,16 @@ async def create_prizedraw(
     effective_prize_count = _validate_prizedraw_prize_count(
         const.DEFAULT_DRAFT_PRIZEDRAW_PRIZE_COUNT if prize_count is None else prize_count
     )
-    if effective_max_total_claims > 0 and effective_prize_count > effective_max_total_claims:
-        raise ValueError("prize_count cannot exceed max_total_claims unless max_total_claims is 0/unlimited")
+    effective_max_claims_per_user = _validate_spot_max_claims_per_user(
+        const.DEFAULT_DRAFT_SPOT_MAX_CLAIMS_PER_USER
+        if max_claims_per_user is None
+        else max_claims_per_user
+    )
+    _validate_prizedraw_participant_limits(
+        max_claims_per_user=effective_max_claims_per_user,
+        max_total_claims=effective_max_total_claims,
+        prize_count=effective_prize_count,
+    )
     if use_password not in (None, False, 0):
         raise ValueError("Prizedraw spots do not use passwords")
 
@@ -1773,7 +1870,7 @@ async def create_prizedraw(
         long=long,
         radius=radius,
         claim_duration=claim_duration,
-        max_claims_per_user=max_claims_per_user,
+        max_claims_per_user=effective_max_claims_per_user,
         max_total_claims=effective_max_total_claims,
         total_value=total_value,
         starts_at=starts_at,
@@ -1814,8 +1911,12 @@ async def modify_draft_prizedraw(
 
     prize_count = _validate_prizedraw_prize_count(prize_count)
     max_total_claims = int(spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) or 0)
-    if max_total_claims > 0 and prize_count > max_total_claims:
-        raise ValueError("prize_count cannot exceed max_total_claims unless max_total_claims is 0/unlimited")
+    max_claims_per_user = int(spot.get(schema.SPOT_MAX_CLAIMS_PER_USER) or 0)
+    _validate_prizedraw_participant_limits(
+        max_claims_per_user=max_claims_per_user,
+        max_total_claims=max_total_claims,
+        prize_count=prize_count,
+    )
 
     cur = await db.execute(
         f"""

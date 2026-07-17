@@ -14,15 +14,15 @@ import {
     setCopyButtonIcon,
     spotScheduleSummary,
     unixToText,
-} from './spot_ui.js?v=refactor-v1-20260716';
+} from './spot_ui.js?v=qol-v1-20260717';
 import { createReusableSpotMap } from './spot_map.js';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
-import { COMMON_TEXT, makeMySpotsText, SPOT_TEXT } from './interface_text.js?v=claim-polish-v2-20260704';
+import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=qol-v1-20260717';
 import {
     createNoticePresenter,
     getLanguage,
     requestDeviceIdentifierHash,
-} from './browser_utils.js?v=refactor-v1-20260716';
+} from './browser_utils.js?v=qol-v1-20260717';
 
 const state = {
     deviceIdHash: null,
@@ -60,6 +60,8 @@ const SPOT_TITLE_MIN_LENGTH = Number.parseInt(document.body.dataset.spotTitleMin
 const SPOT_TITLE_MAX_LENGTH = Number.parseInt(document.body.dataset.spotTitleMax || '18', 10);
 const DRAFT_SPOT_LIMIT = Number.parseInt(document.body.dataset.draftLimit || '3', 10);
 
+const COMMON_TEXT = getCommonText();
+const SPOT_TEXT = getSpotText();
 const TEXT = makeMySpotsText({
     appName: APP_NAME,
     nimiqPayUrl: NIMIQ_PAY_URL,

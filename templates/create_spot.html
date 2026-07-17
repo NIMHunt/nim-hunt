@@ -28,7 +28,7 @@
     data-max-claim-duration="{{ max_claim_duration_seconds | default(43200) }}"
     data-min-claims-per-user="{{ min_max_claims_per_user | default(0) }}"
     data-max-claims-per-user="{{ max_max_claims_per_user | default(10) }}"
-    data-min-prizedraw-total-participants="{{ min_prizedraw_total_participants | default(0) }}"
+    data-min-prizedraw-total-participants="{{ min_prizedraw_total_participants | default(2) }}"
     data-min-standard-total-participants="{{ min_standard_total_participants | default(1) }}"
     data-max-total-participants="{{ max_total_participants | default(1000) }}"
     data-min-total-nim="{{ min_total_nim | default(100) }}"
@@ -42,9 +42,9 @@
     <div id="notice-backdrop" class="notice-backdrop" hidden>
         <section class="notice-card" role="alertdialog" aria-modal="true" aria-labelledby="notice-title" aria-describedby="notice-body">
             <h2 id="notice-title">{{ app_name | default('NimHunt') }} notice</h2>
-            <p id="notice-body">Something needs your attention.</p>
-            <a id="notice-link" class="notice-link" hidden>Read more</a>
-            <button id="notice-ok" class="nq-button light-blue">OK</button>
+            <p id="notice-body" data-i18n="common.noticeBody">Something needs your attention.</p>
+            <a id="notice-link" class="notice-link" data-i18n="common.readMore" hidden>Read more</a>
+            <button id="notice-ok" class="nq-button light-blue" data-i18n="common.ok">OK</button>
         </section>
     </div>
 
@@ -52,36 +52,36 @@
 
     <div id="delete-spot-backdrop" class="notice-backdrop" hidden>
         <section class="notice-card delete-spot-card" role="dialog" aria-modal="true" aria-labelledby="delete-spot-title" aria-describedby="delete-spot-body">
-            <h2 id="delete-spot-title">Delete Draft</h2>
-            <p id="delete-spot-body">Are you sure you want to delete this draft?</p>
+            <h2 id="delete-spot-title" data-i18n="createSpot.deleteTitle">Delete Draft</h2>
+            <p id="delete-spot-body" data-i18n="createSpot.deleteBody">Are you sure you want to delete this draft?</p>
             <div class="delete-spot-actions">
-                <button id="delete-spot-confirm" class="nq-button red" type="button">Delete</button>
-                <button id="delete-spot-cancel" class="nq-button light-blue delete-spot-cancel" type="button">Cancel</button>
+                <button id="delete-spot-confirm" class="nq-button red" type="button" data-i18n="common.delete">Delete</button>
+                <button id="delete-spot-cancel" class="nq-button light-blue delete-spot-cancel" type="button" data-i18n="common.cancel">Cancel</button>
             </div>
         </section>
     </div>
 
     <main class="home-shell find-shell" aria-live="polite">
         <header class="page-top-card">
-            <a class="back-link" href="/my-spots" aria-label="Back to My Spots">‹ My Spots</a>
-            <h1>Create Spot</h1>
+            <a class="back-link" href="/my-spots" aria-label="Back to My Spots" data-i18n-aria-label="createSpot.backAria">‹ <span data-i18n="createSpot.back">My Spots</span></a>
+            <h1 data-i18n="createSpot.title">Create Spot</h1>
         </header>
 
-        <section id="create-spot-loading" class="spot-list-card create-spot-page-card" aria-label="Checking spot owner">
-            <p class="empty-spots">Checking this draft spot.</p>
+        <section id="create-spot-loading" class="spot-list-card create-spot-page-card" aria-label="Checking spot owner" data-i18n-aria-label="createSpot.checkingOwnerAria">
+            <p class="empty-spots" data-i18n="createSpot.checking">Checking this draft spot.</p>
         </section>
 
-        <section id="create-spot-card" class="spot-list-card create-spot-page-card" aria-label="Complete spot creation form" hidden>
+        <section id="create-spot-card" class="spot-list-card create-spot-page-card" aria-label="Complete spot creation form" data-i18n-aria-label="createSpot.formAria" hidden>
             <form id="create-spot-form" class="create-spot-form" novalidate>
                 <div class="create-spot-field-row">
-                    <label for="spot-title-input">Title</label>
+                    <label for="spot-title-input" data-i18n="createSpot.titleLabel">Title</label>
                     <input id="spot-title-input" class="create-spot-input" type="text" autocomplete="off" spellcheck="false" required>
                 </div>
 
                 <div class="create-spot-field-row create-spot-location-row">
                     <div class="create-spot-field-label create-spot-location-label">
-                        <span>Location</span>
-                        <span id="create-spot-city" class="create-spot-location-line">Not set</span>
+                        <span data-i18n="createSpot.location">Location</span>
+                        <span id="create-spot-city" class="create-spot-location-line" data-i18n="createSpot.notSet">Not set</span>
                         <span id="create-spot-country" class="create-spot-location-line" hidden></span>
                         <span id="create-spot-latitude" class="create-spot-coordinate-line" hidden></span>
                         <span id="create-spot-longitude" class="create-spot-coordinate-line" hidden></span>
@@ -89,13 +89,13 @@
 
                     <div class="create-spot-location-field">
                         <div class="create-spot-map-field">
-                            <div id="create-spot-map" class="spot-map create-spot-map" aria-label="Choose spot location"></div>
+                            <div id="create-spot-map" class="spot-map create-spot-map" aria-label="Choose spot location" data-i18n-aria-label="createSpot.mapAria"></div>
                             <div class="create-spot-map-crosshair" aria-hidden="true"></div>
                         </div>
 
                     </div>
 
-                    <label class="create-spot-field-label create-spot-radius-label" for="spot-radius-input">Radius</label>
+                    <label class="create-spot-field-label create-spot-radius-label" for="spot-radius-input" data-i18n="createSpot.radius">Radius</label>
                     <div class="create-spot-slider-control create-spot-radius-control">
                         <div class="create-spot-range-wrap">
                             <span id="spot-radius-value" class="create-spot-range-bubble">25 m</span>
@@ -105,14 +105,14 @@
                 </div>
 
                 <div class="create-spot-field-row create-spot-description-row">
-                    <label for="spot-description-input">Description</label>
+                    <label for="spot-description-input" data-i18n="createSpot.description">Description</label>
                     <textarea id="spot-description-input" class="create-spot-input create-spot-textarea" rows="4"></textarea>
                 </div>
 
                 <div class="create-spot-field-row" data-ignore-when-zero="duration">
                     <label class="create-spot-label-with-help" for="spot-duration-input">
-                        <span>Stay Duration</span>
-                        <button class="create-spot-label-help" type="button" data-tooltip="How long a user must remain inside this spot's radius before claiming." aria-label="Explain Stay Duration"><svg class="nq-icon nq-info-circle-small nh-inline-nimiq-icon create-spot-help-icon" aria-hidden="true" focusable="false"><use href="/static/nimiq-style.icons.svg#nq-info-circle-small" xlink:href="/static/nimiq-style.icons.svg#nq-info-circle-small"></use></svg></button>
+                        <span data-i18n="createSpot.stayDuration">Stay Duration</span>
+                        <button class="create-spot-label-help" type="button" data-tooltip="How long a user must remain inside this spot's radius before claiming." data-i18n-tooltip="createSpot.stayDurationTooltip" aria-label="Explain Stay Duration" data-i18n-aria-label="createSpot.stayDurationAria"><svg class="nq-icon nq-info-circle-small nh-inline-nimiq-icon create-spot-help-icon" aria-hidden="true" focusable="false"><use href="/static/nimiq-style.icons.svg#nq-info-circle-small" xlink:href="/static/nimiq-style.icons.svg#nq-info-circle-small"></use></svg></button>
                     </label>
                     <div class="create-spot-slider-control">
                         <div class="create-spot-range-wrap">
@@ -124,8 +124,8 @@
 
                 <div class="create-spot-field-row" data-ignore-when-zero="perUser">
                     <label class="create-spot-label-with-help" for="spot-max-user-input">
-                        <span>Claims Per User</span>
-                        <button class="create-spot-label-help" type="button" data-tooltip="How many times an individual user can claim a reward from this spot." aria-label="Explain Claims Per User"><svg class="nq-icon nq-info-circle-small nh-inline-nimiq-icon create-spot-help-icon" aria-hidden="true" focusable="false"><use href="/static/nimiq-style.icons.svg#nq-info-circle-small" xlink:href="/static/nimiq-style.icons.svg#nq-info-circle-small"></use></svg></button>
+                        <span data-i18n="createSpot.claimsPerUser">Claims Per User</span>
+                        <button class="create-spot-label-help" type="button" data-tooltip="How many times an individual user can claim a reward from this spot." data-i18n-tooltip="createSpot.claimsPerUserTooltip" aria-label="Explain Claims Per User" data-i18n-aria-label="createSpot.claimsPerUserAria"><svg class="nq-icon nq-info-circle-small nh-inline-nimiq-icon create-spot-help-icon" aria-hidden="true" focusable="false"><use href="/static/nimiq-style.icons.svg#nq-info-circle-small" xlink:href="/static/nimiq-style.icons.svg#nq-info-circle-small"></use></svg></button>
                     </label>
                     <div class="create-spot-slider-control">
                         <div class="create-spot-range-wrap">
@@ -136,7 +136,7 @@
                 </div>
 
                 <div id="spot-total-participants-row" class="create-spot-field-row" data-ignore-when-zero="totalParticipants">
-                    <label for="spot-max-total-input">Total Participants</label>
+                    <label for="spot-max-total-input" data-i18n="createSpot.totalParticipants">Total Participants</label>
                     <div class="create-spot-slider-control">
                         <div class="create-spot-range-wrap">
                             <span id="spot-max-total-value" class="create-spot-range-bubble">1</span>
@@ -146,7 +146,7 @@
                 </div>
 
                 <div id="spot-prize-count-row" class="create-spot-field-row" hidden>
-                    <label for="spot-prize-count-input">Prize Count</label>
+                    <label for="spot-prize-count-input" data-i18n="createSpot.prizeCount">Prize Count</label>
                     <div class="create-spot-slider-control">
                         <div class="create-spot-range-wrap">
                             <span id="spot-prize-count-value" class="create-spot-range-bubble">1</span>
@@ -156,7 +156,7 @@
                 </div>
 
                 <div class="create-spot-field-row create-spot-total-nim-row">
-                    <label for="spot-total-value-input">Total NIM</label>
+                    <label for="spot-total-value-input" data-i18n="createSpot.totalNim">Total NIM</label>
                     <div class="create-spot-total-nim-control">
                         <input id="spot-total-value-input" class="create-spot-input" type="number" inputmode="decimal" min="{{ min_total_nim | default(100) }}" step="0.00001">
                         <span id="spot-total-value-locked" class="create-spot-readonly-value" hidden></span>
@@ -165,12 +165,12 @@
                 </div>
 
                 <div class="create-spot-field-row">
-                    <label for="spot-starts-input">Starts</label>
+                    <label for="spot-starts-input" data-i18n="createSpot.starts">Starts</label>
                     <input id="spot-starts-input" class="create-spot-input" type="datetime-local">
                 </div>
 
                 <div class="create-spot-field-row">
-                    <label for="spot-ends-input">Ends After</label>
+                    <label for="spot-ends-input" data-i18n="createSpot.endsAfter">Ends After</label>
                     <div class="create-spot-slider-control">
                         <div class="create-spot-range-wrap">
                             <span id="spot-ends-value" class="create-spot-range-bubble">1 Week</span>
@@ -181,25 +181,26 @@
 
                 <div id="spot-use-password-row" class="create-spot-field-row">
                     <label class="create-spot-label-with-help" for="spot-use-password-input">
-                        <span>Use Password</span>
-                        <button class="create-spot-label-help" type="button" data-tooltip="Require a claim password. NimHunt will create one claim code for each participant." aria-label="Explain Use Password"><svg class="nq-icon nq-info-circle-small nh-inline-nimiq-icon create-spot-help-icon" aria-hidden="true" focusable="false"><use href="/static/nimiq-style.icons.svg#nq-info-circle-small" xlink:href="/static/nimiq-style.icons.svg#nq-info-circle-small"></use></svg></button>
+                        <span data-i18n="createSpot.usePassword">Use Password</span>
+                        <button class="create-spot-label-help" type="button" data-tooltip="Require a claim password. NimHunt will create one claim code for each participant." data-i18n-tooltip="createSpot.usePasswordTooltip" aria-label="Explain Use Password" data-i18n-aria-label="createSpot.usePasswordAria"><svg class="nq-icon nq-info-circle-small nh-inline-nimiq-icon create-spot-help-icon" aria-hidden="true" focusable="false"><use href="/static/nimiq-style.icons.svg#nq-info-circle-small" xlink:href="/static/nimiq-style.icons.svg#nq-info-circle-small"></use></svg></button>
                     </label>
                     <label class="create-spot-checkbox-wrap">
                         <input id="spot-use-password-input" type="checkbox">
-                        <span>Require claim codes</span>
+                        <span data-i18n="createSpot.requireClaimCodes">Require claim codes</span>
                     </label>
                 </div>
 
                 <p id="create-spot-error" class="display-name-error create-spot-form-error" role="alert" hidden></p>
 
                 <div class="create-spot-page-actions">
-                    <button id="create-spot-save" class="nq-button light-blue" type="submit">Save Draft</button>
-                    <button id="create-spot-delete" class="nq-button red create-spot-delete-button" type="button">Delete</button>
+                    <button id="create-spot-save" class="nq-button light-blue" type="submit" data-i18n="createSpot.saveDraft">Save Draft</button>
+                    <button id="create-spot-delete" class="nq-button red create-spot-delete-button" type="button" data-i18n="common.delete">Delete</button>
                 </div>
             </form>
         </section>
     </main>
 
+    <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
     <script src="{{ leaflet_js_url }}"></script>
     <script type="module" src="/static/create_spot.js?v={{ asset_version | default('owner-actions-deposit-publish-v1-20260628') }}"></script>
 </body>

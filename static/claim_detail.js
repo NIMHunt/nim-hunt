@@ -1,9 +1,10 @@
 import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
+import { makeClaimDetailText } from './interface_text.js?v=qol-v1-20260717';
 import {
     createNoticePresenter,
     getLanguage,
     requestDeviceIdentifierHash,
-} from './browser_utils.js?v=refactor-v1-20260716';
+} from './browser_utils.js?v=qol-v1-20260717';
 import {
     appendBulletLine,
     appendDetailDescription,
@@ -11,13 +12,15 @@ import {
     buildSpotLinkControl,
     nimFromLunaText,
     unixToText,
-} from './spot_ui.js?v=refactor-v1-20260716';
+} from './spot_ui.js?v=qol-v1-20260717';
 
 const APP_NAME = document.body.dataset.appName || 'NimHunt';
 const NIMIQ_PAY_URL = document.body.dataset.nimiqPayUrl || 'https://nimpay.app';
 const CLAIM_ID = Number.parseInt(document.body.dataset.claimId || '0', 10);
 const MAP_TILE_URL = document.body.dataset.mapTileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const MAP_TILE_ATTRIBUTION = document.body.dataset.mapTileAttribution || '&copy; OpenStreetMap contributors';
+
+const TEXT = makeClaimDetailText({ appName: APP_NAME, nimiqPayUrl: NIMIQ_PAY_URL });
 
 const state = {
     deviceIdHash: null,
@@ -48,7 +51,7 @@ async function requestWalletDeviceId() {
     try {
         state.deviceIdHash = await requestDeviceIdentifierHash(
             requestDeviceIdentifier,
-            `View this ${APP_NAME} claim from this device.`,
+            TEXT.nimiqPay.deviceIdReason,
         );
         state.walletAvailable = true;
         return true;
@@ -75,7 +78,7 @@ async function fetchJson(url, options = {}) {
     const response = await fetch(url, options);
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.ok === false) {
-        const err = new Error(data.message || 'Request failed.');
+        const err = new Error(data.message || TEXT.requestFailed);
         err.data = data;
         err.status = response.status;
         throw err;
@@ -90,7 +93,7 @@ async function identify() {
 function requestCurrentLocation() {
     return new Promise((resolve, reject) => {
         if (!navigator.geolocation) {
-            reject(new Error('Geolocation is not available.'));
+            reject(new Error(TEXT.geolocationUnavailable));
             return;
         }
 
@@ -160,9 +163,9 @@ function claimStatusText(claim) {
     if (typeof claim.display_status_text === 'string' && claim.display_status_text.trim()) {
         return claim.display_status_text;
     }
-    if (claim.status_label === 'success') return 'Success';
-    if (claim.status_label === 'failed') return 'Failed';
-    return 'Pending';
+    if (claim.status_label === 'success') return TEXT.status.success;
+    if (claim.status_label === 'failed') return TEXT.status.failed;
+    return TEXT.status.pending;
 }
 
 function claimStatusColourClass(claim) {
@@ -199,7 +202,7 @@ function validCoordinatePair(lat, long) {
 function buildSpotMapShell() {
     const map = document.createElement('div');
     map.className = 'spot-detail-map claim-detail-map';
-    map.setAttribute('aria-label', 'Claim spot map');
+    map.setAttribute('aria-label', TEXT.mapAriaLabel);
     return map;
 }
 
@@ -312,19 +315,19 @@ function buildClaimDetail(claim) {
     const lines = document.createElement('ul');
     lines.className = 'spot-detail-lines';
 
-    const claimedAt = unixToText(claim.claimed_at) || 'now';
+    const claimedAt = unixToText(claim.claimed_at) || TEXT.now;
     const attemptedValue = nimFromLunaText(claim.reward_amount || 0);
-    appendBulletLine(lines, 'Status: ', buildStatusWithTimer(claim));
-    appendBulletLine(lines, `Claimed ${claimedAt} (${attemptedValue})`);
+    appendBulletLine(lines, TEXT.statusLabel, buildStatusWithTimer(claim));
+    appendBulletLine(lines, TEXT.claimed({ when: claimedAt, value: attemptedValue }));
 
     if (claim.is_prizedraw) {
         const participants = Number(spot.success_claim_count || 0) + Number(spot.pending_claim_count || 0);
-        appendBulletLine(lines, `${participants} current participants`);
+        appendBulletLine(lines, TEXT.participants(participants));
     }
 
     if (shouldShowClaimLocation(claim)) {
         const score = Math.round(Number(claim.duration_score || 0) * 100);
-        appendBulletLine(lines, `Location score ${score}%`);
+        appendBulletLine(lines, TEXT.locationScore(score));
     }
 
     if (spot.href) appendBulletLine(lines, buildSpotLinkControl(spot));
@@ -340,7 +343,7 @@ function renderClaim(claim) {
     const spot = claim.spot || {};
     els.fallback.hidden = true;
     els.title.replaceChildren();
-    appendSpotTitleWithLock(els.title, { ...spot, title: spot.title || 'Claim' });
+    appendSpotTitleWithLock(els.title, { ...spot, title: spot.title || TEXT.fallbackTitle });
 
     const item = document.createElement('li');
     item.className = 'spot-list-item is-expanded';
@@ -370,7 +373,7 @@ function renderClaim(claim) {
     bottomRow.className = 'spot-list-row spot-list-bottom-row';
     const meta = document.createElement('span');
     meta.className = 'spot-list-meta';
-    meta.textContent = spot.city || spot.country || 'Unknown area';
+    meta.textContent = spot.city || spot.country || TEXT.unknownArea;
     bottomRow.append(meta);
     summary.append(topRow, bottomRow);
 
@@ -431,8 +434,8 @@ async function sendLocationHeartbeat() {
         if (!state.heartbeatNoticeShown) {
             state.heartbeatNoticeShown = true;
             showNotice({
-                title: 'Location needed',
-                body: `Keep ${APP_NAME} open and allow location access until this claim finishes. If no fresh location reaches the server for too long, the claim will fail.`,
+                title: TEXT.locationNeeded.title,
+                body: TEXT.locationNeeded.body,
             });
         }
     } finally {
@@ -511,13 +514,10 @@ initClaimDetail().catch((err) => {
 
     if (data.code === 'wallet_unavailable') {
         showNotice({
-            title: `Open ${APP_NAME} in Nimiq Pay`,
-            body: `${APP_NAME} needs Nimiq Pay to identify this device before showing the claim.`,
-            href: NIMIQ_PAY_URL,
-            linkText: 'Open Nimiq Pay',
+            ...TEXT.walletUnavailable,
         });
         return;
     }
     els.fallback.hidden = false;
-    els.fallback.textContent = data.message || 'This claim could not be loaded.';
+    els.fallback.textContent = data.message || TEXT.loadFailed;
 });

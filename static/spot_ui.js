@@ -1,5 +1,7 @@
-import { SPOT_TEXT } from './interface_text.js';
+import { getSpotText } from './interface_text.js?v=qol-v1-20260717';
 import { formatNimFromLuna } from './nim_format.js';
+
+const SPOT_TEXT = getSpotText();
 
 const STATUS_CLASS_NAMES = new Set([
     'draft',

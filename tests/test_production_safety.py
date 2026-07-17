@@ -581,3 +581,29 @@ class ApplicationLifespanTest(unittest.IsolatedAsyncioTestCase):
                     raise RuntimeError("test failure")
 
         shutdown.assert_awaited_once_with()
+
+
+class CancellationFeeEnvironmentTest(unittest.TestCase):
+    def _read_fee(self, value: str) -> subprocess.CompletedProcess[str]:
+        project_root = Path(__file__).resolve().parents[1]
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(project_root)
+        environment["NIMHUNT_SPOT_CANCELLATION_FEE_NIM"] = value
+        return subprocess.run(
+            [sys.executable, "-c", "import constants; print(constants.SPOT_CANCELLATION_FEE)"],
+            cwd=project_root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def test_cancellation_fee_accepts_exact_nim_amount(self):
+        result = self._read_fee("1.25")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "125000")
+
+    def test_cancellation_fee_rejects_sub_luna_precision(self):
+        result = self._read_fee("0.000001")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot use more than 5 decimal places", result.stderr)

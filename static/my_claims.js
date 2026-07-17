@@ -1,4 +1,5 @@
 import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
+import { makeMyClaimsText } from './interface_text.js?v=qol-v1-20260717';
 import {
     appendBulletLine,
     appendDetailDescription,
@@ -7,18 +8,20 @@ import {
     nimFromLunaText,
     spotPlaceText,
     unixToText,
-} from './spot_ui.js?v=refactor-v1-20260716';
+} from './spot_ui.js?v=qol-v1-20260717';
 import { createReusableSpotMap } from './spot_map.js';
 import {
     createNoticePresenter,
     getLanguage,
     requestDeviceIdentifierHash,
-} from './browser_utils.js?v=refactor-v1-20260716';
+} from './browser_utils.js?v=qol-v1-20260717';
 
 const APP_NAME = document.body.dataset.appName || 'NimHunt';
 const NIMIQ_PAY_URL = document.body.dataset.nimiqPayUrl || 'https://nimpay.app';
 const MAP_TILE_URL = document.body.dataset.mapTileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const MAP_TILE_ATTRIBUTION = document.body.dataset.mapTileAttribution || '&copy; OpenStreetMap contributors';
+
+const TEXT = makeMyClaimsText({ appName: APP_NAME, nimiqPayUrl: NIMIQ_PAY_URL });
 
 const state = {
     deviceIdHash: null,
@@ -47,7 +50,7 @@ async function requestWalletDeviceId() {
     try {
         state.deviceIdHash = await requestDeviceIdentifierHash(
             requestDeviceIdentifier,
-            `View the ${APP_NAME} claims made by this device.`,
+            TEXT.nimiqPay.deviceIdReason,
         );
         state.walletAvailable = true;
         return true;
@@ -74,7 +77,7 @@ async function fetchJson(url, options = {}) {
     const response = await fetch(url, options);
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.ok === false) {
-        const err = new Error(data.message || 'Request failed.');
+        const err = new Error(data.message || TEXT.requestFailed);
         err.data = data;
         err.status = response.status;
         throw err;
@@ -97,10 +100,10 @@ function claimStatusText(claim) {
     if (typeof claim.display_status_text === 'string' && claim.display_status_text.trim()) {
         return claim.display_status_text;
     }
-    if (claim.status_label === 'success') return 'Success';
-    if (claim.status_label === 'failed') return 'Failed';
-    if (claim.status_label === 'pending') return 'Pending';
-    return 'Unknown';
+    if (claim.status_label === 'success') return TEXT.status.success;
+    if (claim.status_label === 'failed') return TEXT.status.failed;
+    if (claim.status_label === 'pending') return TEXT.status.pending;
+    return TEXT.status.unknown;
 }
 
 function claimStatusClass(claim) {
@@ -178,7 +181,7 @@ function buildStatusKeyword(claim, text = null) {
 
 function buildClaimMeta(claim) {
     const spot = claim.spot || {};
-    const claimed = unixToText(claim.claimed_at) || 'recently';
+    const claimed = unixToText(claim.claimed_at) || TEXT.recent;
     return `${spotPlaceText(spot)} - ${claimed}`;
 }
 
@@ -192,14 +195,14 @@ function buildClaimDetail(claim) {
     const lines = document.createElement('ul');
     lines.className = 'spot-detail-lines';
 
-    const claimedAt = unixToText(claim.claimed_at) || 'recently';
+    const claimedAt = unixToText(claim.claimed_at) || TEXT.recent;
     const attemptedValue = nimFromLunaText(claim.reward_amount || 0);
-    appendBulletLine(lines, 'Status: ', buildStatusWithTimer(claim));
-    appendBulletLine(lines, `Claimed ${claimedAt} (${attemptedValue})`);
+    appendBulletLine(lines, TEXT.statusLabel, buildStatusWithTimer(claim));
+    appendBulletLine(lines, TEXT.claimed({ when: claimedAt, value: attemptedValue }));
 
     if (claim.is_prizedraw) {
         const participants = Number(spot.success_claim_count || 0) + Number(spot.pending_claim_count || 0);
-        appendBulletLine(lines, `${participants} current participants`);
+        appendBulletLine(lines, TEXT.participants(participants));
     }
 
     if (spot.href) appendBulletLine(lines, buildSpotLinkControl(spot));
@@ -275,16 +278,16 @@ function renderEmptyClaims() {
     const link = document.createElement('a');
     link.href = '/spots';
     link.className = 'welcome-link';
-    link.textContent = 'Go collect';
+    link.textContent = TEXT.emptyLink;
     els.empty.replaceChildren(
-        document.createTextNode('You have no claims. '),
+        document.createTextNode(TEXT.emptyBeforeLink),
         link,
-        document.createTextNode(' some!')
+        document.createTextNode(TEXT.emptyAfterLink)
     );
 }
 
 function renderClaims(claims) {
-    els.title.textContent = `My Claims (${claims.length})`;
+    els.title.textContent = TEXT.title(claims.length);
     els.list.replaceChildren();
     els.empty.hidden = claims.length > 0;
     if (claims.length <= 0) renderEmptyClaims();
@@ -299,7 +302,7 @@ function claimToMapItem(claim) {
     return {
         ...spot,
         id: claim.id,
-        title: spot.title || 'Claim',
+        title: spot.title || TEXT.fallbackTitle,
         href: claimHref(claim),
         claim,
     };
@@ -308,7 +311,7 @@ function claimToMapItem(claim) {
 function claimPopupContent(item) {
     const wrap = document.createElement('span');
     wrap.className = 'nh-spot-popup-title';
-    wrap.textContent = `${item.title || 'Claim'} - ${claimStatusText(item.claim || {})}`;
+    wrap.textContent = `${item.title || TEXT.fallbackTitle} - ${claimStatusText(item.claim || {})}`;
     return wrap;
 }
 
@@ -334,8 +337,8 @@ function renderMap(claims) {
     } catch (err) {
         console.error(err);
         showNotice({
-            title: 'Map setup failed',
-            body: 'The claim map could not be loaded. Reload the page and try again.',
+            title: TEXT.mapSetupFailed.title,
+            body: TEXT.mapSetupFailed.body,
         });
     }
 }
@@ -367,13 +370,10 @@ initMyClaims().catch((err) => {
     const data = err?.data || {};
     if (data.code === 'wallet_unavailable') {
         showNotice({
-            title: `Open ${APP_NAME} in Nimiq Pay`,
-            body: `${APP_NAME} needs Nimiq Pay to identify this device before showing My Claims.`,
-            href: NIMIQ_PAY_URL,
-            linkText: 'Open Nimiq Pay',
+            ...TEXT.walletUnavailable,
         });
         return;
     }
     els.empty.hidden = false;
-    els.empty.textContent = data.message || 'My Claims could not be loaded.';
+    els.empty.textContent = data.message || TEXT.loadFailed;
 });

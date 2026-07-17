@@ -9,6 +9,7 @@ Shared constants for NimHunt.
 """
 
 import os
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 
@@ -21,6 +22,24 @@ def _env_int(name: str, default: int) -> int:
         return int(raw_value.strip())
     except ValueError as exc:
         raise ValueError(f"{name} must be an integer") from exc
+
+
+
+def _env_nim_amount(name: str, default_nim: str, *, luna_per_nim: int) -> int:
+    """Read a non-negative NIM amount and convert it exactly to Luna."""
+    raw_value = os.getenv(name, default_nim).strip()
+    try:
+        nim = Decimal(raw_value)
+    except InvalidOperation as exc:
+        raise ValueError(f"{name} must be a valid NIM amount") from exc
+
+    if not nim.is_finite() or nim < 0:
+        raise ValueError(f"{name} must be a non-negative NIM amount")
+
+    luna = nim * int(luna_per_nim)
+    if luna != luna.to_integral_value():
+        raise ValueError(f"{name} cannot use more than 5 decimal places")
+    return int(luna)
 
 
 def _canonical_nimiq_network(value: str) -> str:
@@ -136,10 +155,12 @@ DEFAULT_DRAFT_SPOT_ENDS_AFTER_SECONDS = 7 * 24 * 60 * 60
 MIN_SPOT_MAX_CLAIMS_PER_USER = 0
 MAX_SPOT_MAX_CLAIMS_PER_USER = 10
 
-# Total participant/claim bounds. 0 means unlimited total participants, which is
-# only valid for Prizedraw spots. Standard spots must use at least 1.
+# Total participant/claim bounds. 0 means unlimited total participants and is
+# only valid for Prizedraw spots. Finite Prizedraws need at least two people;
+# standard spots retain their existing minimum of one claim.
 MIN_SPOT_MAX_TOTAL_CLAIMS = 1
 MIN_PRIZEDRAW_MAX_TOTAL_CLAIMS = 0
+MIN_FINITE_PRIZEDRAW_TOTAL_PARTICIPANTS = 2
 MAX_SPOT_MAX_TOTAL_CLAIMS = 1000
 
 
@@ -168,10 +189,14 @@ MIN_STANDARD_CLAIM_PAYOUT = MIN_STANDARD_CLAIM_PAYOUT_NIM * LUNA_PER_NIM
 MIN_PRIZEDRAW_PRIZE_PAYOUT_NIM = 1000
 MIN_PRIZEDRAW_PRIZE_PAYOUT = MIN_PRIZEDRAW_PRIZE_PAYOUT_NIM * LUNA_PER_NIM
 
-# Cancellation rules. Values are stored in Luna. Frontend display should convert
-# to NIM only at the UI boundary. The fee address is a development placeholder
-# until a real pooled-fee Nimiq address is configured.
-SPOT_CANCELLATION_FEE = 1 * LUNA_PER_NIM
+# Cancellation rules. The operator supplies a human-readable NIM fee, which is
+# converted exactly to Luna at import time. The fee address remains an obvious
+# development placeholder until a real pooled-fee address is configured.
+SPOT_CANCELLATION_FEE = _env_nim_amount(
+    "NIMHUNT_SPOT_CANCELLATION_FEE_NIM",
+    "1",
+    luna_per_nim=LUNA_PER_NIM,
+)
 SPOT_CANCELLATION_FEE_ADDRESS = os.getenv(
     "NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS",
     "NQ00 NIMHUNT DEV CANCELLATION FEE POOL",

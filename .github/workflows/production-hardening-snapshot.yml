@@ -1,9 +1,9 @@
 name: Production Hardening Snapshot
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/production-test-gating-and-tx-labels
+      - main
 
 permissions:
   contents: read

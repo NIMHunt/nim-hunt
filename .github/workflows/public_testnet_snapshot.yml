@@ -1,9 +1,9 @@
 name: Public Testnet Snapshot
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/public-testnet-deployment
+      - main
 
 permissions:
   contents: read

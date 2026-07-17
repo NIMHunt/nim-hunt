@@ -33,8 +33,12 @@ jobs:
           echo "6a5822c1591229a53d3687724a48b08907a7037f7ec54f3639629d4ade0e305d  /tmp/public-testnet.patch" | sha256sum --check
           git apply --check --exclude=.github/workflows/public_testnet_snapshot.yml /tmp/public-testnet.patch
           git apply --exclude=.github/workflows/public_testnet_snapshot.yml /tmp/public-testnet.patch
+          echo "f1f3e5bab906e9291d0c0ac6bbc74aa598b0b55ee50a28b535177d5c2af99884  .github/public-testnet-patch/setuptools.patch" | sha256sum --check
+          git apply --check .github/public-testnet-patch/setuptools.patch
+          git apply .github/public-testnet-patch/setuptools.patch
           rm -rf .github/public-testnet-patch
           rm -f .github/workflows/public_testnet_snapshot.yml
+          rm -f .github/workflows/public_testnet_audit_debug.yml
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -212,6 +216,7 @@ jobs:
         run: |
           test ! -e .github/public-testnet-patch
           test ! -e .github/workflows/public_testnet_snapshot.yml
+          test ! -e .github/workflows/public_testnet_audit_debug.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A

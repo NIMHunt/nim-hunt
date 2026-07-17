@@ -26,9 +26,10 @@ jobs:
           echo "b66bf8c43d850145da3362e3072468d60b1f39a87c0ca32a1e1b729c06dc1dee  /tmp/release.patch.gz" | sha256sum --check
           gzip -dc /tmp/release.patch.gz > /tmp/release.patch
           echo "ed2d5e035774967f55909be00a3e62553f8475bad5fe59b9bea0d00d7458085a  /tmp/release.patch" | sha256sum --check
-          git apply --check /tmp/release.patch
-          git apply /tmp/release.patch
+          git apply --check --exclude=.github/workflows/release_candidate_snapshot.yml /tmp/release.patch
+          git apply --exclude=.github/workflows/release_candidate_snapshot.yml /tmp/release.patch
           rm -rf .github/release-candidate-patch
+          rm -f .github/workflows/release_candidate_snapshot.yml
 
       - name: Set up Python
         uses: actions/setup-python@v5

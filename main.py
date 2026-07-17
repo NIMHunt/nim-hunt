@@ -1,5 +1,6 @@
 """NimHunt FastAPI application setup and background-service lifecycle."""
 
+import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -9,29 +10,39 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+import cache
 import constants as const
-from database import get_db, init_db
+import settlement_updater
+import trans_updater
+import wallet
+from database import init_db
 from public_html import render_not_found_page
 from public_html import router as public_router
 
-try:
-    import cache
-except Exception:  # cache is optional while bootstrapping
-    cache = None  # type: ignore[assignment]
-
-try:
-    import settlement_updater
-except Exception:  # settlement is optional while bootstrapping
-    settlement_updater = None  # type: ignore[assignment]
-
-try:
-    import trans_updater
-except Exception:  # transaction polling is optional while bootstrapping
-    trans_updater = None  # type: ignore[assignment]
+logger = logging.getLogger(__name__)
 
 
 def validate_production_safety() -> None:
-    """Refuse unsafe test/development settings in explicit production mode."""
+    """Validate chain settings and refuse development shortcuts in production."""
+    network = str(getattr(const, "NIMIQ_NETWORK", "")).strip()
+    network_ids = getattr(const, "NIMIQ_NETWORK_IDS", {})
+    expected_network_id = network_ids.get(network) if isinstance(network_ids, dict) else None
+    configured_network_id = int(getattr(const, "NIMIQ_NETWORK_ID", 0))
+    rpc_url = str(getattr(const, "NIMIQ_RPC_URL", "")).strip()
+
+    configuration_errors: list[str] = []
+    if expected_network_id is None:
+        configuration_errors.append(f"unsupported NIMIQ_NETWORK {network!r}")
+    elif configured_network_id != int(expected_network_id):
+        configuration_errors.append(
+            f"NIMIQ_NETWORK_ID must be {expected_network_id} for {network}"
+        )
+    if not rpc_url:
+        configuration_errors.append("NIMIQ_RPC_URL must be configured")
+
+    if configuration_errors:
+        raise RuntimeError(f"Invalid Nimiq configuration: {', '.join(configuration_errors)}")
+
     if not bool(getattr(const, "PRODUCTION_MODE", False)):
         return
 
@@ -60,18 +71,36 @@ def validate_production_safety() -> None:
     if str(getattr(const, "NIMIQ_NETWORK", "")).strip() != "MainAlbatross":
         unsafe_settings.append("NIMIQ_NETWORK must be MainAlbatross")
 
-    hub_url = str(getattr(const, "NIMIQ_HUB_URL", "")).strip().lower()
-    if "testnet" in hub_url or "hub.nimiq-testnet" in hub_url:
-        unsafe_settings.append("NIMIQ_HUB_URL must not point at testnet")
+    if int(getattr(const, "NIMIQ_NETWORK_ID", 0)) != 24:
+        unsafe_settings.append("NIMIQ_NETWORK_ID must be 24 for MainAlbatross")
 
-    fee_address = str(getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "")).strip().upper()
-    if (
-        not fee_address
-        or "DEV" in fee_address
-        or "PLACEHOLDER" in fee_address
-        or fee_address.startswith("NQ00 NIMHUNT")
+    rpc_url = str(getattr(const, "NIMIQ_RPC_URL", "")).strip().lower()
+    if not rpc_url or "testnet" in rpc_url:
+        unsafe_settings.append("NIMIQ_RPC_URL must point at a mainnet RPC endpoint")
+
+    hub_url = str(getattr(const, "NIMIQ_HUB_URL", "")).strip().lower()
+    if not hub_url or "testnet" in hub_url or "hub.nimiq-testnet" in hub_url:
+        unsafe_settings.append("NIMIQ_HUB_URL must point at the mainnet Hub")
+
+    for env_constant, fallback in (
+        ("NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND_ENV", "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND"),
+        ("NIMHUNT_NIMIQ_SEND_COMMAND_ENV", "NIMHUNT_NIMIQ_SEND_COMMAND"),
     ):
-        unsafe_settings.append("SPOT_CANCELLATION_FEE_ADDRESS must be a production address")
+        env_name = getattr(const, env_constant, fallback)
+        if not os.getenv(env_name, "").strip():
+            unsafe_settings.append(f"{env_name} must be configured")
+
+    fee_address = str(getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "")).strip()
+    try:
+        wallet.normalise_nimiq_address(
+            fee_address,
+            field_name="SPOT_CANCELLATION_FEE_ADDRESS",
+            allow_dev_placeholder=False,
+        )
+    except ValueError:
+        unsafe_settings.append(
+            "SPOT_CANCELLATION_FEE_ADDRESS must be a valid production address"
+        )
 
     if unsafe_settings:
         joined = ", ".join(unsafe_settings)
@@ -118,43 +147,40 @@ async def startup() -> None:
     validate_production_safety()
     await init_db()
 
-    if cache is not None:
-        start = getattr(cache, "start_cache_refresher", None)
-        refresh = getattr(cache, "refresh_all_caches", None)
-
-        if callable(start):
-            await start(run_immediately=True)
-        elif callable(refresh):
-            async with get_db() as db:
-                await refresh(db)
-
-    if settlement_updater is not None:
-        start_settlement = getattr(settlement_updater, "start_settlement_refresher", None)
-        if callable(start_settlement):
-            await start_settlement(run_immediately=True)
-
-    if trans_updater is not None:
-        start_transactions = getattr(trans_updater, "start_transaction_refresher", None)
-        if callable(start_transactions):
-            await start_transactions(run_immediately=True)
+    strict_startup = bool(getattr(const, "PRODUCTION_MODE", False))
+    try:
+        await cache.start_cache_refresher(run_immediately=True)
+        await settlement_updater.start_settlement_refresher(
+            run_immediately=True,
+            fail_on_initial_error=strict_startup,
+        )
+        await trans_updater.start_transaction_refresher(
+            run_immediately=True,
+            fail_on_initial_error=strict_startup,
+        )
+    except Exception:
+        # FastAPI does not enter the lifespan context when startup fails, so
+        # stop any service that started before the failing one. Cleanup errors
+        # are logged without replacing the more useful startup exception.
+        try:
+            await shutdown()
+        except Exception:  # pragma: no cover - shutdown is already defensive
+            logger.exception("Failed to clean up after application startup error")
+        raise
 
 
 async def shutdown() -> None:
     """Stop NimHunt's background services cleanly."""
-    if cache is not None:
-        stop = getattr(cache, "stop_cache_refresher", None)
-        if callable(stop):
-            await stop()
-
-    if settlement_updater is not None:
-        stop_settlement = getattr(settlement_updater, "stop_settlement_refresher", None)
-        if callable(stop_settlement):
-            await stop_settlement()
-
-    if trans_updater is not None:
-        stop_transactions = getattr(trans_updater, "stop_transaction_refresher", None)
-        if callable(stop_transactions):
-            await stop_transactions()
+    services = (
+        ("transaction refresher", trans_updater.stop_transaction_refresher),
+        ("settlement refresher", settlement_updater.stop_settlement_refresher),
+        ("cache refresher", cache.stop_cache_refresher),
+    )
+    for service_name, stop_service in services:
+        try:
+            await stop_service()
+        except Exception:  # pragma: no cover - best effort during process exit
+            logger.exception("Failed to stop %s", service_name)
 
 
 @asynccontextmanager
@@ -168,7 +194,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title=const.APP_NAME, lifespan=lifespan)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=str(const.STATIC_DIR)), name="static")
 app.include_router(public_router)
 
 

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
 import time
 from collections.abc import Iterable
 from contextlib import suppress
@@ -44,6 +45,8 @@ import database as schema
 # ---------------------------------------------------------------------------
 
 RowDict = dict[str, Any]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -1325,6 +1328,7 @@ async def _cache_refresher_loop() -> None:
             _REFRESH_LAST_ERROR = None
         except Exception as e:
             _REFRESH_LAST_ERROR = repr(e)
+            logger.exception("Background cache refresh failed")
 
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
@@ -1370,6 +1374,7 @@ async def start_cache_refresher(
             _REFRESH_LAST_ERROR = None
         except Exception as e:
             _REFRESH_LAST_ERROR = repr(e)
+            logger.exception("Initial cache refresh failed")
             raise
 
     _REFRESH_TASK = asyncio.create_task(_cache_refresher_loop())

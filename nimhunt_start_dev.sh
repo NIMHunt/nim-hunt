@@ -11,10 +11,12 @@ esac
 # NimHunt development launcher
 # Starts the FastAPI server with the Nimiq TestAlbatross helper enabled.
 
-PROJECT_DIR="${NIMHUNT_PROJECT_DIR:-/home/jakorah/nim-hunt}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="${NIMHUNT_PROJECT_DIR:-$SCRIPT_DIR}"
 HOST="${NIMHUNT_HOST:-0.0.0.0}"
 PORT="${NIMHUNT_PORT:-8000}"
 HELPER_PATH="${PROJECT_DIR}/helpers/nimiq_helper.mjs"
+NIMIQ_CORE_PATH="${PROJECT_DIR}/helpers/node_modules/@nimiq/core"
 
 cd "$PROJECT_DIR"
 
@@ -32,14 +34,21 @@ if [ ! -f "$HELPER_PATH" ]; then
     exit 1
 fi
 
+if [ ! -d "$NIMIQ_CORE_PATH" ]; then
+    echo "Could not find the Nimiq helper dependencies."
+    echo "Run: npm ci --prefix helpers"
+    read -r -p "Press Enter to close..." _
+    exit 1
+fi
+
 source venv/bin/activate
 
 # Development/TestAlbatross settings.
 # Replace the default-test-mnemonic setting with NIMHUNT_NIMIQ_MNEMONIC before using real funds.
 export NIMHUNT_NIMIQ_NETWORK="${NIMHUNT_NIMIQ_NETWORK:-TestAlbatross}"
 export NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC="${NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC:-1}"
-export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND="${NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND:-node ${HELPER_PATH}}"
-export NIMHUNT_NIMIQ_SEND_COMMAND="${NIMHUNT_NIMIQ_SEND_COMMAND:-node ${HELPER_PATH}}"
+export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND="${NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND:-node \"${HELPER_PATH}\"}"
+export NIMHUNT_NIMIQ_SEND_COMMAND="${NIMHUNT_NIMIQ_SEND_COMMAND:-node \"${HELPER_PATH}\"}"
 
 # Optional: set a real TestAlbatross fee address in your shell before launching.
 # export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS="NQ.. your fee address .."

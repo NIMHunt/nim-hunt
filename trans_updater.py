@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import secrets
 import shlex
@@ -44,12 +45,14 @@ from transaction_descriptions import build_transaction_description
 from database import get_db
 
 RowDict = dict[str, Any]
+
+logger = logging.getLogger(__name__)
 TransOutcome = Literal["pending", "confirmed", "failed", "unknown"]
 
 # Public RPC servers are useful for development, but a production deployment
 # should point this at your own node or a service you trust.
-DEFAULT_NIMIQ_RPC_URL = os.getenv("NIMHUNT_NIMIQ_RPC_URL", getattr(const, "NIMIQ_RPC_URL", "https://rpc.nimiqwatch.com"))
-DEFAULT_RPC_TIMEOUT_SECONDS = int(os.getenv("NIMHUNT_NIMIQ_RPC_TIMEOUT_SECONDS", str(getattr(const, "NIMIQ_RPC_TIMEOUT_SECONDS", 12))))
+DEFAULT_NIMIQ_RPC_URL = str(getattr(const, "NIMIQ_RPC_URL", "")).strip()
+DEFAULT_RPC_TIMEOUT_SECONDS = int(getattr(const, "NIMIQ_RPC_TIMEOUT_SECONDS", 12))
 
 # If a transaction hash cannot be found for this long, we treat it as failed.
 # This is deliberately conservative. Adjust once you know the usual Nimiq Pay
@@ -176,7 +179,7 @@ def _integration_payload_base() -> dict[str, Any]:
     return {
         "app": getattr(const, "APP_NAME", "NimHunt"),
         "network": getattr(const, "NIMIQ_NETWORK", "TestAlbatross"),
-        "network_id": int(getattr(const, "NIMIQ_NETWORK_ID", 6)),
+        "network_id": int(getattr(const, "NIMIQ_NETWORK_ID", 5)),
         "rpc_url": getattr(const, "NIMIQ_RPC_URL", None),
         "fee": int(getattr(const, "NIMIQ_TRANSACTION_FEE", 0)),
     }
@@ -1264,9 +1267,17 @@ async def _transaction_check_loop(interval_seconds: int) -> None:
     while not _TRANS_CHECK_STOP_EVENT.is_set():
         try:
             _TRANS_CHECK_LAST_RESULT = await check_pending_transactions()
-            _TRANS_CHECK_LAST_ERROR = None
+            if bool(_TRANS_CHECK_LAST_RESULT.get("ok", True)):
+                _TRANS_CHECK_LAST_ERROR = None
+            else:
+                _TRANS_CHECK_LAST_ERROR = repr(_TRANS_CHECK_LAST_RESULT)
+                logger.error(
+                    "Background transaction check reported failure: %s",
+                    _TRANS_CHECK_LAST_RESULT,
+                )
         except Exception as exc:  # pragma: no cover - defensive loop guard
             _TRANS_CHECK_LAST_ERROR = repr(exc)
+            logger.exception("Background transaction check failed")
 
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
@@ -1279,8 +1290,15 @@ async def start_transaction_refresher(
     *,
     run_immediately: bool = False,
     interval_seconds: int = DEFAULT_TRANSACTION_CHECK_INTERVAL_SECONDS,
+    fail_on_initial_error: bool = False,
 ) -> None:
-    """Start the lightweight background transaction-status loop once."""
+    """Start the background transaction-status loop once.
+
+    Development may continue after a failed initial check so local UI work is
+    still possible without chain access. Production sets
+    ``fail_on_initial_error`` so the app cannot quietly serve while payment
+    reconciliation is unavailable.
+    """
     global _TRANS_CHECK_TASK, _TRANS_CHECK_STOP_EVENT, _TRANS_CHECK_LAST_RESULT, _TRANS_CHECK_LAST_ERROR
 
     if _TRANS_CHECK_TASK is not None and not _TRANS_CHECK_TASK.done():
@@ -1291,9 +1309,18 @@ async def start_transaction_refresher(
     if run_immediately:
         try:
             _TRANS_CHECK_LAST_RESULT = await check_pending_transactions()
-            _TRANS_CHECK_LAST_ERROR = None
-        except Exception as exc:  # pragma: no cover - startup should not fail app boot
+            if not bool(_TRANS_CHECK_LAST_RESULT.get("ok", True)):
+                _TRANS_CHECK_LAST_ERROR = repr(_TRANS_CHECK_LAST_RESULT)
+                if fail_on_initial_error:
+                    raise RuntimeError("Initial transaction check reported failure")
+                logger.error("Initial transaction check reported failure: %s", _TRANS_CHECK_LAST_RESULT)
+            else:
+                _TRANS_CHECK_LAST_ERROR = None
+        except Exception as exc:
             _TRANS_CHECK_LAST_ERROR = repr(exc)
+            logger.exception("Initial background transaction check failed")
+            if fail_on_initial_error:
+                raise
 
     _TRANS_CHECK_TASK = asyncio.create_task(_transaction_check_loop(int(interval_seconds)))
 

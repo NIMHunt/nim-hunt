@@ -29,8 +29,8 @@ test('@nimiq/core builds a signed basic transaction with description data', () =
     1000n,
     0n,
     1,
-    6,
+    5,
   );
   transaction.sign(sender);
-  assert.doesNotThrow(() => transaction.verify(6));
+  assert.doesNotThrow(() => transaction.verify(5));
 });

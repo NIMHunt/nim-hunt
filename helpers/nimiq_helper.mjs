@@ -178,9 +178,10 @@ async function sendLunaFromSpotDeposit(payload) {
 
   try {
     const height = await client.getHeadHeight();
+    const fallbackNetworkIds = { TestAlbatross: 5, MainAlbatross: 24, DevAlbatross: 6 };
     const networkId = typeof client.getNetworkId === 'function'
       ? await client.getNetworkId()
-      : Number(payload.network_id ?? 6);
+      : Number(payload.network_id ?? fallbackNetworkIds[network] ?? 0);
 
     const data = encodeTransactionMemo(payload.memo);
     const tx = data.byteLength > 0

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import secrets
 from contextlib import suppress
 from typing import Any
@@ -24,6 +25,8 @@ import trans_updater
 from database import get_db
 
 RowDict = dict[str, Any]
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SETTLEMENT_INTERVAL_SECONDS = int(getattr(const, "SETTLEMENT_INTERVAL_SECONDS", 60))
 DEFAULT_MAX_SETTLEMENTS_PER_RUN = int(getattr(const, "MAX_SETTLEMENTS_PER_RUN", 50))
@@ -531,9 +534,17 @@ async def _settlement_loop(interval_seconds: int) -> None:
     while not _SETTLEMENT_STOP_EVENT.is_set():
         try:
             _SETTLEMENT_LAST_RESULT = await run_settlement_pass()
-            _SETTLEMENT_LAST_ERROR = None
+            if bool(_SETTLEMENT_LAST_RESULT.get("ok", True)):
+                _SETTLEMENT_LAST_ERROR = None
+            else:
+                _SETTLEMENT_LAST_ERROR = repr(_SETTLEMENT_LAST_RESULT)
+                logger.error(
+                    "Background settlement pass reported failure: %s",
+                    _SETTLEMENT_LAST_RESULT,
+                )
         except Exception as exc:  # pragma: no cover - defensive loop guard
             _SETTLEMENT_LAST_ERROR = repr(exc)
+            logger.exception("Background settlement pass failed")
 
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(_SETTLEMENT_STOP_EVENT.wait(), timeout=max(1, int(interval_seconds)))
@@ -543,8 +554,15 @@ async def start_settlement_refresher(
     *,
     run_immediately: bool = False,
     interval_seconds: int = DEFAULT_SETTLEMENT_INTERVAL_SECONDS,
+    fail_on_initial_error: bool = False,
 ) -> None:
-    """Start the lightweight background settlement loop once."""
+    """Start the background settlement loop once.
+
+    Development may continue after a failed initial pass so local UI work is
+    still possible without chain access. Production sets
+    ``fail_on_initial_error`` so the app cannot quietly serve while settlement
+    is unavailable.
+    """
     global _SETTLEMENT_TASK, _SETTLEMENT_STOP_EVENT, _SETTLEMENT_LAST_RESULT, _SETTLEMENT_LAST_ERROR
 
     if _SETTLEMENT_TASK is not None and not _SETTLEMENT_TASK.done():
@@ -555,9 +573,18 @@ async def start_settlement_refresher(
     if run_immediately:
         try:
             _SETTLEMENT_LAST_RESULT = await run_settlement_pass()
-            _SETTLEMENT_LAST_ERROR = None
-        except Exception as exc:  # pragma: no cover - startup should not fail app boot
+            if not bool(_SETTLEMENT_LAST_RESULT.get("ok", True)):
+                _SETTLEMENT_LAST_ERROR = repr(_SETTLEMENT_LAST_RESULT)
+                if fail_on_initial_error:
+                    raise RuntimeError("Initial settlement pass reported failure")
+                logger.error("Initial settlement pass reported failure: %s", _SETTLEMENT_LAST_RESULT)
+            else:
+                _SETTLEMENT_LAST_ERROR = None
+        except Exception as exc:
             _SETTLEMENT_LAST_ERROR = repr(exc)
+            logger.exception("Initial background settlement pass failed")
+            if fail_on_initial_error:
+                raise
 
     _SETTLEMENT_TASK = asyncio.create_task(_settlement_loop(int(interval_seconds)))
 

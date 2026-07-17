@@ -1,7 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from unittest import mock
 
 import constants as const
@@ -594,7 +594,7 @@ class FreshSchemaPolicyTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(int(row[0]), int(schema.SCHEMA_VERSION))
 
     async def test_nonempty_unversioned_database_is_rejected_instead_of_migrated(self):
-        with sqlite3.connect(self._tmp.name) as db:
+        with closing(sqlite3.connect(self._tmp.name)) as db:
             db.execute("CREATE TABLE user (id INTEGER PRIMARY KEY);")
             db.commit()
 

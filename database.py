@@ -8,6 +8,7 @@ The back-end of the system. Handles the database.
 ─────────────────────────────────────────────
 """
 
+import os
 from contextlib import asynccontextmanager, suppress
 
 import aiosqlite
@@ -48,8 +49,9 @@ from constants import (
     SPOT_DEPOSIT_KEY_VERSION as DEFAULT_SPOT_DEPOSIT_KEY_VERSION,
 )
 
-# Where the SQLite database is stored.
-DB_PATH = "records.db"
+# Where the SQLite database is stored. Production should point this at a
+# persistent volume; local development keeps the convenient repository file.
+DB_PATH = os.getenv("NIMHUNT_DB_PATH", "records.db").strip() or "records.db"
 
 # NimHunt is still in development and intentionally uses fresh databases
 # instead of carrying schema migrations. Increment this whenever the schema

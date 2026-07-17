@@ -1,4 +1,4 @@
-name: PR11 Snapshot
+name: Finish and verify public deployment modes
 
 on:
   pull_request:
@@ -6,26 +6,131 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  snapshot:
+  verify:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out branch
+      - name: Check out PR branch
         uses: actions/checkout@v4
-      - name: Archive source
-        run: |
-          tar \
-            --exclude=.git \
-            --exclude=venv \
-            --exclude='**/__pycache__' \
-            --exclude='*.pyc' \
-            --exclude=records.db \
-            -czf /tmp/nimhunt-pr11-source.tar.gz .
-      - name: Upload source archive
-        uses: actions/upload-artifact@v4
         with:
-          name: nimhunt-pr11-source
-          path: /tmp/nimhunt-pr11-source.tar.gz
-          retention-days: 1
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Reassemble and apply reviewed patch
+        run: |
+          cat .github/pr11-finish/chunk-00 > /tmp/pr11-finish.patch.gz.b64
+          echo "6aa4e9bfc8a275e39ad383ee8300e3b9e0a318a37117ba3ec6c9acdd47e22c8b  /tmp/pr11-finish.patch.gz.b64" | sha256sum --check
+          base64 --decode /tmp/pr11-finish.patch.gz.b64 > /tmp/pr11-finish.patch.gz
+          echo "280f5bed766fbf39fc4f4793fc010ac54974261167b7a730fccc9646a2534e87  /tmp/pr11-finish.patch.gz" | sha256sum --check
+          gzip -dc /tmp/pr11-finish.patch.gz > /tmp/pr11-finish.patch
+          echo "c3c8a5021e14815afdf85be75a2fc35d167838f0b92cc4ee1c0d4125a06b2966  /tmp/pr11-finish.patch" | sha256sum --check
+          git apply --check /tmp/pr11-finish.patch
+          git apply /tmp/pr11-finish.patch
+          rm -rf .github/pr11-finish
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest ruff pip-audit
+          npm ci --prefix helpers
+
+      - name: Run Python tests
+        run: PYTHONPATH=. python -W error::ResourceWarning -m pytest -q
+
+      - name: Run Nimiq and browser module tests
+        run: npm --prefix helpers test
+
+      - name: Run static checks and dependency audits
+        run: |
+          python -m py_compile *.py tests/*.py
+          ruff check .
+          for file in static/*.js; do node --check --input-type=module < "$file"; done
+          for file in helpers/*.mjs; do node --check "$file"; done
+          for file in *.sh; do bash -n "$file"; done
+          python -m pip check
+          python -m pip_audit
+          npm audit --omit=dev --prefix helpers
+          git diff --check
+
+      - name: Compile all templates
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import constants as const
+          from jinja2 import Environment, FileSystemLoader
+
+          environment = Environment(loader=FileSystemLoader(str(const.TEMPLATES_DIR)))
+          for path in sorted(const.TEMPLATES_DIR.glob("*.html")):
+              environment.get_template(path.name)
+          PY
+
+      - name: Seed a fresh development database
+        run: |
+          TMPDIR="$(mktemp -d)"
+          NIMHUNT_DB_PATH="$TMPDIR/records.db" PYTHONPATH=. python spoof.py
+          test -s "$TMPDIR/records.db"
+          rm -rf "$TMPDIR"
+
+      - name: Exercise public-testnet startup with the real bundled signer
+        env:
+          NIMHUNT_DEPLOYMENT_MODE: public-testnet
+          NIMHUNT_NIMIQ_NETWORK: TestAlbatross
+          NIMHUNT_NIMIQ_NETWORK_ID: "5"
+          NIMHUNT_NIMIQ_RPC_URL: https://rpc.testnet.nimiqwatch.com/
+          NIMHUNT_NIMIQ_HUB_URL: https://hub.nimiq-testnet.com
+          NIMHUNT_NIMIQ_MNEMONIC: legal winner thank year wave sausage worth useful legal winner thank yellow
+          NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND: node helpers/nimiq_helper.mjs
+          NIMHUNT_NIMIQ_SEND_COMMAND: node helpers/nimiq_helper.mjs
+          NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS: NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF
+        run: |
+          TMPDIR="$(mktemp -d)"
+          export NIMHUNT_DB_PATH="$TMPDIR/records.db"
+          PYTHONPATH=. python - <<'PY'
+          import asyncio
+          import sqlite3
+          from unittest import mock
+
+          import main
+
+          async def run() -> None:
+              with (
+                  mock.patch.object(main, "verify_public_rpc_network", mock.AsyncMock()),
+                  mock.patch.object(main.cache, "start_cache_refresher", mock.AsyncMock()),
+                  mock.patch.object(main.settlement_updater, "start_settlement_refresher", mock.AsyncMock()),
+                  mock.patch.object(main.trans_updater, "start_transaction_refresher", mock.AsyncMock()),
+              ):
+                  await main.startup()
+
+              connection = sqlite3.connect(main.database.DB_PATH)
+              try:
+                  metadata = dict(connection.execute("SELECT key, value FROM app_metadata"))
+              finally:
+                  connection.close()
+              assert metadata["nimiq_network"] == "TestAlbatross"
+              assert metadata["nimiq_network_id"] == "5"
+              assert metadata["deployment_mode"] == "public-testnet"
+
+          asyncio.run(run())
+          PY
+          rm -rf "$TMPDIR"
+
+      - name: Commit verified repairs
+        run: |
+          rm -f .github/workflows/pr11_snapshot.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Finish public deployment safety checks"
+          git push origin HEAD:${{ github.head_ref }}

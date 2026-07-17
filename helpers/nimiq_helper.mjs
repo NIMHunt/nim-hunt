@@ -59,8 +59,28 @@ function mnemonicForNetwork(network) {
   throw new Error('Set NIMHUNT_NIMIQ_MNEMONIC before deriving or sending real Nimiq transactions. For TestAlbatross-only experiments, you may set NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC=1.');
 }
 
+function envEnabled(name) {
+  return ['1', 'true', 'yes', 'on'].includes(String(env(name, '0')).trim().toLowerCase());
+}
+
+function normalisedDeploymentMode() {
+  const explicitMode = String(env('NIMHUNT_DEPLOYMENT_MODE', '')).trim().toLowerCase().replaceAll('_', '-');
+  if (explicitMode) return explicitMode;
+
+  return envEnabled('NIMHUNT_PRODUCTION') ? 'production' : 'development';
+}
+
 function ensureNotUnsafeDefault(network) {
-  if (network === 'MainAlbatross' && env('NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC', '0') === '1' && !env('NIMHUNT_NIMIQ_MNEMONIC')) {
+  const deploymentMode = normalisedDeploymentMode();
+  const publicDeployment = deploymentMode === 'public-testnet' || deploymentMode === 'production';
+  const configuredMnemonic = String(env('NIMHUNT_NIMIQ_MNEMONIC', '')).trim().replace(/\s+/g, ' ');
+  const defaultEnabled = envEnabled('NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC');
+  const explicitlyDefault = configuredMnemonic.toLowerCase() === DEFAULT_TEST_MNEMONIC;
+
+  if (publicDeployment && (defaultEnabled || explicitlyDefault)) {
+    throw new Error('Refusing to use the public default test mnemonic in a public NimHunt deployment. Configure a private deployment-specific mnemonic.');
+  }
+  if (network === 'MainAlbatross' && defaultEnabled && !configuredMnemonic) {
     throw new Error('Refusing to use the public default test mnemonic on MainAlbatross. Set a private NIMHUNT_NIMIQ_MNEMONIC.');
   }
 }

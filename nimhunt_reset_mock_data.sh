@@ -1,9 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-case "${NIMHUNT_PRODUCTION:-}" in
+DEPLOYMENT_MODE="${NIMHUNT_DEPLOYMENT_MODE:-}"
+LEGACY_PRODUCTION="${NIMHUNT_PRODUCTION:-}"
+
+case "$DEPLOYMENT_MODE" in
+    public-testnet|production)
+        echo "Refusing to reset mock data in public deployment mode: $DEPLOYMENT_MODE."
+        exit 1
+        ;;
+    development|"")
+        ;;
+    *)
+        echo "Refusing to reset mock data: unknown NIMHUNT_DEPLOYMENT_MODE=$DEPLOYMENT_MODE."
+        exit 1
+        ;;
+esac
+
+case "$LEGACY_PRODUCTION" in
     1|true|TRUE|yes|YES|on|ON)
-        echo "Refusing to reset mock data while NIMHUNT_PRODUCTION is enabled."
+        echo "Refusing to reset mock data while legacy NIMHUNT_PRODUCTION is enabled."
         exit 1
         ;;
 esac
@@ -32,6 +48,8 @@ if [ ! -f "$HELPER_PATH" ] || [ ! -d "$NIMIQ_CORE_PATH" ]; then
 fi
 
 source venv/bin/activate
+
+export NIMHUNT_DEPLOYMENT_MODE="${NIMHUNT_DEPLOYMENT_MODE:-development}"
 
 export NIMHUNT_NIMIQ_NETWORK="${NIMHUNT_NIMIQ_NETWORK:-TestAlbatross}"
 export NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC="${NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC:-1}"

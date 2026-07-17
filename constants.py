@@ -24,7 +24,6 @@ def _env_int(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer") from exc
 
 
-
 def _env_nim_amount(name: str, default_nim: str, *, luna_per_nim: int) -> int:
     """Read a non-negative NIM amount and convert it exactly to Luna."""
     raw_value = os.getenv(name, default_nim).strip()
@@ -40,6 +39,46 @@ def _env_nim_amount(name: str, default_nim: str, *, luna_per_nim: int) -> int:
     if luna != luna.to_integral_value():
         raise ValueError(f"{name} cannot use more than 5 decimal places")
     return int(luna)
+
+
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+_FALSE_VALUES = {"0", "false", "no", "off"}
+
+
+def _optional_env_bool(name: str) -> bool | None:
+    """Read an optional boolean environment variable with strict validation."""
+    if name not in os.environ or not os.environ[name].strip():
+        return None
+    value = os.environ[name].strip().lower()
+    if value in _TRUE_VALUES:
+        return True
+    if value in _FALSE_VALUES:
+        return False
+    raise ValueError(f"{name} must be one of: 1, 0, true, false, yes, no, on, off")
+
+
+def _deployment_mode() -> str:
+    """Resolve the preferred deployment mode and the legacy production flag."""
+    mode_env = "NIMHUNT_DEPLOYMENT_MODE"
+    legacy_env = "NIMHUNT_PRODUCTION"
+    raw_mode = os.getenv(mode_env, "").strip().lower().replace("_", "-")
+    legacy_production = _optional_env_bool(legacy_env)
+
+    if raw_mode:
+        allowed = {"development", "public-testnet", "production"}
+        if raw_mode not in allowed:
+            raise ValueError(
+                f"{mode_env} must be development, public-testnet, or production"
+            )
+        mode_is_production = raw_mode == "production"
+        if legacy_production is not None and legacy_production != mode_is_production:
+            raise ValueError(
+                f"{mode_env}={raw_mode!r} conflicts with {legacy_env}="
+                f"{int(legacy_production)}"
+            )
+        return raw_mode
+
+    return "production" if legacy_production else "development"
 
 
 def _canonical_nimiq_network(value: str) -> str:
@@ -77,14 +116,17 @@ NIMIQ_PAY_URL = "https://nimpay.app"
 # Development / test settings
 # -----------------------------
 
-# Set NIMHUNT_PRODUCTION=1 in public deployments. Startup then refuses
-# unsafe local-development settings instead of silently serving with them.
-PRODUCTION_MODE = os.getenv("NIMHUNT_PRODUCTION", "").strip().lower() in {"1", "true", "yes", "on"}
-
-# All deliberately convenient desktop/mock behaviour is controlled by the
-# production flag in one place. Local development keeps these helpers; an
-# explicit production process never exposes or accepts them.
-TEST_FEATURES_ENABLED = not PRODUCTION_MODE
+# Deployment safety is independent from the selected blockchain network.
+# NIMHUNT_DEPLOYMENT_MODE is preferred; NIMHUNT_PRODUCTION remains a strict
+# compatibility alias for production only. Public modes disable every local
+# shortcut, while production specifically means real-NIM MainAlbatross.
+NIMHUNT_DEPLOYMENT_MODE_ENV = "NIMHUNT_DEPLOYMENT_MODE"
+NIMHUNT_LEGACY_PRODUCTION_ENV = "NIMHUNT_PRODUCTION"
+DEPLOYMENT_MODE = _deployment_mode()
+PUBLIC_TESTNET_MODE = DEPLOYMENT_MODE == "public-testnet"
+PRODUCTION_MODE = DEPLOYMENT_MODE == "production"
+PUBLIC_DEPLOYMENT = PUBLIC_TESTNET_MODE or PRODUCTION_MODE
+TEST_FEATURES_ENABLED = DEPLOYMENT_MODE == "development"
 
 # Development helper: the home/session API may return TEST_USER_ID when the
 # webview is opened outside Nimiq Pay and no device hash is available.
@@ -229,7 +271,10 @@ NIMIQ_NETWORK_IDS = {
 NIMIQ_NETWORK = _canonical_nimiq_network(
     os.getenv("NIMHUNT_NIMIQ_NETWORK", "TestAlbatross")
 )
-NIMIQ_NETWORK_ID = NIMIQ_NETWORK_IDS.get(NIMIQ_NETWORK, 0)
+NIMIQ_NETWORK_ID = _env_int(
+    "NIMHUNT_NIMIQ_NETWORK_ID",
+    NIMIQ_NETWORK_IDS.get(NIMIQ_NETWORK, 0),
+)
 
 # Public RPC endpoints are convenient defaults for this small application. A
 # deployment can override them with a trusted provider or its own node. Keeping
@@ -286,9 +331,10 @@ NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC_ENV = "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TES
 NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND_ENV = "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND"
 NIMHUNT_NIMIQ_SEND_COMMAND_ENV = "NIMHUNT_NIMIQ_SEND_COMMAND"
 NIMHUNT_NIMIQ_CONFIRM_COMMAND_ENV = "NIMHUNT_NIMIQ_CONFIRM_COMMAND"
+NIMHUNT_NIMIQ_EXTERNAL_SIGNER_ENV = "NIMHUNT_NIMIQ_EXTERNAL_SIGNER"
 
 # Development fallbacks. Placeholder addresses are automatically disabled in
-# production. Fake sends remain opt-in even during development.
+# every public deployment. Fake sends remain opt-in even during development.
 ALLOW_DEV_WALLET_PLACEHOLDERS = TEST_FEATURES_ENABLED
 ALLOW_DEV_WALLET_SENDS = False
 PLACEHOLDER_SPOT_DEPOSIT_ADDRESS_PREFIX = "NQ00 NIMHUNT DEV SPOT DEPOSIT"

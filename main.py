@@ -4,6 +4,8 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -12,41 +14,76 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import cache
 import constants as const
+import database
 import settlement_updater
 import trans_updater
 import wallet
-from database import init_db
 from public_html import render_not_found_page
 from public_html import router as public_router
 
 logger = logging.getLogger(__name__)
 
 
-def validate_production_safety() -> None:
-    """Validate chain settings and refuse development shortcuts in production."""
+def _env_enabled(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _endpoint_host(value: str) -> str:
+    try:
+        return (urlparse(value).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def _is_https_endpoint(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return False
+    return parsed.scheme.lower() == "https" and bool(parsed.hostname)
+
+
+def _uses_bundled_helper(command: str) -> bool:
+    return "nimiq_helper.mjs" in str(command or "").lower()
+
+
+def validate_deployment_safety() -> None:
+    """Validate deployment safety, chain selection, and signing configuration."""
+    mode = str(getattr(const, "DEPLOYMENT_MODE", "development")).strip()
+    public_deployment = bool(getattr(const, "PUBLIC_DEPLOYMENT", False))
     network = str(getattr(const, "NIMIQ_NETWORK", "")).strip()
     network_ids = getattr(const, "NIMIQ_NETWORK_IDS", {})
     expected_network_id = network_ids.get(network) if isinstance(network_ids, dict) else None
     configured_network_id = int(getattr(const, "NIMIQ_NETWORK_ID", 0))
     rpc_url = str(getattr(const, "NIMIQ_RPC_URL", "")).strip()
+    hub_url = str(getattr(const, "NIMIQ_HUB_URL", "")).strip()
 
-    configuration_errors: list[str] = []
+    errors: list[str] = []
+    if mode not in {"development", "public-testnet", "production"}:
+        errors.append(f"unsupported deployment mode {mode!r}")
     if expected_network_id is None:
-        configuration_errors.append(f"unsupported NIMIQ_NETWORK {network!r}")
+        errors.append(f"unsupported NIMIQ_NETWORK {network!r}")
     elif configured_network_id != int(expected_network_id):
-        configuration_errors.append(
-            f"NIMIQ_NETWORK_ID must be {expected_network_id} for {network}"
-        )
+        errors.append(f"NIMIQ_NETWORK_ID must be {expected_network_id} for {network}")
     if not rpc_url:
-        configuration_errors.append("NIMIQ_RPC_URL must be configured")
+        errors.append("NIMIQ_RPC_URL must be configured")
+    if not hub_url:
+        errors.append("NIMIQ_HUB_URL must be configured")
 
-    if configuration_errors:
-        raise RuntimeError(f"Invalid Nimiq configuration: {', '.join(configuration_errors)}")
+    if mode == "public-testnet":
+        if network != "TestAlbatross" or configured_network_id != 5:
+            errors.append("public-testnet requires TestAlbatross with network ID 5")
+    elif mode == "production":
+        if network != "MainAlbatross" or configured_network_id != 24:
+            errors.append("production requires MainAlbatross with network ID 24")
 
-    if not bool(getattr(const, "PRODUCTION_MODE", False)):
+    if errors:
+        raise RuntimeError(f"Invalid NimHunt deployment configuration: {', '.join(errors)}")
+
+    if not public_deployment:
         return
 
-    unsafe_settings: list[str] = []
+    unsafe: list[str] = []
     for name in (
         "TEST_FEATURES_ENABLED",
         "DEFAULT_TO_TEST_USER",
@@ -54,41 +91,90 @@ def validate_production_safety() -> None:
         "ALLOW_DEV_WALLET_SENDS",
     ):
         if bool(getattr(const, name, False)):
-            unsafe_settings.append(name)
+            unsafe.append(name)
 
     dev_seed_env = getattr(const, "NIMHUNT_DEV_MASTER_SEED_ENV", "NIMHUNT_DEV_MASTER_SEED")
     if os.getenv(dev_seed_env):
-        unsafe_settings.append(f"{dev_seed_env} must not be set")
+        unsafe.append(f"{dev_seed_env} must not be set")
 
     default_mnemonic_env = getattr(
         const,
         "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC_ENV",
         "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC",
     )
-    if os.getenv(default_mnemonic_env, "").strip().lower() in {"1", "true", "yes", "on"}:
-        unsafe_settings.append(f"{default_mnemonic_env} must not be enabled")
+    if _env_enabled(default_mnemonic_env):
+        unsafe.append(f"{default_mnemonic_env} must not be enabled")
 
-    if str(getattr(const, "NIMIQ_NETWORK", "")).strip() != "MainAlbatross":
-        unsafe_settings.append("NIMIQ_NETWORK must be MainAlbatross")
+    derive_env = getattr(
+        const,
+        "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND_ENV",
+        "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND",
+    )
+    send_env = getattr(
+        const,
+        "NIMHUNT_NIMIQ_SEND_COMMAND_ENV",
+        "NIMHUNT_NIMIQ_SEND_COMMAND",
+    )
+    derive_command = os.getenv(derive_env, "").strip()
+    send_command = os.getenv(send_env, "").strip()
+    if not derive_command:
+        unsafe.append(f"{derive_env} must be configured")
+    if not send_command:
+        unsafe.append(f"{send_env} must be configured")
 
-    if int(getattr(const, "NIMIQ_NETWORK_ID", 0)) != 24:
-        unsafe_settings.append("NIMIQ_NETWORK_ID must be 24 for MainAlbatross")
+    mnemonic_env = getattr(
+        const, "NIMHUNT_NIMIQ_MNEMONIC_ENV", "NIMHUNT_NIMIQ_MNEMONIC"
+    )
+    mnemonic = os.getenv(mnemonic_env, "").strip()
+    public_default = (
+        "abandon abandon abandon abandon abandon abandon abandon abandon "
+        "abandon abandon abandon about"
+    )
+    if mnemonic and " ".join(mnemonic.split()).lower() == public_default:
+        unsafe.append(f"{mnemonic_env} must not contain the public default test mnemonic")
 
-    rpc_url = str(getattr(const, "NIMIQ_RPC_URL", "")).strip().lower()
-    if not rpc_url or "testnet" in rpc_url:
-        unsafe_settings.append("NIMIQ_RPC_URL must point at a mainnet RPC endpoint")
+    external_signer_env = getattr(
+        const,
+        "NIMHUNT_NIMIQ_EXTERNAL_SIGNER_ENV",
+        "NIMHUNT_NIMIQ_EXTERNAL_SIGNER",
+    )
+    external_signer = _env_enabled(external_signer_env)
+    bundled_helper = _uses_bundled_helper(derive_command) or _uses_bundled_helper(
+        send_command
+    )
+    if bundled_helper and not mnemonic:
+        unsafe.append(f"{mnemonic_env} must be configured for the bundled Nimiq helper")
+    elif not mnemonic and not external_signer:
+        unsafe.append(
+            f"configure private {mnemonic_env} or enable {external_signer_env} "
+            "for a key-managed external signer"
+        )
 
-    hub_url = str(getattr(const, "NIMIQ_HUB_URL", "")).strip().lower()
-    if not hub_url or "testnet" in hub_url or "hub.nimiq-testnet" in hub_url:
-        unsafe_settings.append("NIMIQ_HUB_URL must point at the mainnet Hub")
+    rpc_host = _endpoint_host(rpc_url)
+    hub_host = _endpoint_host(hub_url)
+    if not _is_https_endpoint(rpc_url):
+        unsafe.append("NIMIQ_RPC_URL must be an HTTPS endpoint")
+    if not _is_https_endpoint(hub_url):
+        unsafe.append("NIMIQ_HUB_URL must be an HTTPS endpoint")
 
-    for env_constant, fallback in (
-        ("NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND_ENV", "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND"),
-        ("NIMHUNT_NIMIQ_SEND_COMMAND_ENV", "NIMHUNT_NIMIQ_SEND_COMMAND"),
-    ):
-        env_name = getattr(const, env_constant, fallback)
-        if not os.getenv(env_name, "").strip():
-            unsafe_settings.append(f"{env_name} must be configured")
+    if mode == "public-testnet":
+        # A private/custom TestAlbatross RPC hostname may not contain the word
+        # "testnet", so reject only endpoints that clearly identify mainnet.
+        if rpc_host == "rpc.nimiqwatch.com" or "mainnet" in rpc_host:
+            unsafe.append("NIMIQ_RPC_URL must not point at a mainnet RPC endpoint")
+        if "testnet" not in hub_host:
+            unsafe.append(
+                "NIMIQ_HUB_URL must clearly identify the TestAlbatross/testnet Hub"
+            )
+    elif mode == "production":
+        if "testnet" in rpc_host:
+            unsafe.append("NIMIQ_RPC_URL must point at a mainnet RPC endpoint")
+        if "testnet" in hub_host or "nimiq-testnet" in hub_host:
+            unsafe.append("NIMIQ_HUB_URL must point at the mainnet Hub")
+
+    database_path = Path(str(database.DB_PATH)).expanduser()
+    if not database_path.is_absolute():
+        unsafe.append("NIMHUNT_DB_PATH must be an absolute persistent path")
 
     fee_address = str(getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "")).strip()
     try:
@@ -98,13 +184,30 @@ def validate_production_safety() -> None:
             allow_dev_placeholder=False,
         )
     except ValueError:
-        unsafe_settings.append(
-            "SPOT_CANCELLATION_FEE_ADDRESS must be a valid production address"
+        unsafe.append(
+            "SPOT_CANCELLATION_FEE_ADDRESS must be a valid operator-controlled address"
         )
 
-    if unsafe_settings:
-        joined = ", ".join(unsafe_settings)
-        raise RuntimeError(f"Unsafe production configuration: {joined}")
+    if unsafe:
+        raise RuntimeError(f"Unsafe {mode} configuration: {', '.join(unsafe)}")
+
+
+def validate_production_safety() -> None:
+    """Backward-compatible alias for the deployment-aware safety validator."""
+    validate_deployment_safety()
+
+
+def verify_public_signing_access() -> None:
+    """Prove that a public deployment can derive from its configured private key."""
+    if not bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
+        return
+    try:
+        wallet.derive_spot_deposit_address(0)
+    except Exception:
+        raise RuntimeError(
+            "Public deployment signer validation failed; check the private mnemonic "
+            "or external signer configuration"
+        ) from None
 
 
 def _request_prefers_json(request: Request) -> bool:
@@ -144,10 +247,33 @@ def _should_render_404_page(request: Request) -> bool:
 
 async def startup() -> None:
     """Initialise storage, caches, settlement work, and transaction polling."""
-    validate_production_safety()
-    await init_db()
+    validate_deployment_safety()
+    verify_public_signing_access()
+    await database.init_db()
 
-    strict_startup = bool(getattr(const, "PRODUCTION_MODE", False))
+    derive_env = getattr(
+        const,
+        "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND_ENV",
+        "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND",
+    )
+    send_env = getattr(
+        const,
+        "NIMHUNT_NIMIQ_SEND_COMMAND_ENV",
+        "NIMHUNT_NIMIQ_SEND_COMMAND",
+    )
+    logger.info(
+        "NimHunt starting: deployment_mode=%s network=%s network_id=%s database=%s "
+        "derive_helper_configured=%s send_helper_configured=%s public_safety=%s",
+        getattr(const, "DEPLOYMENT_MODE", "development"),
+        getattr(const, "NIMIQ_NETWORK", ""),
+        getattr(const, "NIMIQ_NETWORK_ID", 0),
+        database.DB_PATH,
+        bool(os.getenv(derive_env, "").strip()),
+        bool(os.getenv(send_env, "").strip()),
+        bool(getattr(const, "PUBLIC_DEPLOYMENT", False)),
+    )
+
+    strict_startup = bool(getattr(const, "PUBLIC_DEPLOYMENT", False))
     try:
         await cache.start_cache_refresher(run_immediately=True)
         await settlement_updater.start_settlement_refresher(
@@ -196,6 +322,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title=const.APP_NAME, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(const.STATIC_DIR)), name="static")
 app.include_router(public_router)
+
+
+@app.get("/healthz", include_in_schema=False)
+async def healthz() -> JSONResponse:
+    """Return a lightweight, secret-free readiness response."""
+    return JSONResponse(
+        {
+            "ok": True,
+            "deployment_mode": getattr(const, "DEPLOYMENT_MODE", "development"),
+            "network": getattr(const, "NIMIQ_NETWORK", ""),
+        }
+    )
 
 
 @app.exception_handler(StarletteHTTPException)

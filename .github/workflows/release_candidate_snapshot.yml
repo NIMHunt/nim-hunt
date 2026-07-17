@@ -1,9 +1,9 @@
 name: Release Candidate Snapshot
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/release-candidate-final-pass
+      - main
 
 permissions:
   contents: read

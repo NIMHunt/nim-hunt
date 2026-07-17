@@ -33,9 +33,10 @@ jobs:
           echo "2a3a12e7ce545163d99f539e24bf55c697620b4b9774487dfa0f3412205c21c8  /tmp/qol.patch.gz" | sha256sum --check
           gzip -dc /tmp/qol.patch.gz > /tmp/qol.patch
           echo "cfa51efb454f6f9602a7831dbacfb3f0f8d197742f466d06094f4143e1f65957  /tmp/qol.patch" | sha256sum --check
-          git apply --check /tmp/qol.patch
-          git apply /tmp/qol.patch
+          git apply --check --exclude=.github/workflows/qol_snapshot.yml /tmp/qol.patch
+          git apply --exclude=.github/workflows/qol_snapshot.yml /tmp/qol.patch
           rm -rf .github/qol-patch
+          rm -f .github/workflows/qol_snapshot.yml
 
       - name: Set up Python
         uses: actions/setup-python@v5

@@ -146,7 +146,7 @@ def get_master_seed(*, required: bool = False) -> bytes | None:
         return decrypt_master_seed_from_env_value(encrypted, secret or "")
 
     dev_seed = os.getenv(getattr(const, "NIMHUNT_DEV_MASTER_SEED_ENV", "NIMHUNT_DEV_MASTER_SEED"))
-    if dev_seed:
+    if dev_seed and bool(getattr(const, "TEST_FEATURES_ENABLED", not getattr(const, "PRODUCTION_MODE", False))):
         return dev_seed.encode("utf-8")
 
     if getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False):

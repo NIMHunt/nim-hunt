@@ -9,6 +9,7 @@
  */
 
 import * as NimiqModule from '@nimiq/core';
+import { encodeTransactionMemo } from './transaction_data.mjs';
 
 // Some @nimiq/core builds expose a default export, while others expose only
 // named exports. A namespace import works with both shapes and avoids startup
@@ -181,14 +182,25 @@ async function sendLunaFromSpotDeposit(payload) {
       ? await client.getNetworkId()
       : Number(payload.network_id ?? 6);
 
-    const tx = Nimiq.TransactionBuilder.newBasic(
-      keyPair.toAddress(),
-      recipient,
-      amount,
-      fee,
-      height,
-      Number(networkId),
-    );
+    const data = encodeTransactionMemo(payload.memo);
+    const tx = data.byteLength > 0
+      ? Nimiq.TransactionBuilder.newBasicWithData(
+          keyPair.toAddress(),
+          recipient,
+          data,
+          amount,
+          fee,
+          height,
+          Number(networkId),
+        )
+      : Nimiq.TransactionBuilder.newBasic(
+          keyPair.toAddress(),
+          recipient,
+          amount,
+          fee,
+          height,
+          Number(networkId),
+        );
     tx.sign(keyPair);
     tx.verify(Number(networkId));
 
@@ -204,6 +216,7 @@ async function sendLunaFromSpotDeposit(payload) {
       to_address: userFriendlyAddress(recipient),
       amount: Number(amount),
       fee: Number(fee),
+      memo: String(payload.memo || '').trim() || null,
       deposit_key_path: keyPath,
       validity_start_height: Number(height),
       network_id: Number(networkId),

@@ -32,10 +32,14 @@ NIMIQ_PAY_URL = "https://nimpay.app"
 # unsafe local-development settings instead of silently serving with them.
 PRODUCTION_MODE = os.getenv("NIMHUNT_PRODUCTION", "").strip().lower() in {"1", "true", "yes", "on"}
 
-# Development helper: when True, the home/session API can return TEST_USER_ID
-# if the webview is opened outside Nimiq Pay and no device hash is available.
-# Set this to False before any public/production deployment.
-DEFAULT_TO_TEST_USER = True
+# All deliberately convenient desktop/mock behaviour is controlled by the
+# production flag in one place. Local development keeps these helpers; an
+# explicit production process never exposes or accepts them.
+TEST_FEATURES_ENABLED = not PRODUCTION_MODE
+
+# Development helper: the home/session API may return TEST_USER_ID when the
+# webview is opened outside Nimiq Pay and no device hash is available.
+DEFAULT_TO_TEST_USER = TEST_FEATURES_ENABLED
 
 # Mock desktop user created by spoof.py. SQLite allows an explicit INTEGER
 # PRIMARY KEY value of 0, so this is safe for the test dataset.
@@ -166,6 +170,9 @@ NIMIQ_RPC_TIMEOUT_SECONDS = 12
 # returns an unstructured response that still needs from/to/amount proof.
 NIMIQ_ADDRESS_TX_LOOKUP_LIMIT = 500
 NIMIQ_TRANSACTION_FEE = 0
+# Keep human-readable transaction descriptions compact. The limit is measured
+# in UTF-8 bytes because that is what is placed in Nimiq transaction data.
+NIMIQ_TRANSACTION_DESCRIPTION_MAX_BYTES = 30
 
 # Nimiq Pay / Hub endpoints used by browser-side user deposits. The server does
 # not drive the user's Pay app directly; it returns deposit intents and records
@@ -187,13 +194,15 @@ SPOT_DEPOSIT_KEY_PATH_TEMPLATE = "m/44'/242'/{index}'/0'"
 NIMHUNT_MASTER_SEED_ENV = "NIMHUNT_MASTER_SEED_ENC"
 NIMHUNT_MASTER_SEED_SECRET_ENV = "NIMHUNT_MASTER_SEED_SECRET"
 NIMHUNT_DEV_MASTER_SEED_ENV = "NIMHUNT_DEV_MASTER_SEED"
+NIMHUNT_NIMIQ_MNEMONIC_ENV = "NIMHUNT_NIMIQ_MNEMONIC"
+NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC_ENV = "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC"
 NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND_ENV = "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND"
 NIMHUNT_NIMIQ_SEND_COMMAND_ENV = "NIMHUNT_NIMIQ_SEND_COMMAND"
 NIMHUNT_NIMIQ_CONFIRM_COMMAND_ENV = "NIMHUNT_NIMIQ_CONFIRM_COMMAND"
 
-# Development fallbacks. Disable these before production. Placeholder addresses
-# and fake tx hashes are only for local UI/backend flow testing.
-ALLOW_DEV_WALLET_PLACEHOLDERS = DEFAULT_TO_TEST_USER
+# Development fallbacks. Placeholder addresses are automatically disabled in
+# production. Fake sends remain opt-in even during development.
+ALLOW_DEV_WALLET_PLACEHOLDERS = TEST_FEATURES_ENABLED
 ALLOW_DEV_WALLET_SENDS = False
 PLACEHOLDER_SPOT_DEPOSIT_ADDRESS_PREFIX = "NQ00 NIMHUNT DEV SPOT DEPOSIT"
 PLACEHOLDER_SEND_TX_HASH_PREFIX = "devsend"

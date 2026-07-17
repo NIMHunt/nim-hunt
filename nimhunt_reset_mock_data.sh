@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+case "${NIMHUNT_PRODUCTION:-}" in
+    1|true|TRUE|yes|YES|on|ON)
+        echo "Refusing to reset mock data while NIMHUNT_PRODUCTION is enabled."
+        exit 1
+        ;;
+esac
+
 # NimHunt fresh-database and mock-data helper
 # Stop the FastAPI server before using this: the old local database is deleted.
 

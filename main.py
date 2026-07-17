@@ -1,5 +1,6 @@
 """NimHunt FastAPI application setup and background-service lifecycle."""
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -36,12 +37,25 @@ def validate_production_safety() -> None:
 
     unsafe_settings: list[str] = []
     for name in (
+        "TEST_FEATURES_ENABLED",
         "DEFAULT_TO_TEST_USER",
         "ALLOW_DEV_WALLET_PLACEHOLDERS",
         "ALLOW_DEV_WALLET_SENDS",
     ):
         if bool(getattr(const, name, False)):
             unsafe_settings.append(name)
+
+    dev_seed_env = getattr(const, "NIMHUNT_DEV_MASTER_SEED_ENV", "NIMHUNT_DEV_MASTER_SEED")
+    if os.getenv(dev_seed_env):
+        unsafe_settings.append(f"{dev_seed_env} must not be set")
+
+    default_mnemonic_env = getattr(
+        const,
+        "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC_ENV",
+        "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC",
+    )
+    if os.getenv(default_mnemonic_env, "").strip().lower() in {"1", "true", "yes", "on"}:
+        unsafe_settings.append(f"{default_mnemonic_env} must not be enabled")
 
     if str(getattr(const, "NIMIQ_NETWORK", "")).strip() != "MainAlbatross":
         unsafe_settings.append("NIMIQ_NETWORK must be MainAlbatross")

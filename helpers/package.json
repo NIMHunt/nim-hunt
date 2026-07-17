@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check nimiq_helper.mjs"
+    "check": "node --check nimiq_helper.mjs && node --check transaction_data.mjs",
+    "test": "node --test transaction_data.test.mjs"
   },
   "dependencies": {
     "@nimiq/core": "latest"

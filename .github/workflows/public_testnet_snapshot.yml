@@ -59,16 +59,27 @@ jobs:
       - name: Run Node tests
         run: npm --prefix helpers test
 
-      - name: Run static and dependency checks
+      - name: Compile and lint Python
         run: |
           python -m py_compile *.py tests/*.py
           ruff check .
+
+      - name: Check JavaScript and shell syntax
+        run: |
           for file in static/*.js; do node --check --input-type=module < "$file"; done
           for file in helpers/*.mjs; do node --check "$file"; done
           for file in *.sh; do bash -n "$file"; done
+
+      - name: Check Python dependencies
+        run: |
           python -m pip check
           python -m pip_audit
-          npm audit --omit=dev --prefix helpers
+
+      - name: Audit Nimiq helper dependencies
+        run: npm audit --omit=dev --prefix helpers
+
+      - name: Validate Railway configuration
+        run: |
           python - <<'PY'
           import json
           from pathlib import Path
@@ -83,7 +94,9 @@ jobs:
           assert 'python = "3.11"' in mise
           assert 'node = "20"' in mise
           PY
-          git diff --check
+
+      - name: Check patch whitespace
+        run: git diff --check
 
       - name: Compile all templates
         run: |

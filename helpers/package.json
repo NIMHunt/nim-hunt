@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "check": "node --check nimiq_helper.mjs && node --check transaction_data.mjs",
-    "test": "node --test transaction_data.test.mjs"
+    "test": "node --test transaction_data.test.mjs localisation.test.mjs prizedraw_rules.test.mjs static_localisation.test.mjs"
   },
   "dependencies": {
     "@nimiq/core": "2.7.1"

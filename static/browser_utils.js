@@ -1,3 +1,5 @@
+import { getPreferredLanguage } from './localisation.js';
+
 // Small browser-side helpers shared by NimHunt page modules.
 // Keep these helpers free of page-specific state so reusing them cannot change
 // a page's behaviour.
@@ -5,15 +7,10 @@
 const DEVICE_IDENTIFIER_PATTERN = /^[0-9a-fA-F]{64}$/;
 
 export function getLanguage() {
-    const payLanguage = window.nimiqPay?.language;
-    if (typeof payLanguage === 'string' && payLanguage.length > 0) return payLanguage;
-
-    const browserLanguage = navigator.language || navigator.userLanguage;
-    if (typeof browserLanguage === 'string' && browserLanguage.length > 0) {
-        return browserLanguage.split('-')[0];
-    }
-
-    return 'en';
+    // Nimiq Pay's selected language is authoritative for mini apps. When the
+    // host does not expose one (for example, an ordinary desktop browser), the
+    // interface deliberately falls back to English rather than the device locale.
+    return getPreferredLanguage();
 }
 
 export function createNoticePresenter(

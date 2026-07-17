@@ -23,24 +23,25 @@
     <div id="notice-backdrop" class="notice-backdrop" hidden>
         <section class="notice-card" role="alertdialog" aria-modal="true" aria-labelledby="notice-title" aria-describedby="notice-body">
             <h2 id="notice-title">{{ app_name | default('NimHunt') }} notice</h2>
-            <p id="notice-body">Something needs your attention.</p>
-            <a id="notice-link" class="notice-link" hidden>Read more</a>
-            <button id="notice-ok" class="nq-button light-blue">OK</button>
+            <p id="notice-body" data-i18n="common.noticeBody">Something needs your attention.</p>
+            <a id="notice-link" class="notice-link" data-i18n="common.readMore" hidden>Read more</a>
+            <button id="notice-ok" class="nq-button light-blue" data-i18n="common.ok">OK</button>
         </section>
     </div>
 
     <main class="home-shell find-shell" aria-live="polite">
         <header class="page-top-card">
             <a class="back-link" href="{{ back_href }}" aria-label="{{ back_aria_label }}">‹ {{ back_label }}</a>
-            <h1 id="claim-page-title">Claim</h1>
+            <h1 id="claim-page-title" data-i18n="claim.title">Claim</h1>
         </header>
 
-        <section class="claim-page-detail-section" aria-label="Claim details">
+        <section class="claim-page-detail-section" aria-label="Claim details" data-i18n-aria-label="claim.detailsAria">
             <ol id="claim-detail-list" class="spot-list spot-page-list claim-page-list"></ol>
-            <p id="claim-detail-fallback" class="empty-spots">Loading claim.</p>
+            <p id="claim-detail-fallback" class="empty-spots" data-i18n="claim.loading">Loading claim.</p>
         </section>
     </main>
 
+    <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
     <script src="{{ leaflet_js_url }}"></script>
     <script type="module" src="/static/claim_detail.js?v={{ asset_version | default('claim-polish-v2-20260704') }}"></script>
 </body>

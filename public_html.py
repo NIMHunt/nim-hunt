@@ -44,7 +44,7 @@ import settlement_updater
 router = APIRouter()
 templates = Jinja2Templates(directory=str(const.TEMPLATES_DIR))
 
-_ASSET_VERSION = "production-hardening-v1-20260717"
+_ASSET_VERSION = "qol-v1-20260717"
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ALLOWED_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$")
@@ -1020,7 +1020,7 @@ async def create_spot_full_form_page(request: Request, spot_id: int) -> HTMLResp
             "max_claim_duration_seconds": const.MAX_SPOT_CLAIM_DURATION_SECONDS,
             "min_max_claims_per_user": const.MIN_SPOT_MAX_CLAIMS_PER_USER,
             "max_max_claims_per_user": const.MAX_SPOT_MAX_CLAIMS_PER_USER,
-            "min_prizedraw_total_participants": const.MIN_PRIZEDRAW_MAX_TOTAL_CLAIMS,
+            "min_prizedraw_total_participants": const.MIN_FINITE_PRIZEDRAW_TOTAL_PARTICIPANTS,
             "min_standard_total_participants": const.MIN_SPOT_MAX_TOTAL_CLAIMS,
             "max_total_participants": const.MAX_SPOT_MAX_TOTAL_CLAIMS,
             "min_total_nim": const.MIN_SPOT_TOTAL_VALUE_NIM,
@@ -2166,6 +2166,7 @@ async def update_draft_spot_api(spot_id: int, payload: UpdateDraftSpotRequest) -
         "claim_duration",
         "max_claims_per_user",
         "max_total_claims",
+        "prize_count",
         "total_value",
         "starts_at",
         "ends_at",
@@ -2177,9 +2178,6 @@ async def update_draft_spot_api(spot_id: int, payload: UpdateDraftSpotRequest) -
     for name in sorted(update_field_names & field_names):
         key = "desc" if name == "description" else name
         update_kwargs[key] = getattr(payload, name)
-
-    prize_count_supplied = "prize_count" in field_names
-    prize_count_value = payload.prize_count if prize_count_supplied else None
 
     async with get_db() as db:
         try:
@@ -2201,7 +2199,6 @@ async def update_draft_spot_api(spot_id: int, payload: UpdateDraftSpotRequest) -
                     )
 
                 current_spot = await db_access.get_spot(db, spot_id=spot_id)
-                current_pd = await db_access.get_prizedraw(db, spot_id=spot_id)
                 if current_spot is None:
                     return JSONResponse(
                         {
@@ -2214,30 +2211,7 @@ async def update_draft_spot_api(spot_id: int, payload: UpdateDraftSpotRequest) -
                         status_code=status.HTTP_404_NOT_FOUND,
                     )
 
-                if current_pd is not None:
-                    current_prize_count = int(current_pd[schema.PRIZEDRAW_PRIZE_COUNT])
-                    target_max_total = int(update_kwargs.get(
-                        "max_total_claims",
-                        current_spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) or 0,
-                    ))
-                    target_prize_count = int(prize_count_value if prize_count_supplied else current_prize_count)
-
-                    if target_max_total > 0 and target_prize_count > target_max_total:
-                        if prize_count_supplied:
-                            update_kwargs["max_total_claims"] = target_prize_count
-                        else:
-                            prize_count_value = target_max_total
-                            prize_count_supplied = True
-
                 await db_access.modify_draft_spot(db, spot_id=spot_id, **update_kwargs)
-
-                if prize_count_supplied:
-                    await db_access.modify_draft_prizedraw(
-                        db,
-                        spot_id=spot_id,
-                        prize_count=int(prize_count_value),
-                    )
-
                 await db_access.require_spot_minimum_payout(db, spot_id=spot_id)
 
         except ValueError as exc:

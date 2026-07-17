@@ -1,12 +1,13 @@
 import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { COMMON_TEXT, makeCreateSpotFormText } from './interface_text.js?v=remove-help-pages-v1-20260705';
+import { getCommonText, makeCreateSpotFormText } from './interface_text.js?v=qol-v1-20260717';
 import { LUNA_PER_NIM, formatNimAmount } from './nim_format.js';
+import { adjustedPrizedrawLimits, prizedrawLimitsAreValid } from './prizedraw_rules.js?v=qol-v1-20260717';
 import {
     createNoticePresenter,
     getLanguage,
     requestDeviceIdentifierHash,
     responseErrorText,
-} from './browser_utils.js?v=refactor-v1-20260716';
+} from './browser_utils.js?v=qol-v1-20260717';
 const DEFAULT_MAP_CENTRE = [51.5074, -0.1278];
 const DEFAULT_MAP_ZOOM = 13;
 
@@ -43,6 +44,7 @@ const MIN_NONZERO_DURATION = Number.parseInt(document.body.dataset.minNonzeroCla
 const MAX_DURATION = Number.parseInt(document.body.dataset.maxClaimDuration || String(12 * 60 * 60), 10);
 const MIN_CLAIMS_PER_USER = Number.parseInt(document.body.dataset.minClaimsPerUser || '0', 10);
 const MAX_CLAIMS_PER_USER = Number.parseInt(document.body.dataset.maxClaimsPerUser || '10', 10);
+const MIN_PRIZEDRAW_TOTAL_PARTICIPANTS = Number.parseInt(document.body.dataset.minPrizedrawTotalParticipants || '2', 10);
 const MIN_STANDARD_TOTAL_PARTICIPANTS = Number.parseInt(document.body.dataset.minStandardTotalParticipants || '1', 10);
 const MAX_TOTAL_PARTICIPANTS = Number.parseInt(document.body.dataset.maxTotalParticipants || '1000', 10);
 const MIN_TOTAL_NIM = Number.parseFloat(document.body.dataset.minTotalNim || '100');
@@ -56,6 +58,7 @@ const PRIZEDRAW_PRIZE_COUNT_OPTIONS = (document.body.dataset.prizedrawPrizeCount
     .map((value) => Number.parseInt(value.trim(), 10))
     .filter(Number.isFinite);
 
+const COMMON_TEXT = getCommonText();
 const TEXT = makeCreateSpotFormText({
     appName: APP_NAME,
     nimiqPayUrl: NIMIQ_PAY_URL,
@@ -120,8 +123,8 @@ const els = {
 const radiusOptions = buildRadiusOptions();
 const durationOptions = buildDurationOptions();
 const perUserOptions = buildIntegerOptions(MIN_CLAIMS_PER_USER, MAX_CLAIMS_PER_USER);
-const standardParticipantOptions = buildParticipantOptions(false);
-const prizedrawParticipantOptions = buildParticipantOptions(true);
+const standardParticipantOptions = buildParticipantOptions(MIN_STANDARD_TOTAL_PARTICIPANTS, false);
+const prizedrawParticipantOptions = buildParticipantOptions(MIN_PRIZEDRAW_TOTAL_PARTICIPANTS, true);
 const endsAfterOptions = buildEndsAfterOptions();
 const prizeCountOptions = buildPrizeCountOptions();
 
@@ -465,10 +468,10 @@ function uniqueNumbersInOrder(values) {
     return out;
 }
 
-function buildParticipantOptions(includeUnlimited) {
+function buildParticipantOptions(minimumFiniteValue, includeUnlimited) {
     const values = [];
 
-    for (let value = MIN_STANDARD_TOTAL_PARTICIPANTS; value <= Math.min(10, MAX_TOTAL_PARTICIPANTS); value += 1) {
+    for (let value = minimumFiniteValue; value <= Math.min(10, MAX_TOTAL_PARTICIPANTS); value += 1) {
         values.push(value);
     }
 
@@ -634,40 +637,41 @@ function participantLimitIsFinite(value = sliderValue('totalParticipants')) {
     return Number(value) > 0;
 }
 
-function enforcePerUserTotalParticipantRelationship(changedName) {
+function enforceParticipantRelationships(changedName) {
     const perUser = Number(sliderValue('perUser') || 0);
     const totalParticipants = Number(sliderValue('totalParticipants') || 0);
 
-    // 0 means Unlimited for either slider, so only finite positive values are constrained.
-    if (perUser <= 0 || totalParticipants <= 0) return;
-
-    if (changedName === 'perUser' && perUser > totalParticipants) {
-        setSliderValue('totalParticipants', perUser, { updateState: false });
+    if (!isPrizedrawForm()) {
+        // Standard spots retain the existing <= relationship. A zero value
+        // means Unlimited, so it remains outside the finite comparison.
+        if (perUser <= 0 || totalParticipants <= 0) return;
+        if (changedName === 'perUser' && perUser > totalParticipants) {
+            setSliderValue('totalParticipants', perUser, { updateState: false });
+        } else if (changedName === 'totalParticipants' && totalParticipants < perUser) {
+            setSliderValue('perUser', totalParticipants, { updateState: false });
+        }
         return;
     }
 
-    if (changedName === 'totalParticipants' && totalParticipants < perUser) {
-        setSliderValue('perUser', totalParticipants, { updateState: false });
+    const adjusted = adjustedPrizedrawLimits({
+        changedName,
+        maxClaimsPerUser: perUser,
+        maxTotalClaims: totalParticipants,
+        prizeCount: Number(sliderValue('prizeCount') || 0),
+        participantOptions: sliderControls.totalParticipants.options,
+        perUserOptions: sliderControls.perUser.options,
+        prizeOptions: sliderControls.prizeCount.options,
+    });
+
+    if (adjusted.maxClaimsPerUser !== perUser) {
+        setSliderValue('perUser', adjusted.maxClaimsPerUser, { updateState: false });
     }
-}
-
-function enforcePrizedrawParticipantPrizeRelationship(changedName) {
-    if (!isPrizedrawForm()) return;
-
-    const totalParticipants = Number(sliderValue('totalParticipants') || 0);
+    if (adjusted.maxTotalClaims !== totalParticipants) {
+        setSliderValue('totalParticipants', adjusted.maxTotalClaims, { updateState: false });
+    }
     const prizeCount = Number(sliderValue('prizeCount') || 0);
-
-    // 0 means Unlimited total participants for Prizedraws, so it does not
-    // constrain the finite number of prizes.
-    if (totalParticipants <= 0 || prizeCount <= 0) return;
-
-    if (changedName === 'totalParticipants' && totalParticipants < prizeCount) {
-        setSliderValue('prizeCount', totalParticipants, { updateState: false });
-        return;
-    }
-
-    if (changedName === 'prizeCount' && prizeCount > totalParticipants) {
-        setSliderValue('totalParticipants', prizeCount, { updateState: false });
+    if (adjusted.prizeCount !== prizeCount) {
+        setSliderValue('prizeCount', adjusted.prizeCount, { updateState: false });
     }
 }
 
@@ -683,12 +687,8 @@ function setSliderValue(name, value, { updateState = true } = {}) {
     control.bubble.textContent = control.display(actualValue);
     requestAnimationFrame(() => positionSliderBubble(control, rangePosition));
 
-    if (name === 'perUser' || name === 'totalParticipants') {
-        enforcePerUserTotalParticipantRelationship(name);
-    }
-
-    if (name === 'totalParticipants' || name === 'prizeCount') {
-        enforcePrizedrawParticipantPrizeRelationship(name);
+    if (name === 'perUser' || name === 'totalParticipants' || name === 'prizeCount') {
+        enforceParticipantRelationships(name);
     }
 
     if (name === 'radius') {
@@ -932,14 +932,19 @@ function isPrizedrawForm() {
 }
 
 function validTotalParticipants() {
-    return isPrizedrawForm() || sliderValue('totalParticipants') > 0;
+    const totalParticipants = sliderValue('totalParticipants');
+    if (!isPrizedrawForm()) return totalParticipants > 0;
+    return totalParticipants === 0 || totalParticipants >= MIN_PRIZEDRAW_TOTAL_PARTICIPANTS;
 }
 
-function validPrizeCount() {
+function validPrizedrawRelationships() {
     if (!isPrizedrawForm()) return true;
-    const totalParticipants = sliderValue('totalParticipants');
-    const prizeCount = sliderValue('prizeCount');
-    return totalParticipants <= 0 || prizeCount <= totalParticipants;
+    return prizedrawLimitsAreValid({
+        maxClaimsPerUser: sliderValue('perUser'),
+        maxTotalClaims: sliderValue('totalParticipants'),
+        prizeCount: sliderValue('prizeCount'),
+        minimumFiniteParticipants: MIN_PRIZEDRAW_TOTAL_PARTICIPANTS,
+    });
 }
 
 function validPasswordSettings() {
@@ -961,11 +966,11 @@ function validateForm({ showMessage = true } = {}) {
     const datesOk = startsCheck.ok;
     const locationOk = validLocation();
     const participantsOk = validTotalParticipants();
-    const prizeOk = validPrizeCount();
+    const relationshipsOk = validPrizedrawRelationships();
     const passwordOk = validPasswordSettings();
     const payoutCheck = payoutValidation();
     const payoutOk = payoutCheck.ok;
-    const ok = titleOk && totalOk && datesOk && locationOk && participantsOk && prizeOk && passwordOk && payoutOk;
+    const ok = titleOk && totalOk && datesOk && locationOk && participantsOk && relationshipsOk && passwordOk && payoutOk;
 
     els.title.classList.toggle('is-invalid', !titleOk);
     if (!state.totalValueLocked) {
@@ -984,9 +989,11 @@ function validateForm({ showMessage = true } = {}) {
         } else if (!datesOk) {
             setError(startsCheck.message || TEXT.form.startsInvalid);
         } else if (!participantsOk) {
-            setError(TEXT.form.standardParticipantsRequired);
-        } else if (!prizeOk) {
-            setError(TEXT.form.prizeCountInvalid);
+            setError(isPrizedrawForm()
+                ? TEXT.form.prizedrawParticipantsMinimum(MIN_PRIZEDRAW_TOTAL_PARTICIPANTS)
+                : TEXT.form.standardParticipantsRequired);
+        } else if (!relationshipsOk) {
+            setError(TEXT.form.prizedrawLimitsInvalid);
         } else if (!passwordOk) {
             setError(isPrizedrawForm() ? TEXT.form.prizedrawPasswordInvalid : TEXT.form.passwordRequiresFiniteParticipants);
         } else if (!payoutOk) {
@@ -1049,7 +1056,7 @@ function updateSaveButtonState() {
         && validDates()
         && validLocation()
         && validTotalParticipants()
-        && validPrizeCount()
+        && validPrizedrawRelationships()
         && validPasswordSettings()
         && !savingOrLoading
         && !state.hydrating;

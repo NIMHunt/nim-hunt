@@ -23,28 +23,28 @@
     <div id="notice-backdrop" class="notice-backdrop" hidden>
         <section class="notice-card" role="alertdialog" aria-modal="true" aria-labelledby="notice-title" aria-describedby="notice-body">
             <h2 id="notice-title">{{ app_name | default('NimHunt') }} notice</h2>
-            <p id="notice-body">Something needs your attention.</p>
-            <a id="notice-link" class="notice-link" hidden>Read more</a>
-            <button id="notice-ok" class="nq-button light-blue">OK</button>
+            <p id="notice-body" data-i18n="common.noticeBody">Something needs your attention.</p>
+            <a id="notice-link" class="notice-link" data-i18n="common.readMore" hidden>Read more</a>
+            <button id="notice-ok" class="nq-button light-blue" data-i18n="common.ok">OK</button>
         </section>
     </div>
 
     <div id="report-backdrop" class="notice-backdrop" hidden>
         <section class="notice-card nh-confirm-card report-spot-card" role="dialog" aria-modal="true" aria-labelledby="report-title">
-            <h2 id="report-title">Make a Report</h2>
+            <h2 id="report-title" data-i18n="findSpots.reportTitle">Make a Report</h2>
             <p id="report-spot-name" class="report-spot-name"></p>
 
             <form id="report-form" class="report-form" novalidate>
-                <label class="report-field-label" for="report-reason-select">Reason</label>
+                <label class="report-field-label" for="report-reason-select" data-i18n="findSpots.reason">Reason</label>
                 <select id="report-reason-select" class="create-spot-input report-select" required>
-                    <option value="">Select a reason</option>
+                    <option value="" data-i18n="findSpots.reasonPlaceholder">Select a reason</option>
                 </select>
 
-                <label class="report-field-label" for="report-details-input">Details</label>
+                <label class="report-field-label" for="report-details-input" data-i18n="findSpots.details">Details</label>
                 <textarea id="report-details-input" class="create-spot-input create-spot-textarea report-details-input" rows="4"></textarea>
                 <p id="report-details-limit" class="report-field-hint"></p>
 
-                <label class="report-field-label" for="report-captcha-input">Captcha</label>
+                <label class="report-field-label" for="report-captcha-input" data-i18n="findSpots.captcha">Captcha</label>
                 <div class="report-captcha-row">
                     <span id="report-captcha-question" class="report-captcha-question"></span>
                     <input id="report-captcha-input" class="create-spot-input report-captcha-input" type="text" inputmode="numeric" autocomplete="off">
@@ -53,8 +53,8 @@
                 <p id="report-error" class="create-spot-error" role="alert" hidden></p>
 
                 <div class="nh-modal-actions report-spot-actions">
-                    <button id="report-confirm" class="nq-button light-blue" type="submit" disabled>Confirm</button>
-                    <button id="report-cancel" class="nq-button nh-grey-cancel-button" type="button">Cancel</button>
+                    <button id="report-confirm" class="nq-button light-blue" type="submit" data-i18n="common.confirm" disabled>Confirm</button>
+                    <button id="report-cancel" class="nq-button nh-grey-cancel-button" type="button" data-i18n="common.cancel">Cancel</button>
                 </div>
             </form>
         </section>
@@ -66,13 +66,14 @@
             <h1>{{ spot.title }}</h1>
         </header>
 
-        <section class="spot-page-detail-section" aria-label="Spot details">
+        <section class="spot-page-detail-section" aria-label="Spot details" data-i18n-aria-label="spot.detailsAria">
             <ol id="spot-detail-list" class="spot-list spot-page-list"></ol>
-            <p id="spot-detail-fallback" class="empty-spots">Loading spot.</p>
+            <p id="spot-detail-fallback" class="empty-spots" data-i18n="spot.loading">Loading spot.</p>
         </section>
     </main>
 
     <script id="spot-data" type="application/json">{{ spot_json | safe }}</script>
+    <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
     <script src="{{ leaflet_js_url }}"></script>
     <script type="module" src="/static/spot_detail.js?v={{ asset_version | default('claim-polish-v2-20260704') }}"></script>
 </body>

@@ -1,5 +1,5 @@
 import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { COMMON_TEXT, REPORT_REASON_OPTIONS, makeSpotDetailText } from './interface_text.js?v=remove-help-pages-v1-20260705';
+import { getCommonText, getReportReasonOptions, makeSpotDetailText } from './interface_text.js?v=qol-v1-20260717';
 import { formatNimFromLuna } from './nim_format.js';
 import {
     appendBulletLine,
@@ -10,13 +10,13 @@ import {
     highestTimeUnitText,
     spotScheduleTooltip,
     unixToText,
-} from './spot_ui.js?v=refactor-v1-20260716';
+} from './spot_ui.js?v=qol-v1-20260717';
 import {
     createNoticePresenter,
     getLanguage,
     requestDeviceIdentifierHash,
     responseErrorText as sharedResponseErrorText,
-} from './browser_utils.js?v=refactor-v1-20260716';
+} from './browser_utils.js?v=qol-v1-20260717';
 const els = {
     data: document.getElementById('spot-data'),
     list: document.getElementById('spot-detail-list'),
@@ -48,6 +48,8 @@ const MAP_TILE_URL = document.body.dataset.mapTileUrl || 'https://tile.openstree
 const MAP_TILE_ATTRIBUTION = document.body.dataset.mapTileAttribution || '&copy; OpenStreetMap contributors';
 const REPORT_DETAILS_MAX = Number.parseInt(document.body.dataset.reportDetailsMax || '300', 10);
 
+const COMMON_TEXT = getCommonText();
+const REPORT_REASON_OPTIONS = getReportReasonOptions();
 const TEXT = makeSpotDetailText({
     appName: APP_NAME,
     nimiqPayUrl: NIMIQ_PAY_URL,

@@ -26,9 +26,9 @@
     <div id="notice-backdrop" class="notice-backdrop" hidden>
         <section class="notice-card" role="alertdialog" aria-modal="true" aria-labelledby="notice-title" aria-describedby="notice-body">
             <h2 id="notice-title">{{ app_name | default('NimHunt') }} notice</h2>
-            <p id="notice-body">Something needs your attention.</p>
-            <a id="notice-link" class="notice-link" hidden>Read more</a>
-            <button id="notice-ok" class="nq-button light-blue">OK</button>
+            <p id="notice-body" data-i18n="common.noticeBody">Something needs your attention.</p>
+            <a id="notice-link" class="notice-link" data-i18n="common.readMore" hidden>Read more</a>
+            <button id="notice-ok" class="nq-button light-blue" data-i18n="common.ok">OK</button>
         </section>
     </div>
 
@@ -121,20 +121,21 @@
 
     <main class="home-shell find-shell" aria-live="polite">
         <header class="page-top-card">
-            <a class="back-link" href="/" aria-label="Back home">‹ Home</a>
-            <h1>My Spots</h1>
+            <a class="back-link" href="/" aria-label="Back home" data-i18n-aria-label="common.backHome">‹ <span data-i18n="common.home">Home</span></a>
+            <h1 data-i18n="mySpots.title">My Spots</h1>
         </header>
 
-        <section class="map-card" aria-label="My spots map">
+        <section class="map-card" aria-label="Your spot map" data-i18n-aria-label="mySpots.mapAria">
             <div id="spot-map" class="spot-map"></div>
         </section>
 
-        <button id="create-spot-open" class="nq-button light-blue create-spot-open-button" type="button">Create Spot</button>
+        <button id="create-spot-open" class="nq-button light-blue create-spot-open-button" type="button" data-i18n="mySpots.createSpot">Create Spot</button>
 
         <div id="my-spots-sections" class="my-spots-sections" aria-label="Spots you created"></div>
         <p id="empty-my-spots" class="empty-spots" hidden></p>
     </main>
 
+    <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
     <script src="{{ leaflet_js_url }}"></script>
     <script type="module" src="/static/my_spots.js?v={{ asset_version | default('publish-confirm-v1-20260701') }}"></script>
 </body>

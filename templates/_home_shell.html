@@ -21,9 +21,9 @@
     <div id="notice-backdrop" class="notice-backdrop" hidden>
         <section class="notice-card" role="alertdialog" aria-modal="true" aria-labelledby="notice-title" aria-describedby="notice-body">
             <h2 id="notice-title">{{ app_name | default('NimHunt') }} notice</h2>
-            <p id="notice-body">Something needs your attention.</p>
-            <a id="notice-link" class="notice-link" hidden>Read more</a>
-            <button id="notice-ok" class="nq-button light-blue">OK</button>
+            <p id="notice-body" data-i18n="common.noticeBody">Something needs your attention.</p>
+            <a id="notice-link" class="notice-link" data-i18n="common.readMore" hidden>Read more</a>
+            <button id="notice-ok" class="nq-button light-blue" data-i18n="common.ok">OK</button>
         </section>
     </div>
     {% endif %}
@@ -34,14 +34,14 @@
 
     <main class="home-shell" aria-live="polite">
         {% if hero_href is defined and hero_href %}
-        <a class="hero-card home-hero-link" href="{{ hero_href }}" aria-label="{{ hero_aria_label | default('Back home') }}">
+        <a class="hero-card home-hero-link" href="{{ hero_href }}" aria-label="{{ hero_aria_label | default('Back home') }}" data-i18n-aria-label="home.returnHome">
             <h1 class="hero-title"><span>{{ app_name | default('NimHunt') }}</span><span class="hero-diamond" aria-hidden="true">◆</span></h1>
             <p id="connection-line" class="sr-only">{{ hero_screenreader_text | default('Return to Home') }}</p>
         </a>
         {% else %}
         <header class="hero-card">
             <h1 class="hero-title"><span>{{ app_name | default('NimHunt') }}</span><span class="hero-diamond" aria-hidden="true">◆</span></h1>
-            <p id="connection-line" class="sr-only">Checking Nimiq Pay…</p>
+            <p id="connection-line" class="sr-only" data-i18n="home.checkingPay">Checking Nimiq Pay…</p>
         </header>
         {% endif %}
 
@@ -52,70 +52,72 @@
             <p class="home-error-message">{{ error_message }}</p>
             {% endif %}
             {% else %}
-            <p id="welcome-line" class="welcome-line">Preparing your home screen.</p>
+            <p id="welcome-line" class="welcome-line" data-i18n="home.preparing">Preparing your home screen.</p>
             <div id="display-name-editor" class="display-name-editor" hidden>
                 <p id="display-name-error" class="display-name-error" role="alert" hidden></p>
                 <div class="display-name-actions">
-                    <button id="display-name-save" class="nq-button green" type="button">Save</button>
-                    <button id="display-name-cancel" class="nq-button light-blue" type="button">Cancel</button>
+                    <button id="display-name-save" class="nq-button green" type="button" data-i18n="home.save">Save</button>
+                    <button id="display-name-cancel" class="nq-button light-blue" type="button" data-i18n="common.cancel">Cancel</button>
                 </div>
             </div>
             {% endif %}
         </section>
 
         {% if show_home_nav | default(true) %}
-        <nav class="home-actions" aria-label="Main navigation">
+        <nav class="home-actions" aria-label="Main navigation" data-i18n-aria-label="home.mainNavigation">
             <a id="find-spots-button" class="nq-button green action-button primary-action disabled" href="/spots" aria-disabled="true">
-                <span class="action-title">Find Spots</span>
-                <span class="action-detail">Search the map for nearby current and upcoming spots.</span>
+                <span class="action-title" data-i18n="home.findSpots">Find Spots</span>
+                <span class="action-detail" data-i18n="home.findSpotsDetail">Search the map for nearby current and upcoming spots.</span>
             </a>
 
             <a id="my-spots-button" class="nq-button gold action-button secondary-action disabled" href="/my-spots" aria-disabled="true">
-                <span class="action-title">My Spots</span>
-                <span class="action-detail">Review spots you created.</span>
+                <span class="action-title" data-i18n="home.mySpots">My Spots</span>
+                <span class="action-detail" data-i18n="home.mySpotsDetail">Review spots you created.</span>
             </a>
 
             <a id="my-claims-button" class="nq-button light-blue action-button secondary-action disabled" href="/my-claims" aria-disabled="true">
-                <span class="action-title">My Claims</span>
-                <span class="action-detail">See claims you have made.</span>
+                <span class="action-title" data-i18n="home.myClaims">My Claims</span>
+                <span class="action-detail" data-i18n="home.myClaimsDetail">See claims you have made.</span>
             </a>
         </nav>
         {% endif %}
 
         {% if show_debug | default(true) %}
-        <section class="debug-card" aria-label="Troubleshooting information">
+        <section class="debug-card" aria-label="Troubleshooting information" data-i18n-aria-label="home.troubleshootingAria">
             <button id="debug-toggle" class="debug-toggle disclosure-toggle" type="button" aria-expanded="false" aria-controls="debug-panel">
-                Troubleshooting
+                <span data-i18n="home.troubleshooting">Troubleshooting</span>
             </button>
             <dl id="debug-panel" class="debug-panel" hidden>
                 <div>
-                    <dt>Nimiq Pay</dt>
-                    <dd id="debug-wallet">checking</dd>
+                    <dt data-i18n="home.nimiqPay">Nimiq Pay</dt>
+                    <dd id="debug-wallet" data-i18n="home.checking">checking</dd>
                 </div>
                 <div>
-                    <dt>Location</dt>
-                    <dd id="debug-location">not requested on Home</dd>
+                    <dt data-i18n="home.location">Location</dt>
+                    <dd id="debug-location" data-i18n="home.locationNotRequested">not requested on Home</dd>
                 </div>
                 <div>
-                    <dt>Language</dt>
-                    <dd id="debug-language">checking</dd>
+                    <dt data-i18n="home.language">Language</dt>
+                    <dd id="debug-language" data-i18n="home.checking">checking</dd>
                 </div>
                 <div>
-                    <dt>User</dt>
-                    <dd id="debug-user">checking</dd>
+                    <dt data-i18n="home.user">User</dt>
+                    <dd id="debug-user" data-i18n="home.checking">checking</dd>
                 </div>
             </dl>
         </section>
         {% endif %}
 
         {% if show_metrics | default(true) %}
-        <div id="home-metrics" class="home-metrics" aria-label="NimHunt metrics" hidden>
-            <span id="home-active-spots" class="nq-label">0 Active Spots</span>
+        <div id="home-metrics" class="home-metrics" aria-label="NimHunt metrics" data-i18n-aria-label="home.metricsAria" hidden>
+            <span id="home-active-spots" class="nq-label" data-i18n="home.activeSpots">0 Active Spots</span>
             <span class="home-metrics-separator" aria-hidden="true">–</span>
-            <span id="home-daily-users" class="nq-label">0 Daily Users</span>
+            <span id="home-daily-users" class="nq-label" data-i18n="home.dailyUsers">0 Daily Users</span>
         </div>
         {% endif %}
     </main>
+
+    <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
 
     {% if home_script_src is defined and home_script_src %}
     <script type="module" src="{{ home_script_src }}"></script>

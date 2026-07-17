@@ -1,10 +1,11 @@
 import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
+import { makeHomeText } from './interface_text.js?v=qol-v1-20260717';
 import {
     createNoticePresenter,
     getLanguage,
     requestDeviceIdentifierHash,
     responseErrorText as sharedResponseErrorText,
-} from './browser_utils.js?v=refactor-v1-20260716';
+} from './browser_utils.js?v=qol-v1-20260717';
 
 const state = {
     deviceIdHash: null,
@@ -28,72 +29,11 @@ const DISPLAY_NAME_MAX_LENGTH = Number.parseInt(document.body.dataset.displayNam
 
 // All human-facing homepage text lives here.
 // A notice only shows "Read more" when its copy includes an href.
-const UI_COPY = {
-    nimiqPay: {
-        deviceIdReason: `Create or find your ${APP_NAME} device account.`,
-    },
-    notices: {
-        walletUnavailable: {
-            title: `Open ${APP_NAME} in Nimiq Pay`,
-            body: `${APP_NAME} needs Nimiq Pay to identify this device. My Spots and My Claims are locked until this app is opened inside Nimiq Pay.`,
-        },
-        testUserMissing: {
-            title: 'Test user missing',
-            body: 'Desktop test mode is enabled, but the mock test user does not exist. Run spoof.py, then reload this page.',
-        },
-        banned: {
-            title: 'Account unavailable',
-            body: `This device account can no longer use ${APP_NAME}.`,
-        },
-        setupFailed: {
-            title: 'Home setup failed',
-            body: `${APP_NAME} could not initialise the home page. Reload the mini app or open it again from Nimiq Pay.`,
-        },
-        firstVisit: {
-            title: `Welcome to ${APP_NAME}`,
-            body: `Your ${APP_NAME} device account has been created. You can now find spots, create spots, and track your claims from this device.`,
-            buttonText: "Let's Go!",
-        },
-    },
-    metrics: {
-        activeSpots: (n) => `${n.toLocaleString()} Active ${n === 1 ? 'Spot' : 'Spots'}`,
-        dailyUsers: (n) => `${n.toLocaleString()} Daily ${n === 1 ? 'User' : 'Users'}`,
-    },
-    profile: {
-        editLabel: 'Edit display name',
-        inputLabel: 'Display name',
-        save: 'Save',
-        saving: 'Saving…',
-        cancel: 'Cancel',
-        invalidLength: () => `Display name must be between ${DISPLAY_NAME_MIN_LENGTH} and ${DISPLAY_NAME_MAX_LENGTH} characters.`,
-        saveFailed: 'Display name could not be saved. Try again.',
-        invalidResponse: 'The server did not understand the display-name update.',
-    },
-    status: {
-        checkingPay: 'Checking Nimiq Pay…',
-        connectedPay: 'Connected through Nimiq Pay.',
-        notConnectedPay: 'Not connected through Nimiq Pay.',
-        testUser: 'Using desktop test user.',
-        guestWelcome: `Open ${APP_NAME} inside Nimiq Pay to identify this device.`,
-        userWelcome: (displayName) => `Welcome, ${displayName}`,
-        userFallback: (id) => `User ${id}`,
-    },
-    locked: {
-        walletRequired: 'This feature requires Nimiq Pay.',
-        accountUnavailable: `This account cannot use ${APP_NAME}.`,
-        userRequired: `Open ${APP_NAME} in Nimiq Pay first.`,
-        locationRequired: 'Find Spots requires location access.',
-    },
-    debug: {
-        available: 'available',
-        notAvailable: 'not available',
-        locationNotRequested: 'not requested on Home',
-        unknown: 'unknown',
-        userNotLoaded: 'not loaded',
-        userLoaded: (user) => `${user.display_name || UI_COPY.status.userFallback(user.id)}(#${user.id})`,
-    },
-};
-
+const UI_COPY = makeHomeText({
+    appName: APP_NAME,
+    displayNameMin: DISPLAY_NAME_MIN_LENGTH,
+    displayNameMax: DISPLAY_NAME_MAX_LENGTH,
+});
 const els = {
     noticeBackdrop: document.getElementById('notice-backdrop'),
     noticeTitle: document.getElementById('notice-title'),
@@ -248,7 +188,7 @@ function setGuestWelcome() {
     link.className = 'welcome-link';
 
     els.welcomeLine.replaceChildren(
-        document.createTextNode(`Open ${APP_NAME} inside `),
+        document.createTextNode(UI_COPY.status.guestBeforePay),
         link,
         document.createTextNode(' to identify this device.')
     );

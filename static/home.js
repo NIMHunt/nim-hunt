@@ -1,4 +1,10 @@
 import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
+import {
+    createNoticePresenter,
+    getLanguage,
+    requestDeviceIdentifierHash,
+    responseErrorText as sharedResponseErrorText,
+} from './browser_utils.js?v=refactor-v1-20260716';
 
 const state = {
     deviceIdHash: null,
@@ -199,25 +205,13 @@ function makeDisplayNamePayload(displayName) {
 
 function responseErrorText(data, fallback = UI_COPY.profile.saveFailed) {
     const detail = data?.detail;
-
-    if (typeof detail === 'string' && detail.trim()) return detail;
-
-    if (Array.isArray(detail)) {
-        const messages = detail
-            .map((item) => item?.msg || item?.message || item?.detail)
-            .filter(Boolean);
-
-        if (messages.length > 0) return messages.join(' ');
+    if (Array.isArray(detail) && detail.length === 0) {
         return UI_COPY.profile.invalidResponse;
     }
-
-    if (detail && typeof detail === 'object') {
+    if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
         return detail.msg || detail.message || detail.detail || UI_COPY.profile.invalidResponse;
     }
-
-    if (typeof data?.message === 'string' && data.message.trim()) return data.message;
-
-    return fallback;
+    return sharedResponseErrorText(data, fallback);
 }
 
 function renderUserWelcome() {
@@ -415,22 +409,7 @@ function blockDisabledLink(event) {
     }
 }
 
-function showNotice({ title, body, href = null, linkText = 'Read more', buttonText = 'OK' }) {
-    els.noticeTitle.textContent = title;
-    els.noticeBody.textContent = body;
-    els.noticeOk.textContent = buttonText;
-
-    if (href) {
-        els.noticeLink.textContent = linkText;
-        els.noticeLink.href = href;
-        els.noticeLink.hidden = false;
-    } else {
-        els.noticeLink.hidden = true;
-        els.noticeLink.removeAttribute('href');
-    }
-
-    els.noticeBackdrop.hidden = false;
-}
+const showNotice = createNoticePresenter(els);
 
 function renderHomeMetrics(metrics) {
     if (!els.metrics || !els.activeSpotsMetric || !els.dailyUsersMetric) return;
@@ -499,19 +478,6 @@ function setDebugPanelOpen(open) {
     els.debugToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
-function getLanguage() {
-    const payLanguage = window.nimiqPay?.language;
-    if (typeof payLanguage === 'string' && payLanguage.length > 0) return payLanguage;
-
-    const browserLanguage = navigator.language || navigator.userLanguage;
-    if (typeof browserLanguage === 'string' && browserLanguage.length > 0) {
-        return browserLanguage.split('-')[0];
-    }
-
-    return 'en';
-}
-
-
 function requestLocation() {
     return new Promise((resolve) => {
         if (!navigator.geolocation) {
@@ -539,18 +505,12 @@ function requestLocation() {
 
 async function requestWalletDeviceId() {
     try {
-        const id = await requestDeviceIdentifier({
-            reason: UI_COPY.nimiqPay.deviceIdReason,
-        });
-
-        if (typeof id === 'string' && /^[0-9a-fA-F]{64}$/.test(id)) {
-            state.walletAvailable = true;
-            state.deviceIdHash = id.toLowerCase();
-            els.connectionLine.textContent = UI_COPY.status.connectedPay;
-            return;
-        }
-
-        throw new Error('Nimiq Pay returned an invalid device identifier.');
+        state.deviceIdHash = await requestDeviceIdentifierHash(
+            requestDeviceIdentifier,
+            UI_COPY.nimiqPay.deviceIdReason,
+        );
+        state.walletAvailable = true;
+        els.connectionLine.textContent = UI_COPY.status.connectedPay;
     } catch (err) {
         state.walletAvailable = false;
         state.deviceIdHash = null;

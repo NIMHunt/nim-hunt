@@ -32,9 +32,9 @@ from pydantic import BaseModel, Field
 
 import constants as const
 import database as schema
-from database import get_db
 import db_access
 import trans_updater
+from database import get_db
 
 try:
     import cache
@@ -50,7 +50,7 @@ except Exception:  # pragma: no cover - settlement is optional while bootstrappi
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
-_ASSET_VERSION = "claim-missing-console-v1-20260706"
+_ASSET_VERSION = "refactor-v1-20260716"
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ALLOWED_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$")

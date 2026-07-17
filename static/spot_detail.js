@@ -1,6 +1,22 @@
 import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
 import { COMMON_TEXT, REPORT_REASON_OPTIONS, makeSpotDetailText } from './interface_text.js?v=remove-help-pages-v1-20260705';
 import { formatNimFromLuna } from './nim_format.js';
+import {
+    appendBulletLine,
+    appendDetailDescription,
+    buildClaimCodeCopyButton as buildSharedClaimCodeCopyButton,
+    buildSpotLinkControl,
+    durationText,
+    highestTimeUnitText,
+    spotScheduleTooltip,
+    unixToText,
+} from './spot_ui.js?v=refactor-v1-20260716';
+import {
+    createNoticePresenter,
+    getLanguage,
+    requestDeviceIdentifierHash,
+    responseErrorText as sharedResponseErrorText,
+} from './browser_utils.js?v=refactor-v1-20260716';
 const els = {
     data: document.getElementById('spot-data'),
     list: document.getElementById('spot-detail-list'),
@@ -56,24 +72,10 @@ const state = {
     claimCodesLoading: false,
 };
 
-function showNotice({ title, body, href = null, linkText = COMMON_TEXT.notice.readMore, buttonText = COMMON_TEXT.notice.ok }) {
-    if (!els.noticeBackdrop) return;
-
-    els.noticeTitle.textContent = title;
-    els.noticeBody.textContent = body;
-    els.noticeOk.textContent = buttonText;
-
-    if (href) {
-        els.noticeLink.textContent = linkText;
-        els.noticeLink.href = href;
-        els.noticeLink.hidden = false;
-    } else {
-        els.noticeLink.hidden = true;
-        els.noticeLink.removeAttribute('href');
-    }
-
-    els.noticeBackdrop.hidden = false;
-}
+const showNotice = createNoticePresenter(els, {
+    defaultLinkText: COMMON_TEXT.notice.readMore,
+    defaultButtonText: COMMON_TEXT.notice.ok,
+});
 
 function launchPublishConfetti() {
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
@@ -250,41 +252,17 @@ function updateReportDetailsLimit(candidate = null) {
     limitEl.setAttribute('aria-live', 'polite');
 }
 function responseErrorText(data, fallback = TEXT.report.failed.body) {
-    const detail = data?.detail;
-    if (typeof detail === 'string' && detail.trim()) return detail;
-    if (Array.isArray(detail)) {
-        const messages = detail.map((item) => item?.msg || item?.message || item?.detail).filter(Boolean);
-        if (messages.length > 0) return messages.join(' ');
-    }
-    if (typeof data?.message === 'string' && data.message.trim()) return data.message;
-    return fallback;
-}
-
-function getLanguage() {
-    const payLanguage = window.nimiqPay?.language;
-    if (typeof payLanguage === 'string' && payLanguage.length > 0) return payLanguage;
-
-    const browserLanguage = navigator.language || navigator.userLanguage;
-    if (typeof browserLanguage === 'string' && browserLanguage.length > 0) {
-        return browserLanguage.split('-')[0];
-    }
-
-    return 'en';
+    return sharedResponseErrorText(data, fallback);
 }
 
 async function requestWalletDeviceId() {
     try {
-        const id = await requestDeviceIdentifier({
-            reason: TEXT.nimiqPay.deviceIdReason,
-        });
-
-        if (typeof id === 'string' && /^[0-9a-fA-F]{64}$/.test(id)) {
-            state.walletAvailable = true;
-            state.deviceIdHash = id.toLowerCase();
-            return true;
-        }
-
-        throw new Error('Nimiq Pay returned an invalid device identifier.');
+        state.deviceIdHash = await requestDeviceIdentifierHash(
+            requestDeviceIdentifier,
+            TEXT.nimiqPay.deviceIdReason,
+        );
+        state.walletAvailable = true;
+        return true;
     } catch (err) {
         state.walletAvailable = false;
         state.deviceIdHash = null;
@@ -569,55 +547,6 @@ function metresToText(value) {
     return `${(value / 1000).toFixed(value < 10000 ? 1 : 0)} km away`;
 }
 
-function unixToText(value) {
-    if (!value) return null;
-
-    const date = new Date(Number(value) * 1000);
-    const now = new Date();
-    const dateDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    const nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const daysFromToday = Math.round((dateDay - nowDay) / 86400000);
-    const timeText = date.toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-    });
-
-    if (daysFromToday === 0) return `today, ${timeText}`;
-    if (daysFromToday === 1) return `tomorrow, ${timeText}`;
-
-    const dateText = date.toLocaleDateString([], {
-        day: 'numeric',
-        month: 'short',
-    });
-    return `${dateText}, ${timeText}`;
-}
-
-
-function highestTimeUnitText(seconds, suffix = '') {
-    const value = Math.max(0, Math.floor(Number(seconds || 0)));
-    if (value <= 60) return `Less than 1 Minute${suffix ? ` ${suffix}` : ''}`;
-    const units = [
-        ['Week', 7 * 24 * 60 * 60],
-        ['Day', 24 * 60 * 60],
-        ['Hour', 60 * 60],
-        ['Minute', 60],
-    ];
-    for (const [name, size] of units) {
-        if (value >= size) {
-            const count = Math.floor(value / size);
-            return `${count} ${name}${count === 1 ? '' : 's'}${suffix ? ` ${suffix}` : ''}`;
-        }
-    }
-    return `Less than 1 Minute${suffix ? ` ${suffix}` : ''}`;
-}
-
-function spotScheduleTooltip(spot) {
-    const starts = unixToText(spot?.starts_at) || 'now';
-    const ends = unixToText(spot?.ends_at) || 'no end time';
-    return `Active ${starts} until ${ends}`;
-}
-
 function spotScheduleSummary(spot) {
     const now = Math.floor(Date.now() / 1000);
     const status = String(spot?.status_label || '').toLowerCase();
@@ -675,153 +604,8 @@ function nimPerClaimText(spot) {
     return nimFromLunaText(totalValue / Math.max(1, divisor));
 }
 
-function durationText(seconds) {
-    const value = Number(seconds || 0);
-    if (value <= 0) return null;
-    if (value < 60) return `${value} sec`;
-    if (value < 3600) return `${Math.round(value / 60)} min`;
-    if (value < 86400) return `${(value / 3600).toFixed(value % 3600 === 0 ? 0 : 1)} hr`;
-    return `${(value / 86400).toFixed(value % 86400 === 0 ? 0 : 1)} days`;
-}
-
-function publicSpotUrl(spot) {
-    return new URL(spot.href, window.location.origin).toString();
-}
-
-function appendParts(el, parts) {
-    for (const part of parts) {
-        if (part === null || part === undefined || part === '') continue;
-        if (part instanceof Node) {
-            el.append(part);
-        } else {
-            el.append(document.createTextNode(String(part)));
-        }
-    }
-}
-
-function appendDetailDescription(container, text) {
-    const description = document.createElement('p');
-    description.className = 'spot-detail-description';
-    description.textContent = text || 'No description provided.';
-    container.append(description);
-}
-
-function appendBulletLine(list, ...parts) {
-    const hasContent = parts.some((part) => {
-        if (part instanceof Node) return true;
-        return part !== null && part !== undefined && String(part) !== '';
-    });
-    if (!hasContent) return;
-
-    const line = document.createElement('li');
-    line.className = 'spot-detail-line';
-    appendParts(line, parts);
-    list.append(line);
-}
-
-async function copyText(text) {
-    if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        return;
-    }
-
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.setAttribute('readonly', '');
-    textarea.style.position = 'fixed';
-    textarea.style.left = '-9999px';
-    document.body.append(textarea);
-    textarea.select();
-    document.execCommand('copy');
-    textarea.remove();
-}
-
-const NIMIQ_ICON_SVG_NS = 'http://www.w3.org/2000/svg';
-const NIMIQ_ICON_SPRITE_PATH = '/static/nimiq-style.icons.svg';
-
-function createNimiqInlineIcon(iconName) {
-    const safeIconName = String(iconName || '').trim();
-    const svg = document.createElementNS(NIMIQ_ICON_SVG_NS, 'svg');
-    svg.classList.add('nq-icon', safeIconName, 'nh-inline-nimiq-icon');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('focusable', 'false');
-
-    const use = document.createElementNS(NIMIQ_ICON_SVG_NS, 'use');
-    const href = `${NIMIQ_ICON_SPRITE_PATH}#${safeIconName}`;
-    use.setAttribute('href', href);
-    use.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', href);
-    svg.append(use);
-
-    return svg;
-}
-
-function setCopyButtonIcon(button, iconName) {
-    if (!button) return;
-    button.replaceChildren(createNimiqInlineIcon(iconName));
-}
-
-function buildSpotLinkControl(spot) {
-    const wrap = document.createElement('span');
-    wrap.className = 'spot-detail-link-row';
-
-    const link = document.createElement('a');
-    link.href = spot.href;
-    link.className = 'spot-link-anchor';
-    link.textContent = spot.link || spot.href;
-
-    const copyButton = document.createElement('button');
-    copyButton.type = 'button';
-    copyButton.className = 'spot-copy-button';
-    copyButton.setAttribute('aria-label', 'Copy spot link');
-
-    setCopyButtonIcon(copyButton, 'nq-copy');
-
-    copyButton.addEventListener('click', async () => {
-        try {
-            await copyText(publicSpotUrl(spot));
-            copyButton.classList.add('is-copied');
-            setCopyButtonIcon(copyButton, 'nq-checkmark-small');
-            window.setTimeout(() => {
-                copyButton.classList.remove('is-copied');
-                setCopyButtonIcon(copyButton, 'nq-copy');
-            }, 900);
-        } catch (err) {
-            console.error(err);
-        }
-    });
-
-    wrap.append(link, copyButton);
-    return wrap;
-}
-
-function setPasswordCopyButtonIcon(button, iconName) {
-    setCopyButtonIcon(button, iconName);
-}
-
 function buildClaimCodeCopyButton(code) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'spot-copy-button spot-password-copy-button';
-    button.setAttribute('aria-label', TEXT.ownerClaimCodes.copy);
-    setPasswordCopyButtonIcon(button, 'nq-copy');
-
-    button.addEventListener('click', async () => {
-        try {
-            await copyText(code);
-            button.classList.add('is-copied');
-            button.setAttribute('aria-label', TEXT.ownerClaimCodes.copied);
-            setPasswordCopyButtonIcon(button, 'nq-checkmark-small');
-            window.setTimeout(() => {
-                button.classList.remove('is-copied');
-                button.setAttribute('aria-label', TEXT.ownerClaimCodes.copy);
-                setPasswordCopyButtonIcon(button, 'nq-copy');
-            }, 900);
-        } catch (err) {
-            console.error(err);
-        }
-    });
-
-    return button;
+    return buildSharedClaimCodeCopyButton(code, TEXT.ownerClaimCodes);
 }
 
 function buildOwnerClaimCodesLine() {

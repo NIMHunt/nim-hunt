@@ -1,19 +1,17 @@
-"""
-main.py
+"""NimHunt FastAPI application setup and background-service lifecycle."""
 
-Minimal FastAPI entrypoint for trying the NimHunt home page.
-If your project already has a main.py, copy the relevant parts instead of
-using this file wholesale.
-"""
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from database import init_db, get_db
-from public_html import render_not_found_page, router as public_router
 import constants as const
+from database import get_db, init_db
+from public_html import render_not_found_page
+from public_html import router as public_router
 
 try:
     import cache
@@ -53,17 +51,17 @@ def validate_production_safety() -> None:
         unsafe_settings.append("NIMIQ_HUB_URL must not point at testnet")
 
     fee_address = str(getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "")).strip().upper()
-    if not fee_address or "DEV" in fee_address or "PLACEHOLDER" in fee_address or fee_address.startswith("NQ00 NIMHUNT"):
+    if (
+        not fee_address
+        or "DEV" in fee_address
+        or "PLACEHOLDER" in fee_address
+        or fee_address.startswith("NQ00 NIMHUNT")
+    ):
         unsafe_settings.append("SPOT_CANCELLATION_FEE_ADDRESS must be a production address")
 
     if unsafe_settings:
         joined = ", ".join(unsafe_settings)
         raise RuntimeError(f"Unsafe production configuration: {joined}")
-
-
-app = FastAPI(title=const.APP_NAME)
-app.mount("/static", StaticFiles(directory="static"), name="static")
-app.include_router(public_router)
 
 
 def _request_prefers_json(request: Request) -> bool:
@@ -92,7 +90,7 @@ def _should_render_404_page(request: Request) -> bool:
         return False
 
     path = request.url.path
-    if path == "/" or path.startswith("/api/") or path.startswith("/static/"):
+    if path == "/" or path.startswith(("/api/", "/static/")):
         return False
 
     if path in {"/favicon.ico", "/robots.txt"}:
@@ -101,21 +99,8 @@ def _should_render_404_page(request: Request) -> bool:
     return not _request_prefers_json(request)
 
 
-@app.exception_handler(StarletteHTTPException)
-async def nimhunt_http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """Show a branded 404 page while preserving useful API/static errors."""
-    if exc.status_code == 404 and _should_render_404_page(request):
-        return render_not_found_page(request)
-
-    detail = exc.detail if exc.detail is not None else "Request failed"
-    if _request_prefers_json(request):
-        return JSONResponse({"detail": detail}, status_code=exc.status_code)
-
-    return PlainTextResponse(str(detail), status_code=exc.status_code)
-
-
-@app.on_event("startup")
 async def startup() -> None:
+    """Initialise storage, caches, settlement work, and transaction polling."""
     validate_production_safety()
     await init_db()
 
@@ -140,8 +125,8 @@ async def startup() -> None:
             await start_transactions(run_immediately=True)
 
 
-@app.on_event("shutdown")
 async def shutdown() -> None:
+    """Stop NimHunt's background services cleanly."""
     if cache is not None:
         stop = getattr(cache, "stop_cache_refresher", None)
         if callable(stop):
@@ -156,3 +141,31 @@ async def shutdown() -> None:
         stop_transactions = getattr(trans_updater, "stop_transaction_refresher", None)
         if callable(stop_transactions):
             await stop_transactions()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Connect FastAPI's lifespan to NimHunt's startup and shutdown routines."""
+    await startup()
+    try:
+        yield
+    finally:
+        await shutdown()
+
+
+app = FastAPI(title=const.APP_NAME, lifespan=lifespan)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+app.include_router(public_router)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def nimhunt_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Show a branded 404 page while preserving useful API/static errors."""
+    if exc.status_code == 404 and _should_render_404_page(request):
+        return render_not_found_page(request)
+
+    detail = exc.detail if exc.detail is not None else "Request failed"
+    if _request_prefers_json(request):
+        return JSONResponse({"detail": detail}, status_code=exc.status_code)
+
+    return PlainTextResponse(str(detail), status_code=exc.status_code)

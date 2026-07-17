@@ -29,13 +29,13 @@ from __future__ import annotations
 import math
 import secrets
 import sqlite3
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Awaitable, Callable, Optional
+from typing import Any
 
 import constants as const
 import database as schema
 import wallet
-
 
 # ---------------------------------------------------------------------------
 # Transaction helper
@@ -2809,7 +2809,6 @@ async def create_claim_attempt(
         if existing_code is None or existing_code.get(schema.CLAIM_CODE_USED_BY) is not None:
             raise ValueError("That claim code is not valid for this spot.")
 
-    is_draw = await is_prizedraw(db, spot_id=spot_id)
     claim_duration = int(spot.get(schema.SPOT_CLAIM_DURATION) or 0)
     # CLAIM.accuracy now tracks the duration-claim health budget.
     # It starts full; later heartbeats deduct from it only when the user is

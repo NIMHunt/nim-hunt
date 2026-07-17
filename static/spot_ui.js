@@ -232,7 +232,7 @@ export function createNimiqInlineIcon(iconName) {
     return svg;
 }
 
-function setCopyButtonIcon(button, iconName) {
+export function setCopyButtonIcon(button, iconName) {
     if (!button) return;
     button.replaceChildren(createNimiqInlineIcon(iconName));
 }

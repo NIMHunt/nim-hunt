@@ -10,7 +10,6 @@ Shared constants for NimHunt.
 
 import os
 
-
 # -----------------------------
 # APP Settings
 # -----------------------------

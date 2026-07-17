@@ -75,9 +75,9 @@ def _urlsafe_b64decode(data: str) -> bytes:
 
 def _require_cryptography():
     try:
+        from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-        from cryptography.hazmat.primitives import hashes
     except Exception as exc:  # pragma: no cover - depends on venv
         raise WalletConfigError(
             "cryptography is required for encrypted master-seed handling. "
@@ -88,7 +88,7 @@ def _require_cryptography():
 
 
 def _derive_encryption_key(secret: str, salt: bytes) -> bytes:
-    AESGCM, PBKDF2HMAC, hashes = _require_cryptography()
+    _, PBKDF2HMAC, hashes = _require_cryptography()
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
@@ -152,7 +152,7 @@ def get_master_seed(*, required: bool = False) -> bytes | None:
     if getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False):
         # Deterministic development-only seed. This is intentionally not secret
         # and must never secure real funds.
-        return f"{const.APP_NAME}:development-placeholder-master-seed".encode("utf-8")
+        return f"{const.APP_NAME}:development-placeholder-master-seed".encode()
 
     if required:
         raise WalletConfigError(
@@ -371,7 +371,7 @@ def spot_deposit_key_path(index: int, *, key_version: int | None = None) -> str:
 
 
 def _dev_address_from_seed(seed: bytes, *, key_index: int, key_path: str, key_version: int) -> str:
-    material = f"spot-deposit:{key_version}:{key_path}:{key_index}".encode("utf-8")
+    material = f"spot-deposit:{key_version}:{key_path}:{key_index}".encode()
     digest = hmac.new(seed, material, hashlib.blake2b).digest()
     token = base64.b32encode(digest[:20]).decode("ascii").rstrip("=")
     prefix = str(getattr(const, "PLACEHOLDER_SPOT_DEPOSIT_ADDRESS_PREFIX", "NQ00 NIMHUNT DEV SPOT DEPOSIT"))
@@ -437,7 +437,7 @@ def derive_spot_deposit_address(key_index: int, *, key_version: int | None = Non
 def _dev_tx_hash(*, from_address: str, to_address: str, amount: int) -> str:
     prefix = str(getattr(const, "PLACEHOLDER_SEND_TX_HASH_PREFIX", "devsend"))
     nonce = secrets.token_hex(16)
-    digest = hashlib.sha256(f"{from_address}|{to_address}|{amount}|{nonce}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{from_address}|{to_address}|{amount}|{nonce}".encode()).hexdigest()
     return f"{prefix}{digest[:58]}"
 
 

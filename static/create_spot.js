@@ -1,6 +1,12 @@
 import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
 import { COMMON_TEXT, makeCreateSpotFormText } from './interface_text.js?v=remove-help-pages-v1-20260705';
 import { LUNA_PER_NIM, formatNimAmount } from './nim_format.js';
+import {
+    createNoticePresenter,
+    getLanguage,
+    requestDeviceIdentifierHash,
+    responseErrorText,
+} from './browser_utils.js?v=refactor-v1-20260716';
 const DEFAULT_MAP_CENTRE = [51.5074, -0.1278];
 const DEFAULT_MAP_ZOOM = 13;
 
@@ -158,22 +164,10 @@ const sliderControls = {
     },
 };
 
-function showNotice({ title, body, href = null, linkText = COMMON_TEXT.notice.readMore, buttonText = COMMON_TEXT.notice.ok }) {
-    els.noticeTitle.textContent = title;
-    els.noticeBody.textContent = body;
-    els.noticeOk.textContent = buttonText;
-
-    if (href) {
-        els.noticeLink.textContent = linkText;
-        els.noticeLink.href = href;
-        els.noticeLink.hidden = false;
-    } else {
-        els.noticeLink.hidden = true;
-        els.noticeLink.removeAttribute('href');
-    }
-
-    els.noticeBackdrop.hidden = false;
-}
+const showNotice = createNoticePresenter(els, {
+    defaultLinkText: COMMON_TEXT.notice.readMore,
+    defaultButtonText: COMMON_TEXT.notice.ok,
+});
 
 function hideHelpTooltip() {
     if (!els.tooltip) return;
@@ -221,31 +215,8 @@ function showSaveLockedTooltip() {
     showHelpTooltip(els.save);
 }
 
-function responseErrorText(data, fallback) {
-    const detail = data?.detail;
-    if (typeof detail === 'string' && detail.trim()) return detail;
-    if (Array.isArray(detail)) {
-        const messages = detail.map((item) => item?.msg || item?.message || item?.detail).filter(Boolean);
-        if (messages.length > 0) return messages.join(' ');
-    }
-    if (typeof data?.message === 'string' && data.message.trim()) return data.message;
-    return fallback;
-}
-
 function redirectHome() {
     window.location.replace('/');
-}
-
-function getLanguage() {
-    const payLanguage = window.nimiqPay?.language;
-    if (typeof payLanguage === 'string' && payLanguage.length > 0) return payLanguage;
-
-    const browserLanguage = navigator.language || navigator.userLanguage;
-    if (typeof browserLanguage === 'string' && browserLanguage.length > 0) {
-        return browserLanguage.split('-')[0];
-    }
-
-    return 'en';
 }
 
 function requestLocation() {
@@ -273,17 +244,11 @@ function requestLocation() {
 
 async function requestWalletDeviceId() {
     try {
-        const id = await requestDeviceIdentifier({
-            reason: TEXT.nimiqPay.deviceIdReason,
-        });
-
-        if (typeof id === 'string' && /^[0-9a-fA-F]{64}$/.test(id)) {
-            state.walletAvailable = true;
-            state.deviceIdHash = id.toLowerCase();
-            return;
-        }
-
-        throw new Error('Nimiq Pay returned an invalid device identifier.');
+        state.deviceIdHash = await requestDeviceIdentifierHash(
+            requestDeviceIdentifier,
+            TEXT.nimiqPay.deviceIdReason,
+        );
+        state.walletAvailable = true;
     } catch (err) {
         state.walletAvailable = false;
         state.deviceIdHash = null;

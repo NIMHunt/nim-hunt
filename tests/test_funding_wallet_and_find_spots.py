@@ -8,6 +8,10 @@ import db_access
 import trans_updater
 
 
+def _normalise_test_address(value, **_kwargs):
+    return str(value or "").strip().lower() or None
+
+
 class FundingWalletDatabaseTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=True)
@@ -58,8 +62,18 @@ class FundingWalletDatabaseTest(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             wrong = await db_access.get_transaction(db, trans_id=wrong_id)
 
-            normalise = lambda value: str(value or "").strip().lower() or None
-            with mock.patch.object(trans_updater, "_normalise_address_for_compare", side_effect=normalise),                  mock.patch.object(trans_updater.cache, "notify_transaction_changed", mock.AsyncMock()):
+            with (
+                mock.patch.object(
+                    trans_updater,
+                    "_normalise_address_for_compare",
+                    side_effect=_normalise_test_address,
+                ),
+                mock.patch.object(
+                    trans_updater.cache,
+                    "notify_transaction_changed",
+                    mock.AsyncMock(),
+                ),
+            ):
                 result = await trans_updater.mark_trans_as_confirmed(
                     db,
                     wrong,
@@ -94,7 +108,18 @@ class FundingWalletDatabaseTest(unittest.IsolatedAsyncioTestCase):
             )
             await db.commit()
             same = await db_access.get_transaction(db, trans_id=same_id)
-            with mock.patch.object(trans_updater, "_normalise_address_for_compare", side_effect=normalise),                  mock.patch.object(trans_updater.cache, "notify_transaction_changed", mock.AsyncMock()):
+            with (
+                mock.patch.object(
+                    trans_updater,
+                    "_normalise_address_for_compare",
+                    side_effect=_normalise_test_address,
+                ),
+                mock.patch.object(
+                    trans_updater.cache,
+                    "notify_transaction_changed",
+                    mock.AsyncMock(),
+                ),
+            ):
                 same_result = await trans_updater.mark_trans_as_confirmed(
                     db,
                     same,
@@ -110,7 +135,10 @@ class FundingWalletDatabaseTest(unittest.IsolatedAsyncioTestCase):
             same_after = await db_access.get_transaction(db, trans_id=same_id)
             self.assertEqual(same_result["status"], "confirmed")
             self.assertEqual(int(same_after[schema.TRANS_STATUS]), const.TRANS_STATUS_CONFIRMED)
-            self.assertEqual(await db_access.get_confirmed_spot_deposit_total(db, spot_id=spot_id), 13_000_000)
+            self.assertEqual(
+                await db_access.get_confirmed_spot_deposit_total(db, spot_id=spot_id),
+                13_000_000,
+            )
 
 
 class FundingWalletSubmissionGuardTest(unittest.IsolatedAsyncioTestCase):
@@ -119,20 +147,33 @@ class FundingWalletSubmissionGuardTest(unittest.IsolatedAsyncioTestCase):
             schema.SPOT_ID: 7,
             schema.SPOT_DEPOSIT_ADDRESS: "deposit-wallet",
         }
-        identity = lambda value, **kwargs: str(value).strip().lower()
-        with mock.patch.object(trans_updater.db_access, "get_spot", mock.AsyncMock(return_value=spot)),              mock.patch.object(
-                 trans_updater.db_access,
-                 "get_confirmed_spot_funding_address",
-                 mock.AsyncMock(return_value="wallet-a"),
-             ),              mock.patch.object(trans_updater.wallet, "normalise_nimiq_address", side_effect=identity),              mock.patch.object(
-                 trans_updater,
-                 "_normalise_address_for_compare",
-                 side_effect=lambda value: str(value).strip().lower(),
-             ),              mock.patch.object(
-                 trans_updater.db_access,
-                 "create_spot_deposit_transaction",
-                 mock.AsyncMock(),
-             ) as create_transaction:
+        with (
+            mock.patch.object(
+                trans_updater.db_access,
+                "get_spot",
+                mock.AsyncMock(return_value=spot),
+            ),
+            mock.patch.object(
+                trans_updater.db_access,
+                "get_confirmed_spot_funding_address",
+                mock.AsyncMock(return_value="wallet-a"),
+            ),
+            mock.patch.object(
+                trans_updater.wallet,
+                "normalise_nimiq_address",
+                side_effect=_normalise_test_address,
+            ),
+            mock.patch.object(
+                trans_updater,
+                "_normalise_address_for_compare",
+                side_effect=_normalise_test_address,
+            ),
+            mock.patch.object(
+                trans_updater.db_access,
+                "create_spot_deposit_transaction",
+                mock.AsyncMock(),
+            ) as create_transaction,
+        ):
             with self.assertRaisesRegex(ValueError, "original funding wallet"):
                 await trans_updater.record_spot_deposit_transaction(
                     object(),
@@ -151,7 +192,11 @@ class ClaimRuleWithoutLocationTest(unittest.IsolatedAsyncioTestCase):
     def _patch_rules(self, *, owner_id=99, capacity=True, reached_limit=False):
         return (
             mock.patch.object(db_access, "can_user_claim", mock.AsyncMock(return_value=True)),
-            mock.patch.object(db_access, "get_public_spot", mock.AsyncMock(return_value={"availability_rank": 0})),
+            mock.patch.object(
+                db_access,
+                "get_public_spot",
+                mock.AsyncMock(return_value={"availability_rank": 0}),
+            ),
             mock.patch.object(
                 db_access,
                 "get_spot",
@@ -185,8 +230,11 @@ class ClaimRuleWithoutLocationTest(unittest.IsolatedAsyncioTestCase):
             capacity=capacity,
             reached_limit=reached_limit,
         )
-        started = [patcher.start() for patcher in patches]
-        self.addCleanup(lambda: [patcher.stop() for patcher in reversed(patches)])
+        started = []
+        for patcher in patches:
+            started.append(patcher.start())
+            self.addCleanup(patcher.stop)
+
         result = await db_access.get_claim_rule_check(
             object(),
             spot_id=7,

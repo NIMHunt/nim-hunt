@@ -1,9 +1,9 @@
 name: Export final release candidate
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/final-release-polish
+      - main
 
 permissions:
   contents: read

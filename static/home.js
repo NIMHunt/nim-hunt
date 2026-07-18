@@ -10,10 +10,6 @@ import {
 const state = {
     deviceIdHash: null,
     walletAvailable: false,
-    locationAvailable: false,
-    lat: null,
-    long: null,
-    accuracy: null,
     language: null,
     user: null,
     banned: false,
@@ -154,6 +150,60 @@ function responseErrorText(data, fallback = UI_COPY.profile.saveFailed) {
     return sharedResponseErrorText(data, fallback);
 }
 
+function createWelcomeEditIcon() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    svg.style.display = 'block';
+    svg.style.width = '1em';
+    svg.style.height = '1em';
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('fill', 'currentColor');
+    path.setAttribute(
+        'd',
+        'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25Zm17.71-10.04a.996.996 0 0 0 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83Z'
+    );
+    svg.append(path);
+    return svg;
+}
+
+function launchWelcomeConfetti() {
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+
+    const confetti = document.createElement('div');
+    confetti.className = 'nh-confetti';
+    confetti.setAttribute('aria-hidden', 'true');
+
+    const pieceCount = 34;
+    for (let index = 0; index < pieceCount; index += 1) {
+        const piece = document.createElement('span');
+        const angle = ((Math.PI * 2) * index / pieceCount) + ((Math.random() - 0.5) * 0.58);
+        const distance = 24 + Math.random() * 36;
+        const drift = (Math.random() - 0.5) * 12;
+
+        piece.style.setProperty('--tx', `${Math.cos(angle) * distance}vmin`);
+        piece.style.setProperty('--ty', `${Math.sin(angle) * distance}vmin`);
+        piece.style.setProperty('--drift', `${drift}vmin`);
+        piece.style.setProperty('--delay', `${Math.random() * 70}ms`);
+        piece.style.setProperty('--duration', `${780 + Math.random() * 360}ms`);
+        piece.style.setProperty('--rotation', `${Math.round(Math.random() * 720 - 360)}deg`);
+        piece.style.setProperty('--size', `${7 + Math.random() * 7}px`);
+        piece.className = index % 3 === 0 ? 'is-gold' : (index % 3 === 1 ? 'is-green' : 'is-blue');
+        confetti.append(piece);
+    }
+
+    document.body.append(confetti);
+    window.setTimeout(() => confetti.remove(), 1250);
+}
+
+function scheduleWelcomeConfetti() {
+    window.requestAnimationFrame(() => {
+        window.setTimeout(launchWelcomeConfetti, 160);
+    });
+}
+
 function renderUserWelcome() {
     hideDisplayNameEditor();
 
@@ -161,7 +211,7 @@ function renderUserWelcome() {
     const editButton = document.createElement('button');
     editButton.type = 'button';
     editButton.className = 'welcome-edit-button';
-    editButton.textContent = '🖉';
+    editButton.append(createWelcomeEditIcon());
     editButton.setAttribute('aria-label', UI_COPY.profile.editLabel);
     editButton.addEventListener('click', startDisplayNameEdit);
 
@@ -382,9 +432,8 @@ function updateDebug() {
         ? UI_COPY.debug.available
         : UI_COPY.debug.notAvailable;
 
-    els.debugLocation.textContent = state.locationAvailable
-        ? UI_COPY.debug.available
-        : UI_COPY.debug.notAvailable;
+    // Home no longer requests geolocation. The Find Spots page owns that check.
+    els.debugLocation.textContent = UI_COPY.debug.locationNotRequested;
 
     els.debugLanguage.textContent = state.language || UI_COPY.debug.unknown;
     els.debugUser.textContent = state.user
@@ -398,17 +447,13 @@ function getLockedReason() {
     return UI_COPY.locked.walletRequired;
 }
 
-function getFindSpotsLockedReason() {
-    if (state.banned) return UI_COPY.locked.accountUnavailable;
-    if (!state.locationAvailable) return UI_COPY.locked.locationRequired;
-    return '';
-}
-
 function updateButtons() {
     const hasUser = Boolean(state.user);
     const usableAccount = hasUser && !state.banned;
 
-    setButtonEnabled(els.findSpotsButton, !state.banned && state.locationAvailable, getFindSpotsLockedReason());
+    // Finding public Spots does not require a Home-page account or location check.
+    // The Find Spots page requests location only when it needs it.
+    setButtonEnabled(els.findSpotsButton, true);
     setButtonEnabled(els.mySpotsButton, usableAccount && state.walletAvailable, UI_COPY.locked.walletRequired);
     setButtonEnabled(els.myClaimsButton, usableAccount && state.walletAvailable, UI_COPY.locked.walletRequired);
 }
@@ -416,31 +461,6 @@ function updateButtons() {
 function setDebugPanelOpen(open) {
     els.debugPanel.hidden = !open;
     els.debugToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-}
-
-function requestLocation() {
-    return new Promise((resolve) => {
-        if (!navigator.geolocation) {
-            resolve(null);
-            return;
-        }
-
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                resolve({
-                    lat: pos.coords.latitude,
-                    long: pos.coords.longitude,
-                    accuracy: pos.coords.accuracy,
-                });
-            },
-            () => resolve(null),
-            {
-                enableHighAccuracy: true,
-                timeout: 8000,
-                maximumAge: 60000,
-            }
-        );
-    });
 }
 
 async function requestWalletDeviceId() {
@@ -467,10 +487,10 @@ async function postSession() {
             device_id_hash: state.deviceIdHash,
             wallet_available: state.walletAvailable,
             language: state.language,
-            location_available: state.locationAvailable,
-            lat: state.lat,
-            long: state.long,
-            accuracy: state.accuracy,
+            location_available: false,
+            lat: null,
+            long: null,
+            accuracy: null,
         }),
     });
 
@@ -517,6 +537,7 @@ async function postSession() {
 
     if (data.created && state.user && !state.banned) {
         showNotice(UI_COPY.notices.firstVisit);
+        scheduleWelcomeConfetti();
     }
 }
 
@@ -525,22 +546,6 @@ async function initHome() {
     updateDebug();
     updateButtons();
     setDebugPanelOpen(false);
-
-    const location = await requestLocation();
-    if (location) {
-        state.locationAvailable = true;
-        state.lat = location.lat;
-        state.long = location.long;
-        state.accuracy = location.accuracy;
-    } else {
-        state.locationAvailable = false;
-        state.lat = null;
-        state.long = null;
-        state.accuracy = null;
-    }
-
-    updateButtons();
-    updateDebug();
 
     await requestWalletDeviceId();
 

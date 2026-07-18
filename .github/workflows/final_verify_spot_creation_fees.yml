@@ -1,0 +1,46 @@
+name: Final Spot creation fee verification
+
+on:
+  pull_request:
+    branches:
+      - agent/public-testnet-deployment
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out final PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/spot-creation-fees
+          fetch-depth: 0
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: helpers/package-lock.json
+      - name: Run final verification matrix
+        run: bash .github/final_verify_spot_fees.sh
+      - name: Upload verification summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-creation-fee-verification-summary
+          path: /tmp/verification-summary.txt
+          retention-days: 2
+      - name: Remove temporary verification files
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/final_verify_spot_fees.sh .github/workflows/final_verify_spot_creation_fees.yml
+          git commit -m "Remove temporary creation-fee verification files"
+          git push origin HEAD:agent/spot-creation-fees

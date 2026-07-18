@@ -16,6 +16,11 @@ function ensureResponsiveStylesheets() {
             href: '/static/responsive_labels.css?v=mobile-layout-v3-20260718',
             marker: 'labels',
         },
+        {
+            selector: 'link[data-nimhunt-responsive="home"]',
+            href: '/static/responsive_home.css?v=mobile-hero-v1-20260718',
+            marker: 'home',
+        },
     ];
 
     for (const { selector, href, marker } of stylesheets) {

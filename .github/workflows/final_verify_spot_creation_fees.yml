@@ -29,13 +29,50 @@ jobs:
           node-version: '20'
           cache: npm
           cache-dependency-path: helpers/package-lock.json
-      - name: Run final verification matrix
-        run: bash .github/final_verify_spot_fees.sh
+      - name: Install dependencies
+        run: bash .github/final_verify_spot_fees.sh install
+      - name: Run complete Python suite
+        run: bash .github/final_verify_spot_fees.sh python-tests
+      - name: Run complete Node suite
+        run: bash .github/final_verify_spot_fees.sh node-tests
+      - name: Run static checks
+        run: bash .github/final_verify_spot_fees.sh static
+      - name: Run dependency audits
+        run: bash .github/final_verify_spot_fees.sh audits
+      - name: Compile templates
+        run: bash .github/final_verify_spot_fees.sh templates
+      - name: Seed and inspect schema-version-2 database
+        env:
+          NIMHUNT_DB_PATH: /tmp/nimhunt-final-fee-mock.db
+        run: bash .github/final_verify_spot_fees.sh mock-db
+      - name: Exercise development startup
+        env:
+          NIMHUNT_DB_PATH: /tmp/nimhunt-final-fee-development.db
+        run: bash .github/final_verify_spot_fees.sh development
+      - name: Exercise public TestAlbatross startup without broadcasting
+        env:
+          TEST_MNEMONIC_B64: bGVnYWwgd2lubmVyIHRoYW5rIHllYXIgd2F2ZSBzYXVzYWdlIHdvcnRoIHVzZWZ1bCBsZWdhbCB3aW5uZXIgdGhhbmsgeWVsbG93
+          NIMHUNT_DEPLOYMENT_MODE: public-testnet
+          NIMHUNT_DB_PATH: /tmp/nimhunt-final-fee-public-testnet.db
+          NIMHUNT_NIMIQ_NETWORK: TestAlbatross
+          NIMHUNT_NIMIQ_NETWORK_ID: '5'
+          NIMHUNT_NIMIQ_RPC_URL: https://rpc.testnet.nimiqwatch.com/
+          NIMHUNT_NIMIQ_HUB_URL: https://hub.nimiq-testnet.com
+          NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND: node /home/runner/work/nim-hunt/nim-hunt/helpers/nimiq_helper.mjs
+          NIMHUNT_NIMIQ_SEND_COMMAND: node /home/runner/work/nim-hunt/nim-hunt/helpers/nimiq_helper.mjs
+          NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM: '1'
+          NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM: '2'
+          NIMHUNT_SPOT_CANCELLATION_FEE_NIM: '1'
+          NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS: NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF
+          NIMHUNT_NIMIQ_TRANSACTION_FEE: '0'
+        run: bash .github/final_verify_spot_fees.sh public-testnet
       - name: Upload verification summary
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: final-creation-fee-verification-summary
           path: /tmp/verification-summary.txt
+          if-no-files-found: ignore
           retention-days: 2
       - name: Remove temporary verification files
         run: |

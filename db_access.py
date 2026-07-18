@@ -422,8 +422,8 @@ def _validate_bool_flag(value: bool | int, *, field_name: str) -> int:
         return 1 if value else 0
     try:
         int_value = int(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"{field_name} must be 0 or 1")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be 0 or 1") from exc
     if int_value not in (0, 1):
         raise ValueError(f"{field_name} must be 0 or 1")
     return int_value
@@ -3881,23 +3881,6 @@ async def derive_spot_deposit_address_from_record(db, *, spot_id: int) -> wallet
     )
 
 
-async def create_claim_send_transaction(*args, **kwargs) -> int:
-    """Deprecated: use trans_updater.submit_claim_reward_transaction().
-
-    db_access.py records database facts only. Chain-facing sends belong in
-    trans_updater.py, which may call wallet.py for signing/address management.
-    """
-    raise RuntimeError("Use trans_updater.submit_claim_reward_transaction()")
-
-
-async def create_spot_refund_send_transaction(*args, **kwargs) -> int:
-    """Deprecated: use trans_updater.submit_spot_cancellation_transactions()."""
-    raise RuntimeError("Use trans_updater.submit_spot_cancellation_transactions()")
-
-
-async def cancel_published_standard_spot(*args, **kwargs) -> RowDict:
-    """Deprecated: use trans_updater.submit_spot_cancellation_transactions()."""
-    raise RuntimeError("Use trans_updater.submit_spot_cancellation_transactions()")
 
 
 async def modify_transaction_status(db, *, trans_id: int, status: int) -> None:

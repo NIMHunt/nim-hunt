@@ -1,11 +1,11 @@
 """
 trans_updater.py
 
-Small transaction-status updater for NimHunt.
+NimHunt transaction outbox and chain-reconciliation service.
 
-This module checks the pending TRANSACTION cache, asks a Nimiq JSON-RPC server
-about each transaction hash, and finalises any transaction that is no longer
-pending.
+This module records durable outgoing-payment intents before broadcast, checks
+pending transactions through Nimiq RPC, finalises verified deposits/payouts,
+and coordinates creation fees, refunds and cancellation fees.
 
 Typical scheduled use:
 
@@ -41,8 +41,8 @@ import constants as const
 import database as schema
 import db_access
 import wallet
-from transaction_descriptions import build_transaction_description
 from database import get_db
+from transaction_descriptions import build_transaction_description
 
 RowDict = dict[str, Any]
 
@@ -75,6 +75,10 @@ DEFAULT_TRANSACTION_CHECK_INTERVAL_SECONDS = int(os.getenv(
 # If the helper broadcasts but the later DB update fails, this local intent row
 # prevents automatic retries and therefore avoids accidental double payment.
 LOCAL_TRANSACTION_INTENT_PREFIX = "NIMHUNT_INTENT:"
+
+
+def _env_enabled(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 _TRANS_CHECK_TASK: asyncio.Task | None = None
@@ -114,7 +118,7 @@ def _helper_seed_configured() -> bool:
     )
     if os.getenv(mnemonic_env):
         return True
-    if os.getenv(default_test_env) == "1" and str(getattr(const, "NIMIQ_NETWORK", "TestAlbatross")) != "MainAlbatross":
+    if _env_enabled(default_test_env) and str(getattr(const, "NIMIQ_NETWORK", "TestAlbatross")) != "MainAlbatross":
         return True
     return False
 
@@ -1359,8 +1363,10 @@ async def _transaction_check_loop(interval_seconds: int) -> None:
     """Background loop that keeps pending TRANSACTION rows moving."""
     global _TRANS_CHECK_LAST_RESULT, _TRANS_CHECK_LAST_ERROR
 
-    assert _TRANS_CHECK_STOP_EVENT is not None
-    while not _TRANS_CHECK_STOP_EVENT.is_set():
+    stop_event = _TRANS_CHECK_STOP_EVENT
+    if stop_event is None:  # Defensive: the loop is normally created only by start_transaction_refresher().
+        return
+    while not stop_event.is_set():
         try:
             _TRANS_CHECK_LAST_RESULT = await check_pending_transactions()
             if bool(_TRANS_CHECK_LAST_RESULT.get("ok", True)):
@@ -1377,7 +1383,7 @@ async def _transaction_check_loop(interval_seconds: int) -> None:
 
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
-                _TRANS_CHECK_STOP_EVENT.wait(),
+                stop_event.wait(),
                 timeout=max(1, int(interval_seconds)),
             )
 
@@ -1635,7 +1641,7 @@ async def submit_spot_creation_fee_transaction(
             },
             serialize_intent=True,
         )
-    except ValueError as exc:
+    except ValueError:
         # A cancellation may acquire the write lock after the scheduler selected
         # this Spot but before the fee intent is inserted. That is a normal,
         # safe race outcome rather than a reconciliation failure.
@@ -1648,8 +1654,8 @@ async def submit_spot_creation_fee_transaction(
                 "reason": "cancellation_started",
                 "trans_id": None,
             }
-        raise exc
-    except (sqlite3.IntegrityError, RuntimeError) as exc:
+        raise
+    except (sqlite3.IntegrityError, RuntimeError):
         if await db_access.has_nonfailed_spot_creation_fee_transaction(
             db,
             spot_id=int(spot_id),
@@ -1660,7 +1666,7 @@ async def submit_spot_creation_fee_transaction(
                 "already_exists": True,
                 "trans_id": None,
             }
-        raise exc
+        raise
 
     return {**result, "spot_id": int(spot_id)}
 

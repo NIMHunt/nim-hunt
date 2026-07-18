@@ -1,5 +1,7 @@
 # NimHunt
 
+![CI](https://github.com/NIMHunt/nim-hunt/actions/workflows/ci.yml/badge.svg)
+
 NimHunt is a small geofaucet-style and Prizedraw mini-app for Nimiq Pay.
 
 Creators fund geographic **Spots** with NIM. Other users find those Spots on a
@@ -225,13 +227,15 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 
-Install Python and Nimiq helper dependencies:
+Install the runtime, development and Nimiq helper dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 npm ci --prefix helpers
 ```
 
+`requirements.txt` contains only runtime packages; `requirements-dev.txt` adds
+the pinned test, lint and dependency-audit tools used by contributors and CI.
 `npm ci` uses `helpers/package-lock.json` and installs the exact pinned
 `@nimiq/core` version rather than a moving latest release.
 
@@ -279,7 +283,7 @@ script and `spoof.py` refuse to run in either public deployment mode.
 
 NimHunt currently follows a fresh-development-database policy rather than
 maintaining a general migration framework. The creation-fee release raises the
-schema to version `2`, so after switching to this branch stop the server and run
+schema to version `2`, so after pulling this release stop the server and run
 this reset once before ordinary local testing. Never use the reset script on a
 public deployment database; public TestAlbatross and MainAlbatross must use fresh
 persistent databases for this release.
@@ -768,11 +772,15 @@ descriptions, locations or display names with `data-i18n`.
 Activate the virtual environment, then run:
 
 ```bash
-PYTHONPATH=. python -W error::ResourceWarning -m pytest -q
-npm --prefix helpers test
-python -m py_compile *.py tests/*.py
+python -m pytest -q
+npm test --prefix helpers
 ruff check .
+python -m compileall -q *.py tests
 ```
+
+`pyproject.toml` keeps the Python test path, warning policy and Ruff rules in one
+place. GitHub Actions runs the same deterministic checks for every pull request
+and every update to `main`.
 
 Check every browser/helper module and shell script:
 
@@ -807,6 +815,9 @@ npm audit --omit=dev --prefix helpers
 | `templates/` | Jinja page shells |
 | `static/` | browser JavaScript, localisation, CSS and icons |
 | `tests/` | Python regression and integration tests |
+| `.github/workflows/ci.yml` | permanent pull-request and `main` verification |
+| `pyproject.toml` | shared pytest and Ruff configuration |
+| `requirements-dev.txt` | pinned test, lint and audit tooling |
 | `spoof.py` | destructive development-only mock-data seed |
 
 ## Operational limitations

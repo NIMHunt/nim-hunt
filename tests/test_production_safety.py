@@ -8,12 +8,13 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from unittest import mock
 
+from starlette.requests import Request
+
 import constants as const
 import main
 import public_html
 import spoof
 import wallet
-from starlette.requests import Request
 
 SAFE_PRODUCTION_SETTINGS = {
     "DEPLOYMENT_MODE": "production",

@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS {APP_METADATA_TABLE_NAME} (
 #################
 # User
 # Spot
-# PrizeDraw
+# Prizedraw
 # Claim
 # Claim-Code
 # Transaction
@@ -458,7 +458,7 @@ END;
 # PRIZEDRAW #
 # A PRIZEDRAW is an optional extension of a SPOT.
 #
-# If a SPOT has a matching PRIZEDRAW row, the SPOT works as a prize draw:
+# If a SPOT has a matching PRIZEDRAW row, the SPOT works as a Prizedraw:
 #   - eligible USERS become participants
 #   - one or more winners are selected later
 #   - the SPOT total_value is split between those winners
@@ -490,7 +490,7 @@ CREATE TABLE IF NOT EXISTS {PRIZEDRAW_TABLE_NAME} (
 """
 
 
-# A prize draw cannot have more winners than possible participants/claims.
+# A Prizedraw cannot have more winners than possible participants/claims.
 PRIZEDRAW_TRIGGER_PRIZE_COUNT_INSERT = "trg_prizedraw_prize_count_insert"
 PRIZEDRAW_TRIGGER_PRIZE_COUNT_INSERT_QUERY = f"""
 CREATE TRIGGER IF NOT EXISTS {PRIZEDRAW_TRIGGER_PRIZE_COUNT_INSERT}

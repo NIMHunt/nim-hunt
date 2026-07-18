@@ -120,8 +120,6 @@ NIMIQ_PAY_URL = "https://nimpay.app"
 # NIMHUNT_DEPLOYMENT_MODE is preferred; NIMHUNT_PRODUCTION remains a strict
 # compatibility alias for production only. Public modes disable every local
 # shortcut, while production specifically means real-NIM MainAlbatross.
-NIMHUNT_DEPLOYMENT_MODE_ENV = "NIMHUNT_DEPLOYMENT_MODE"
-NIMHUNT_LEGACY_PRODUCTION_ENV = "NIMHUNT_PRODUCTION"
 DEPLOYMENT_MODE = _deployment_mode()
 PUBLIC_TESTNET_MODE = DEPLOYMENT_MODE == "public-testnet"
 PRODUCTION_MODE = DEPLOYMENT_MODE == "production"
@@ -165,8 +163,7 @@ LEAFLET_JS_URL = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
 MAP_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 MAP_TILE_ATTRIBUTION = "&copy; OpenStreetMap contributors"
 
-# Future page URLs. These are centralised even before the pages exist, so copy
-# and links remain easy to change later.
+# Page URLs are centralised so browser copy and redirects stay consistent.
 CREATE_SPOT_URL = "/create"
 SPOT_PAGE_URL_PREFIX = "/spot"
 CLAIM_PAGE_URL_PREFIX = "/claim"
@@ -329,8 +326,6 @@ NIMIQ_HUB_URL = os.getenv(
     "NIMHUNT_NIMIQ_HUB_URL",
     _DEFAULT_NIMIQ_HUB_URLS.get(NIMIQ_NETWORK, ""),
 ).strip()
-NIMIQ_PAY_PROVIDER = "nimiq-pay-mini-app-sdk"
-
 # Address/signing integration. If NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND or
 # NIMHUNT_NIMIQ_SEND_COMMAND are set, wallet.py calls those commands with JSON
 # on stdin and expects JSON on stdout. This lets the Python app remain small
@@ -349,7 +344,6 @@ NIMHUNT_NIMIQ_MNEMONIC_ENV = "NIMHUNT_NIMIQ_MNEMONIC"
 NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC_ENV = "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC"
 NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND_ENV = "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND"
 NIMHUNT_NIMIQ_SEND_COMMAND_ENV = "NIMHUNT_NIMIQ_SEND_COMMAND"
-NIMHUNT_NIMIQ_CONFIRM_COMMAND_ENV = "NIMHUNT_NIMIQ_CONFIRM_COMMAND"
 NIMHUNT_NIMIQ_EXTERNAL_SIGNER_ENV = "NIMHUNT_NIMIQ_EXTERNAL_SIGNER"
 
 # Development fallbacks. Placeholder addresses are automatically disabled in
@@ -391,13 +385,13 @@ CLAIM_LOCATION_HARD_PENALTY = 0.35
 # USER Statuses
 # -----------------------------
 
-# Normal user. Can create SPOTs and CLAIM caches.
+# Normal user. Can create Spots and make claims.
 USER_STATUS_ACTIVE = 1
 
-# Restricted user. Can CLAIM caches, but cannot create new SPOTs.
+# Restricted user. Can make claims, but cannot create new Spots.
 USER_STATUS_LIMITED = 2
 
-# Banned user. Cannot create SPOTs or CLAIM caches.
+# Banned user. Cannot create Spots or make claims.
 USER_STATUS_BANNED = 3
 
 

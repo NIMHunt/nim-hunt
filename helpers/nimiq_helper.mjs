@@ -51,7 +51,7 @@ function mnemonicForNetwork(network) {
   const mnemonic = env('NIMHUNT_NIMIQ_MNEMONIC');
   if (mnemonic) return mnemonic;
 
-  const allowDefaultTestMnemonic = env('NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC', '0') === '1';
+  const allowDefaultTestMnemonic = envEnabled('NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC');
   if (allowDefaultTestMnemonic && network !== 'MainAlbatross') {
     return DEFAULT_TEST_MNEMONIC;
   }

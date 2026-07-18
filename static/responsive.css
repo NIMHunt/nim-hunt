@@ -135,55 +135,66 @@
         padding-inline: 1.35rem;
     }
 
-    .spot-list-toggle,
-    .spot-list-toggle.has-claim-action {
+    /* Keep summaries as two compact text rows. Right-side status and claim
+       controls stay anchored in place; the title/meta text truncates first. */
+    .spot-list-toggle {
         min-height: 0;
-        padding: 14px 12px;
-        padding-right: 12px;
+        padding: 14px 8.9rem 14px 12px;
     }
 
-    .spot-list-toggle .spot-list-actions {
-        position: static !important;
-        top: auto !important;
-        right: auto !important;
-        transform: none !important;
+    .spot-list-toggle.has-claim-action {
+        min-height: 7.8rem;
+        padding-right: 13.8rem;
     }
 
-    .spot-list-top-row {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        align-items: center;
-        gap: 10px;
-    }
-
-    .spot-list-toggle.has-claim-action .spot-list-top-row {
-        grid-template-columns: minmax(0, 1fr);
-    }
-
+    .spot-list-toggle .spot-list-actions,
     .spot-list-toggle.has-claim-action .spot-list-actions {
-        width: 100%;
-        margin-top: 8px;
+        position: absolute !important;
+        top: 50% !important;
+        right: 12px !important;
+        width: auto;
+        margin-top: 0;
         justify-content: flex-end;
+        transform: translateY(-50%) !important;
+    }
+
+    .spot-list-top-row,
+    .spot-list-toggle.has-claim-action .spot-list-top-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
     }
 
     .spot-list-title,
     .spot-list-toggle .spot-list-meta {
         min-width: 0;
         max-width: 100%;
+        overflow: hidden;
+        overflow-wrap: normal;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
-    .spot-list-toggle .spot-list-meta {
-        white-space: normal;
-        overflow-wrap: anywhere;
+    .spot-badge {
+        max-width: 8.8rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .spot-claim-button.nq-button-pill,
     .spot-claim-button.is-unavailable {
-        min-width: 8.6rem !important;
-        height: 4.8rem !important;
-        min-height: 4.8rem !important;
-        padding-inline: 0.9rem !important;
-        font-size: 1.3rem !important;
+        min-width: 10.6rem !important;
+        width: 10.6rem !important;
+        height: 5.4rem !important;
+        min-height: 5.4rem !important;
+        padding: 0.65rem 1rem !important;
+        font-size: 1.55rem !important;
+        line-height: 1 !important;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .spot-list-detail {
@@ -205,18 +216,30 @@
         min-width: 0;
     }
 
+    /* Action groups remain horizontal even on the narrowest supported phones.
+       Give each button enough height and prevent wrapped text from being clipped. */
+    .spot-owner-actions,
     .create-spot-page-actions,
-    .spot-owner-actions {
+    .create-spot-modal-actions {
         min-width: 0;
+        flex-direction: row !important;
+        align-items: stretch;
     }
 
     .create-spot-page-actions .nq-button,
     .spot-owner-action-button,
+    .create-spot-modal-actions .nq-button,
     .nh-modal-actions .nq-button,
     .delete-spot-actions .nq-button {
         min-width: 0 !important;
-        padding-inline: 0.75rem !important;
-        overflow-wrap: anywhere;
+        min-height: 4.8rem !important;
+        height: auto !important;
+        padding: 1rem 0.75rem !important;
+        line-height: 1.05 !important;
+        overflow: hidden;
+        overflow-wrap: normal;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .create-spot-range-bubble {
@@ -262,12 +285,6 @@
         font-size: clamp(0.92rem, 3.8vw, 1.05rem);
     }
 
-    .spot-list-title {
-        white-space: normal;
-        text-overflow: clip;
-        overflow-wrap: anywhere;
-    }
-
     .spot-password-row {
         align-items: flex-start;
         flex-direction: column;
@@ -301,6 +318,27 @@
         padding-top: 0;
     }
 
+    /* Once the map drops beneath Location, keep latitude and longitude together
+       as one compact coordinate line rather than two tall rows. */
+    .create-spot-location-label {
+        display: block !important;
+    }
+
+    #create-spot-city:not([hidden]),
+    #create-spot-country:not([hidden]) {
+        display: block !important;
+    }
+
+    #create-spot-latitude:not([hidden]),
+    #create-spot-longitude:not([hidden]) {
+        display: inline !important;
+        white-space: nowrap;
+    }
+
+    #create-spot-longitude:not([hidden])::before {
+        content: ", ";
+    }
+
     .create-spot-map {
         min-height: 230px;
     }
@@ -324,18 +362,6 @@
 
     .action-button {
         padding-inline: 9px !important;
-    }
-
-    .display-name-actions,
-    .nh-modal-actions,
-    .delete-spot-actions {
-        grid-template-columns: minmax(0, 1fr) !important;
-    }
-
-    .spot-owner-actions,
-    .create-spot-page-actions,
-    .create-spot-modal-actions {
-        flex-direction: column;
     }
 
     .back-link {

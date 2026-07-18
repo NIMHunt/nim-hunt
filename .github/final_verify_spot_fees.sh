@@ -1,28 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt pytest ruff pip-audit
-npm ci --prefix helpers
+stage=${1:?verification stage is required}
 
-PYTHONPATH=. python -W error::ResourceWarning -m pytest -q | tee /tmp/python-tests.txt
-tail -n 3 /tmp/python-tests.txt > /tmp/verification-summary.txt
+case "$stage" in
+  install)
+    python -m pip install --upgrade pip
+    python -m pip install -r requirements.txt pytest ruff pip-audit
+    npm ci --prefix helpers
+    ;;
 
-npm --prefix helpers test | tee /tmp/node-tests.txt
-printf '\nNode test summary:\n' >> /tmp/verification-summary.txt
-tail -n 8 /tmp/node-tests.txt >> /tmp/verification-summary.txt
+  python-tests)
+    PYTHONPATH=. python -W error::ResourceWarning -m pytest -q | tee /tmp/python-tests.txt
+    tail -n 3 /tmp/python-tests.txt > /tmp/verification-summary.txt
+    ;;
 
-python -m py_compile *.py tests/*.py
-ruff check .
-for file in static/*.js; do node --check --input-type=module < "$file"; done
-for file in helpers/*.mjs; do node --check "$file"; done
-for file in *.sh; do bash -n "$file"; done
-python -m pip check
-python -m pip_audit
-npm audit --omit=dev --prefix helpers
-git diff --check
+  node-tests)
+    npm --prefix helpers test | tee /tmp/node-tests.txt
+    printf '\nNode test summary:\n' >> /tmp/verification-summary.txt
+    tail -n 8 /tmp/node-tests.txt >> /tmp/verification-summary.txt
+    ;;
 
-python - <<'PY'
+  static)
+    python -m py_compile *.py tests/*.py
+    ruff check .
+    for file in static/*.js; do node --check --input-type=module < "$file"; done
+    for file in helpers/*.mjs; do node --check "$file"; done
+    for file in *.sh; do bash -n "$file"; done
+    git diff --check
+    ;;
+
+  audits)
+    python -m pip check
+    python -m pip_audit
+    npm audit --omit=dev --prefix helpers
+    ;;
+
+  templates)
+    python - <<'PY'
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 root = Path('templates')
@@ -32,10 +47,11 @@ for template in templates:
     env.get_template(template)
 print(f'Compiled {len(templates)} templates')
 PY
+    ;;
 
-export NIMHUNT_DB_PATH=/tmp/nimhunt-final-fee-mock.db
-rm -f "$NIMHUNT_DB_PATH" "$NIMHUNT_DB_PATH-wal" "$NIMHUNT_DB_PATH-shm"
-python - <<'PY'
+  mock-db)
+    rm -f "$NIMHUNT_DB_PATH" "$NIMHUNT_DB_PATH-wal" "$NIMHUNT_DB_PATH-shm"
+    python - <<'PY'
 import asyncio
 import sqlite3
 import spoof
@@ -70,10 +86,11 @@ with sqlite3.connect(schema.DB_PATH) as db:
     assert missing == 0
 print('Fresh database and exact creation-fee lifecycle verified')
 PY
+    ;;
 
-export NIMHUNT_DB_PATH=/tmp/nimhunt-final-fee-development.db
-rm -f "$NIMHUNT_DB_PATH" "$NIMHUNT_DB_PATH-wal" "$NIMHUNT_DB_PATH-shm"
-python - <<'PY'
+  development)
+    rm -f "$NIMHUNT_DB_PATH" "$NIMHUNT_DB_PATH-wal" "$NIMHUNT_DB_PATH-shm"
+    python - <<'PY'
 import asyncio
 import main
 async def exercise():
@@ -82,25 +99,13 @@ async def exercise():
 asyncio.run(exercise())
 print('Development startup/shutdown passed')
 PY
+    ;;
 
-export NIMHUNT_DEPLOYMENT_MODE=public-testnet
-export NIMHUNT_DB_PATH=/tmp/nimhunt-final-fee-public-testnet.db
-export NIMHUNT_NIMIQ_NETWORK=TestAlbatross
-export NIMHUNT_NIMIQ_NETWORK_ID=5
-export NIMHUNT_NIMIQ_RPC_URL=https://rpc.testnet.nimiqwatch.com/
-export NIMHUNT_NIMIQ_HUB_URL=https://hub.nimiq-testnet.com
-export NIMHUNT_NIMIQ_MNEMONIC="$(printf '%s' 'bGVnYWwgd2lubmVyIHRoYW5rIHllYXIgd2F2ZSBzYXVzYWdlIHdvcnRoIHVzZWZ1bCBsZWdhbCB3aW5uZXIgdGhhbmsgeWVsbG93' | base64 -d)"
-export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND="node $GITHUB_WORKSPACE/helpers/nimiq_helper.mjs"
-export NIMHUNT_NIMIQ_SEND_COMMAND="node $GITHUB_WORKSPACE/helpers/nimiq_helper.mjs"
-export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=1
-export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=2
-export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
-export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF'
-export NIMHUNT_NIMIQ_TRANSACTION_FEE=0
-
-for attempt in 1 2 3; do
-    rm -f "$NIMHUNT_DB_PATH" "$NIMHUNT_DB_PATH-wal" "$NIMHUNT_DB_PATH-shm"
-    if python - <<'PY'
+  public-testnet)
+    export NIMHUNT_NIMIQ_MNEMONIC="$(printf '%s' "$TEST_MNEMONIC_B64" | base64 -d)"
+    for attempt in 1 2 3; do
+      rm -f "$NIMHUNT_DB_PATH" "$NIMHUNT_DB_PATH-wal" "$NIMHUNT_DB_PATH-shm"
+      if python - <<'PY'
 import asyncio
 import sqlite3
 import database
@@ -119,10 +124,17 @@ with sqlite3.connect(database.DB_PATH) as db:
     assert db.execute('PRAGMA user_version').fetchone()[0] == 2
 print('Public TestAlbatross startup passed without broadcasting')
 PY
-    then
+      then
         exit 0
-    fi
-    echo "Public TestAlbatross dependency unavailable on attempt $attempt; retrying..."
-    sleep 10
-done
-exit 1
+      fi
+      echo "Public TestAlbatross dependency unavailable on attempt $attempt; retrying..."
+      sleep 10
+    done
+    exit 1
+    ;;
+
+  *)
+    echo "Unknown verification stage: $stage" >&2
+    exit 2
+    ;;
+esac

@@ -16,6 +16,7 @@ than high-volume financial infrastructure.
 - **Stay durations** — require a claimant to remain inside the radius for a set time.
 - **Scheduling** — configure a future start and a fixed active duration.
 - **Participation limits** — set total participants and per-user limits.
+- **Creation fees** — charge separate configurable fees for Standard Spots and Prizedraws.
 - **Creator tools** — inspect drafts, deposits, publishing state, claim codes and history.
 - **Claim history** — users can review pending, successful and failed claims.
 - **On-chain descriptions** — NimHunt-generated transactions include short Spot labels.
@@ -68,12 +69,24 @@ Only `wallet.py` and `trans_updater.py` should initiate or verify chain-facing w
 ### Funding a Spot
 
 1. NimHunt derives a unique deposit address for the draft Spot.
-2. The creator opens a Nimiq Pay payment request from the My Spots page.
-3. Nimiq Pay signs and broadcasts the creator's funding transaction.
-4. NimHunt records the returned hash and verifies it independently through RPC.
-5. The first confirmed sender becomes that Spot's funding wallet. Later top-ups
-   must come from the same wallet.
-6. Once the required amount is confirmed, the draft can be published.
+2. The draft snapshots the configured creation-fee amount and fee destination.
+   Later configuration changes therefore affect only newly-created Spots.
+3. The creator opens a Nimiq Pay request for **Spot funding + creation fee** from
+   the My Spots page. The card shows both components and the total being sent.
+4. Nimiq Pay signs and broadcasts the creator's funding transaction.
+5. NimHunt records the returned hash and verifies it independently through RPC.
+6. Deposits may be made in parts. The first confirmed sender becomes that Spot's
+   funding wallet, and every later top-up must come from the same wallet.
+7. Only after confirmed deposits cover the full Spot value plus its snapshotted
+   fee does NimHunt create a durable creation-fee transaction intent.
+8. The fee is sent from the Spot deposit address to the snapshotted platform-fee
+   address. The draft cannot be published until that transaction confirms.
+9. Once the fee confirms, the deposit address retains the intended Spot reward
+   pool and the draft may be published if its other rules are satisfied.
+
+A creation fee of `0` skips the fee transaction entirely. A failed fee transaction
+may be retried only after the chain has proved failure; an ambiguous local intent
+remains pending to prevent an accidental duplicate charge.
 
 A wrong-wallet top-up is retained in the transaction record but excluded from
 usable Spot funds. It requires manual recovery; NimHunt does not silently assign
@@ -102,12 +115,28 @@ those finite comparisons.
 
 ### Cancellation
 
-Cancelling a funded standard Spot creates up to two outgoing transactions:
+A funded draft may be cancelled instead of deleted. Published Standard Spots may
+also be cancelled; published Prizedraws retain their existing no-cancellation rule.
+Cancellation creates up to two outgoing transactions:
 
 - the remaining refundable balance to the original funding wallet;
 - the configured cancellation fee to the platform fee address.
 
-Already-confirmed claim payouts are deducted before the refundable balance is
+If the creation fee already confirmed, it is retained and excluded from the
+refund. If a draft is only partly funded, no creation fee is charged; the ordinary
+cancellation fee is applied to the confirmed deposit. Once deposits reach the full
+Spot-plus-fee target, the creation fee is owed: cancellation waits until that fee
+confirms, so a timing race cannot be used to avoid it. Cancellation also waits while
+a deposit, payout, refund or cancellation-fee transaction is pending.
+
+A draft with no deposit history can still be deleted normally. Once any deposit
+transaction has been recorded, deletion is disabled so the Spot address and audit
+trail cannot disappear. A draft containing only failed deposit records can instead
+be archived as cancelled without an automatic refund; those records remain attached
+for manual review because a failed row may represent an abandoned hash or an
+on-chain wrong-wallet payment that NimHunt deliberately excluded from usable funds.
+
+Already-confirmed claim payouts are also deducted before the refundable balance is
 calculated. The Spot is marked cancelled only after every required outgoing leg
 has reached a final state.
 
@@ -116,6 +145,7 @@ has reached a final state.
 NimHunt includes short public transaction data:
 
 - `Funding: [Spot name]`
+- `Creation Fee: [Spot name]`
 - `Claim: [Spot name]`
 - `Prizedraw: [Spot name]`
 - `Cancelled Spot: [Spot name]`
@@ -248,8 +278,11 @@ the current schema and inserts mock users, Spots, claims and transactions. The
 script and `spoof.py` refuse to run in either public deployment mode.
 
 NimHunt currently follows a fresh-development-database policy rather than
-maintaining a general migration framework. Never use the reset script on a
-public deployment database.
+maintaining a general migration framework. The creation-fee release raises the
+schema to version `2`, so after switching to this branch stop the server and run
+this reset once before ordinary local testing. Never use the reset script on a
+public deployment database; public TestAlbatross and MainAlbatross must use fresh
+persistent databases for this release.
 
 ## Phone testing
 
@@ -352,37 +385,48 @@ they are **not** the mnemonic consumed by the bundled official Nimiq helper.
 public deployment. These Python seed helpers do not provide signing material to
 the bundled JavaScript helper. For that helper, use `NIMHUNT_NIMIQ_MNEMONIC`.
 
-## Cancellation fee configuration
+## Platform fee configuration
 
-The cancellation fee has two separate settings:
+Creation and cancellation fees use human-readable NIM amounts and one shared
+operator-controlled destination address. One NIM contains 100,000 Luna, so values
+may use up to five decimal places. `0` is valid and disables that particular fee;
+negative values or fractions smaller than one Luna are rejected at startup.
 
-### Fee amount
+### Creation fee amounts
 
-Set the fee as a human-readable NIM amount:
+Standard Spots and Prizedraws have independent settings:
+
+```bash
+export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=1
+export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=1
+```
+
+Both default to `1 NIM`. Each new draft snapshots the appropriate amount. Changing
+an environment variable later does not retroactively change an existing draft's
+deposit target or fee transaction.
+
+### Cancellation fee amount
 
 ```bash
 export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
 ```
 
-Decimals up to five places are supported because one NIM contains 100,000 Luna:
+The default is `1 NIM`. A value of `0` preserves the refund flow without charging
+a cancellation fee.
 
-```bash
-export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=0.25
-```
+### Shared fee destination
 
-The default is `1 NIM`. A value of `0` disables the platform fee while preserving
-the refund flow. Values below one Luna or negative values are rejected at startup.
-
-### Fee destination
-
-Set the checksummed Nimiq address that receives cancellation fees:
+Set the checksummed Nimiq address that receives both creation and cancellation fees:
 
 ```bash
 export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ45 ... real address ...'
 ```
 
-The repository default is an obvious development placeholder. Both public modes
-require a real, checksum-valid address controlled by the operator.
+The variable retains its historical name for compatibility. The repository's
+development default is a real TestAlbatross address derived from the public test
+mnemonic, so anyone can spend from it. Both public modes explicitly reject that
+address and require a different checksum-valid address controlled by the operator.
+The destination is also snapshotted onto each new Spot for its creation fee.
 
 ## Environment variable reference
 
@@ -393,8 +437,10 @@ require a real, checksum-valid address controlled by the operator.
 | `NIMHUNT_DEPLOYMENT_MODE` | `development` | preferred: `development`, `public-testnet`, or `production` |
 | `NIMHUNT_PRODUCTION` | unset | legacy compatibility flag; `1` maps to `production` only |
 | `NIMHUNT_DB_PATH` | `records.db` | SQLite file; public modes require a separate absolute persistent path |
+| `NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM` | `1` | one-time creation fee for Standard Spots, in NIM |
+| `NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM` | `1` | one-time creation fee for Prizedraws, in NIM |
 | `NIMHUNT_SPOT_CANCELLATION_FEE_NIM` | `1` | cancellation fee amount in NIM |
-| `NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS` | development placeholder | fee recipient |
+| `NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS` | public TestAlbatross development address | shared creation/cancellation fee recipient; public modes require an operator address |
 
 ### Nimiq network and RPC
 
@@ -406,11 +452,13 @@ require a real, checksum-valid address controlled by the operator.
 | `NIMHUNT_NIMIQ_HUB_URL` | selected by network | Hub used for creator funding requests |
 | `NIMHUNT_NIMIQ_RPC_TIMEOUT_SECONDS` | `12` | RPC/helper timeout base |
 | `NIMHUNT_NIMIQ_ADDRESS_TX_LOOKUP_LIMIT` | `500` | recent address transactions inspected during fallback verification |
-| `NIMHUNT_NIMIQ_TRANSACTION_FEE` | `0` | outgoing network fee in Luna |
+| `NIMHUNT_NIMIQ_TRANSACTION_FEE` | `0` | outgoing network fee in Luna; public deployments currently require `0` |
 
-`NIMHUNT_NIMIQ_TRANSACTION_FEE` is measured in **Luna**, unlike the cancellation
-fee variable. It is passed to the Nimiq transaction builder for each outgoing
-server-generated transaction.
+`NIMHUNT_NIMIQ_TRANSACTION_FEE` is measured in **Luna**, unlike the platform-fee
+variables. The current funding model does not reserve an extra network-fee budget
+for every creation fee, claim, refund and Prizedraw payout, so both public modes
+reject non-zero values rather than silently underfunding Spots. Development may
+still use the setting for controlled experiments.
 
 ### Signer and mnemonic
 
@@ -451,7 +499,8 @@ deployment secrets. This includes:
 
 Change these in `constants.py` only when intentionally changing product behaviour,
 then run the complete test suite. Environment variables are reserved for values
-that genuinely differ between deployments, secrets or operational tuning.
+that genuinely differ between deployments, secrets or operational tuning. Creation
+fees are environment-backed operator policy and are snapshotted when a Spot is created.
 
 NimHunt does not automatically parse a `.env` file. Export variables in the
 shell, configure them in the process manager/hosting platform, or deliberately
@@ -482,6 +531,8 @@ export NIMHUNT_NIMIQ_MNEMONIC='private testnet mnemonic -- supply as a secret'
 export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
 export NIMHUNT_NIMIQ_SEND_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
 
+export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=1
+export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=1
 export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
 export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ... operator testnet fee address ...'
 ```
@@ -508,6 +559,8 @@ export NIMHUNT_NIMIQ_MNEMONIC='private mainnet mnemonic -- supply as a secret'
 export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
 export NIMHUNT_NIMIQ_SEND_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
 
+export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=1
+export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=1
 export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
 export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ... operator mainnet fee address ...'
 ```
@@ -537,7 +590,10 @@ in an additive `app_metadata` table. Once bound, it refuses another network or m
   database rather than guessing which chain or safety context its records belong to.
 - A public database is also protected from `spoof.py` resets if the process is
   accidentally launched with development settings.
-- This additive metadata does not require resetting a current development database.
+- Network/deployment metadata remains additive, but the creation-fee release also
+  adds immutable Spot columns and uses schema version `2`. There is deliberately no
+  `ALTER` migration: existing development databases must be recreated, and public
+  deployments must start with a fresh volume/database for this release.
 
 ### Testnet-to-mainnet cutover
 
@@ -552,7 +608,7 @@ Mainnet is an environment and data-volume change, not a code rewrite:
 6. Do not copy testnet Spots, claims, transaction hashes, deposits or balances into
    the mainnet database.
 7. Configure a separate private mainnet mnemonic or external signing setup.
-8. Configure the real mainnet cancellation-fee address.
+8. Configure the real mainnet fee address and both desired creation-fee amounts.
 9. Set `NIMHUNT_DEPLOYMENT_MODE=production`, MainAlbatross, ID `24`, mainnet RPC
    and mainnet Hub.
 10. Start the new service, allow validation to complete, then perform deliberately
@@ -589,6 +645,8 @@ NIMHUNT_NIMIQ_MNEMONIC=SECRET_PRIVATE_TESTNET_MNEMONIC
 NIMHUNT_NIMIQ_MNEMONIC_PASSWORD=SECRET_OPTIONAL_PASSPHRASE
 NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND=node /app/helpers/nimiq_helper.mjs
 NIMHUNT_NIMIQ_SEND_COMMAND=node /app/helpers/nimiq_helper.mjs
+NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=1
+NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=1
 NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
 NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS=OPERATOR_TESTNET_NQ_ADDRESS
 ```
@@ -614,6 +672,8 @@ NIMHUNT_NIMIQ_MNEMONIC=SECRET_PRIVATE_MAINNET_MNEMONIC
 NIMHUNT_NIMIQ_MNEMONIC_PASSWORD=SECRET_OPTIONAL_PASSPHRASE
 NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND=node /app/helpers/nimiq_helper.mjs
 NIMHUNT_NIMIQ_SEND_COMMAND=node /app/helpers/nimiq_helper.mjs
+NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=1
+NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=1
 NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
 NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS=OPERATOR_MAINNET_NQ_ADDRESS
 ```
@@ -642,8 +702,8 @@ Before public launch:
 2. Store the private mnemonic and optional passphrase in the host's secret manager.
 3. Back up the mnemonic separately and verify recovery.
 4. Configure the correct deployment mode, network, ID, RPC and Hub.
-5. Configure a real fee address and desired fee amount.
-6. Use a fresh network-specific persistent database.
+5. Configure a real fee address, both creation fees and the cancellation fee.
+6. Use a fresh schema-version-2 network-specific persistent database.
 7. Serve over HTTPS with one application replica and worker.
 8. Confirm strict startup and `/healthz`.
 9. Complete a deliberately small-value end-to-end cycle.
@@ -741,7 +801,7 @@ npm audit --omit=dev --prefix helpers
 | `db_access.py` | validated database reads and writes |
 | `cache.py` | in-memory public/owner cache |
 | `wallet.py` | address validation and signer command boundary |
-| `trans_updater.py` | blockchain verification and outgoing payments |
+| `trans_updater.py` | blockchain verification, creation-fee recovery and outgoing payments |
 | `settlement_updater.py` | duration-claim and Prizedraw settlement |
 | `helpers/` | official Nimiq JS helper and tests |
 | `templates/` | Jinja page shells |
@@ -758,6 +818,8 @@ npm audit --omit=dev --prefix helpers
 - Public RPC and map-tile services have no NimHunt-specific availability guarantee.
 - Location evidence reduces casual misuse but cannot make phone GPS impossible to spoof.
 - On-chain transfers are irreversible; use TestAlbatross and small values first.
+- An ambiguous creation-fee send remains pending instead of being retried automatically;
+  this may require manual reconciliation, but prevents charging the same Spot twice.
 
 These trade-offs are intentional and proportionate to the project's competition
 scope. They should be revisited before substantially increasing user counts or

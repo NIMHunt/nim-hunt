@@ -27,12 +27,15 @@ def clean_environment() -> dict[str, str]:
         "NIMHUNT_NIMIQ_NETWORK_ID",
         "NIMHUNT_NIMIQ_RPC_URL",
         "NIMHUNT_NIMIQ_HUB_URL",
+        "NIMHUNT_NIMIQ_TRANSACTION_FEE",
         "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND",
         "NIMHUNT_NIMIQ_SEND_COMMAND",
         "NIMHUNT_NIMIQ_MNEMONIC",
         "NIMHUNT_NIMIQ_EXTERNAL_SIGNER",
         "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC",
         "NIMHUNT_DEV_MASTER_SEED",
+        "NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM",
+        "NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM",
         "NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS",
         "NIMHUNT_DB_PATH",
     ):
@@ -120,6 +123,22 @@ class DeploymentModeParsingTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must be development, public-testnet, or production", result.stderr)
 
+    def test_creation_fees_are_independent_and_zero_is_supported(self):
+        environment = clean_environment()
+        environment.update(
+            {
+                "NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM": "0",
+                "NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM": "2.5",
+            }
+        )
+        result = run_python(
+            "import constants as c; print(c.STANDARD_SPOT_CREATION_FEE, "
+            "c.PRIZEDRAW_SPOT_CREATION_FEE)",
+            environment,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "0 250000")
+
     def test_conflicting_legacy_and_preferred_settings_fail(self):
         environment = clean_environment()
         environment.update(
@@ -172,6 +191,43 @@ class PublicDeploymentValidationTest(unittest.TestCase):
         result = run_python("import main; main.validate_deployment_safety()", environment)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("public default test mnemonic", result.stderr)
+
+    def test_public_modes_reject_nonzero_network_fee_without_a_fee_reserve(self):
+        with (
+            mock.patch.object(const, "DEPLOYMENT_MODE", "public-testnet"),
+            mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
+            mock.patch.object(const, "NIMIQ_NETWORK", "TestAlbatross"),
+            mock.patch.object(const, "NIMIQ_NETWORK_ID", 5),
+            mock.patch.object(const, "NIMIQ_RPC_URL", "https://rpc.testnet.nimiqwatch.com/"),
+            mock.patch.object(const, "NIMIQ_HUB_URL", "https://hub.nimiq-testnet.com"),
+            mock.patch.object(const, "NIMIQ_TRANSACTION_FEE", 1),
+            mock.patch.object(const, "TEST_FEATURES_ENABLED", False),
+            mock.patch.object(const, "DEFAULT_TO_TEST_USER", False),
+            mock.patch.object(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False),
+            mock.patch.object(const, "ALLOW_DEV_WALLET_SENDS", False),
+            mock.patch.object(const, "SPOT_CANCELLATION_FEE_ADDRESS", VALID_FEE_ADDRESS),
+            mock.patch.object(main.database, "DB_PATH", "/srv/nimhunt/records.db"),
+            mock.patch.dict(
+                os.environ,
+                {
+                    "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND": "node /app/helpers/nimiq_helper.mjs",
+                    "NIMHUNT_NIMIQ_SEND_COMMAND": "node /app/helpers/nimiq_helper.mjs",
+                    "NIMHUNT_NIMIQ_MNEMONIC": "private operator mnemonic words",
+                    "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC": "",
+                    "NIMHUNT_DEV_MASTER_SEED": "",
+                },
+                clear=False,
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "NIMIQ_TRANSACTION_FEE must remain 0"):
+                main.validate_deployment_safety()
+
+    def test_public_testnet_rejects_public_development_fee_address(self):
+        environment = valid_public_environment("public-testnet")
+        environment["NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS"] = const.DEV_PLATFORM_FEE_ADDRESS
+        result = run_python("import main; main.validate_deployment_safety()", environment)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("public development fee address", result.stderr)
 
     def test_public_testnet_rejects_development_seed(self):
         environment = valid_public_environment("public-testnet")

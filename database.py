@@ -43,6 +43,7 @@ from constants import (
     TRANS_STATUS_PENDING,
     TRANS_TYPE_CANCEL_SPOT,
     TRANS_TYPE_CLAIM,
+    TRANS_TYPE_CREATION_FEE,
     TRANS_TYPE_PLAT_FEE,
     USER_STATUS_ACTIVE,
 )
@@ -58,7 +59,7 @@ DB_PATH = os.getenv("NIMHUNT_DB_PATH", "records.db").strip() or "records.db"
 # instead of carrying schema migrations. Increment this whenever the schema
 # changes. Existing non-empty databases with another version are rejected
 # with a clear instruction to recreate them.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Durable chain and deployment identity prevents a TestAlbatross database from
 # being silently reinterpreted as MainAlbatross, and prevents a local/mock
@@ -196,6 +197,8 @@ SPOT_MAX_TOTAL_CLAIMS = "max_total_claims"          # Total claim/entry limit. 0
 SPOT_USE_PASSWORD = "use_password"                    # Boolean-ish. 1 means CLAIM_CODE rows are required.
 
 SPOT_TOTAL_VALUE = "total_value"                    # Total value in Luna
+SPOT_CREATION_FEE = "creation_fee"                  # Snapshotted one-time creation fee in Luna
+SPOT_CREATION_FEE_ADDRESS = "creation_fee_address"  # Snapshotted fee recipient
 
 SPOT_STARTS_AT = "starts_at"                        # Optional Unix timestamp
 SPOT_ENDS_AT = "ends_at"                            # Seconds after starts_at when the SPOT ends
@@ -244,6 +247,8 @@ SPOT_IMMUTABLE_FIELDS = {
     SPOT_DEPOSIT_KEY_INDEX,
     SPOT_DEPOSIT_KEY_PATH,
     SPOT_DEPOSIT_KEY_VERSION,
+    SPOT_CREATION_FEE,
+    SPOT_CREATION_FEE_ADDRESS,
     SPOT_CREATED_AT,
 }
 
@@ -297,6 +302,11 @@ CREATE TABLE IF NOT EXISTS {SPOT_TABLE_NAME} (
     {SPOT_TOTAL_VALUE} INTEGER NOT NULL
         DEFAULT {MIN_SPOT_TOTAL_VALUE},
 
+    {SPOT_CREATION_FEE} INTEGER NOT NULL
+        DEFAULT 0,
+
+    {SPOT_CREATION_FEE_ADDRESS} TEXT NOT NULL,
+
     {SPOT_STARTS_AT} INTEGER,
 
     -- Seconds after starts_at when the SPOT ends. This is intentionally
@@ -324,6 +334,8 @@ CREATE TABLE IF NOT EXISTS {SPOT_TABLE_NAME} (
     CHECK ({SPOT_MAX_TOTAL_CLAIMS} BETWEEN {MIN_PRIZEDRAW_MAX_TOTAL_CLAIMS} AND {MAX_SPOT_MAX_TOTAL_CLAIMS}),
     CHECK ({SPOT_USE_PASSWORD} IN (0, 1)),
     CHECK ({SPOT_TOTAL_VALUE} >= {MIN_SPOT_TOTAL_VALUE}),
+    CHECK ({SPOT_CREATION_FEE} >= 0),
+    CHECK (TRIM({SPOT_CREATION_FEE_ADDRESS}) != ''),
 
     CHECK ({SPOT_STARTS_AT} IS NULL OR {SPOT_STARTS_AT} > 0),
     CHECK ({SPOT_ENDS_AT} BETWEEN {MIN_SPOT_ENDS_AFTER_SECONDS} AND {MAX_SPOT_ENDS_AFTER_SECONDS}),
@@ -817,7 +829,7 @@ TRANS_USER_ID = "user_id"                    # FK from USER.id
 TRANS_SPOT_ID = "spot_id"                    # Optional FK from SPOT.id
 TRANS_CLAIM_ID = "claim_id"                  # Optional FK from CLAIM.id
 
-TRANS_TYPE = "type"                          # Enum-ish. FILL_SPOT, CANCEL_SPOT, CLAIM, PLAT_FEE
+TRANS_TYPE = "type"                          # Enum-ish. FILL_SPOT, CANCEL_SPOT, CLAIM, PLAT_FEE, CREATION_FEE
 TRANS_AMOUNT = "amount"                      # Amount in Luna
 
 TRANS_FROM_ADDRESS = "from_address"          # Sender Nimiq address
@@ -935,6 +947,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS {TRANS_INDEX_SPOT_ACTIVE_CANCELLATION_UNIQUE}
 ON {TRANS_TABLE_NAME}({TRANS_SPOT_ID}, {TRANS_TYPE})
 WHERE {TRANS_SPOT_ID} IS NOT NULL
   AND {TRANS_TYPE} IN ({TRANS_TYPE_CANCEL_SPOT}, {TRANS_TYPE_PLAT_FEE})
+  AND {TRANS_STATUS} != {TRANS_STATUS_FAILED};
+"""
+
+
+# Prevents duplicate active creation-fee sends while keeping a definitively
+# failed on-chain attempt retryable. Ambiguous local intents remain pending and
+# therefore continue to block automatic retries.
+TRANS_INDEX_SPOT_ACTIVE_CREATION_FEE_UNIQUE = "idx_trans_spot_active_creation_fee_unique"
+TRANS_INDEX_SPOT_ACTIVE_CREATION_FEE_UNIQUE_QUERY = f"""
+CREATE UNIQUE INDEX IF NOT EXISTS {TRANS_INDEX_SPOT_ACTIVE_CREATION_FEE_UNIQUE}
+ON {TRANS_TABLE_NAME}({TRANS_SPOT_ID}, {TRANS_TYPE})
+WHERE {TRANS_SPOT_ID} IS NOT NULL
+  AND {TRANS_TYPE} = {TRANS_TYPE_CREATION_FEE}
   AND {TRANS_STATUS} != {TRANS_STATUS_FAILED};
 """
 
@@ -1591,6 +1616,7 @@ async def init_db():
         await db.executescript(TRANS_INDEX_CLAIM_QUERY)
         await db.executescript(TRANS_INDEX_CLAIM_ACTIVE_PAYOUT_UNIQUE_QUERY)
         await db.executescript(TRANS_INDEX_SPOT_ACTIVE_CANCELLATION_UNIQUE_QUERY)
+        await db.executescript(TRANS_INDEX_SPOT_ACTIVE_CREATION_FEE_UNIQUE_QUERY)
         await db.executescript(TRANS_INDEX_STATUS_CREATED_QUERY)
         await db.executescript(TRANS_INDEX_TYPE_STATUS_CREATED_QUERY)
         await db.executescript(TRANS_TRIGGER_SET_COMPLETED_AT_UPDATE_QUERY)

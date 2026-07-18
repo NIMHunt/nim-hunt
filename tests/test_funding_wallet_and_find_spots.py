@@ -146,6 +146,8 @@ class FundingWalletSubmissionGuardTest(unittest.IsolatedAsyncioTestCase):
         spot = {
             schema.SPOT_ID: 7,
             schema.SPOT_DEPOSIT_ADDRESS: "deposit-wallet",
+            schema.SPOT_STATUS: const.SPOT_STATUS_DRAFT,
+            schema.SPOT_CANCELLATION_STARTED_AT: None,
         }
         with (
             mock.patch.object(

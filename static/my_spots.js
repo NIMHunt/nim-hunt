@@ -493,13 +493,14 @@ function draftDepositText(spot) {
 
     if (status === 'ready') return TEXT.draftDeposit.ready;
     if (status === 'partial') return TEXT.draftDeposit.partial(nimFromLunaText(deposit.amount));
+    if (status === 'processing') return TEXT.draftDeposit.processingFee;
     return TEXT.draftDeposit.missing;
 }
 
 function draftDepositClass(spot) {
     const status = spot.deposit?.status || 'missing';
     if (status === 'ready') return 'is-ready';
-    if (status === 'partial') return 'is-partial';
+    if (status === 'partial' || status === 'processing') return 'is-partial';
     return 'is-missing';
 }
 
@@ -640,7 +641,9 @@ function buildOwnerActions(spot) {
 
     if (spot.can_cancel) {
         actions.append(ownerActionButton({
-            text: TEXT.ownerActions.cancel,
+            text: spot.status_label === 'draft'
+                ? TEXT.ownerActions.cancelDraft
+                : TEXT.ownerActions.cancel,
             className: 'red',
             onClick: () => openCancelModal(spot),
         }));
@@ -937,11 +940,26 @@ async function openDepositModal(spot) {
         state.depositIntent = data;
 
         const amountText = nimFromLunaText(data.amount || spot.deposit?.amount_due || 0);
+        const spotValueText = nimFromLunaText(data.spot_value ?? spot.total_value ?? 0);
+        const creationFeeText = nimFromLunaText(data.creation_fee ?? spot.creation_fee ?? 0);
         els.depositTitle.textContent = TEXT.deposit.title;
-        els.depositBody.textContent = TEXT.deposit.confirmBody({
-            title: data.spot?.title || spot.title || SPOT_TEXT.fallbackTitle,
-            amountText,
-        });
+        const title = data.spot?.title || spot.title || SPOT_TEXT.fallbackTitle;
+        const creationFee = Number(data.creation_fee ?? spot.creation_fee ?? 0);
+        const lines = [
+            TEXT.deposit.confirmLead({ title }),
+            TEXT.deposit.spotFundingLine(spotValueText),
+            TEXT.deposit.creationFeeLine(creationFeeText),
+            TEXT.deposit.depositNowLine(amountText),
+        ];
+        if (creationFee > 0) {
+            lines.push(TEXT.deposit.creationFeeNotice);
+        }
+        els.depositBody.replaceChildren(...lines.map((line) => {
+            const span = document.createElement('span');
+            span.className = 'cancel-spot-body-line';
+            span.textContent = line;
+            return span;
+        }));
         els.depositConfirm.textContent = TEXT.deposit.confirm;
         els.depositCancel.textContent = TEXT.deposit.cancel;
         els.depositConfirm.disabled = false;
@@ -1099,17 +1117,33 @@ function closeCancelModal() {
     els.cancelBackdrop.hidden = true;
 }
 
-function setCancelBodyContent({ title, refundText, feeText, remainingLost, noRemaining }) {
+function setCancelBodyContent({
+    title,
+    refundText,
+    feeText,
+    remainingLost,
+    noRemaining,
+    manualReviewRequired,
+}) {
     if (!els.cancelBody) return;
 
     if (noRemaining || remainingLost) {
-        els.cancelBody.textContent = TEXT.cancelSpot.confirmBody({
+        const lines = [TEXT.cancelSpot.confirmBody({
             title,
             refundText,
             feeText,
             remainingLost,
             noRemaining,
-        });
+        })];
+        if (manualReviewRequired) {
+            lines.push(TEXT.cancelSpot.manualReviewNotice);
+        }
+        els.cancelBody.replaceChildren(...lines.map((line) => {
+            const span = document.createElement('span');
+            span.className = 'cancel-spot-body-line';
+            span.textContent = line;
+            return span;
+        }));
         return;
     }
 
@@ -1118,6 +1152,9 @@ function setCancelBodyContent({ title, refundText, feeText, remainingLost, noRem
         `Estimated refund: ${refundText}.`,
         `Cancellation fee: ${feeText}.`,
     ];
+    if (manualReviewRequired) {
+        lines.push(TEXT.cancelSpot.manualReviewNotice);
+    }
 
     els.cancelBody.replaceChildren(...lines.map((line) => {
         const span = document.createElement('span');
@@ -1138,6 +1175,7 @@ function openCancelModal(spot) {
     const feeText = nimFromLunaText(cancellation.fee_amount || cancellation.configured_fee || 0);
     const remainingLost = Boolean(cancellation.remaining_lost) || (remainingAmount > 0 && refundAmount <= 0);
     const noRemaining = remainingAmount <= 0;
+    const manualReviewRequired = Boolean(cancellation.manual_review_required);
 
     els.cancelTitle.textContent = TEXT.cancelSpot.title;
     setCancelBodyContent({
@@ -1146,6 +1184,7 @@ function openCancelModal(spot) {
         feeText,
         remainingLost,
         noRemaining,
+        manualReviewRequired,
     });
     els.cancelConfirm.textContent = TEXT.cancelSpot.confirm;
     els.cancelCancel.textContent = TEXT.cancelSpot.cancel;

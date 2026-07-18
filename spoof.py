@@ -147,7 +147,13 @@ async def _insert_mock_user(db, user: MockUser, *, now: int) -> None:
     )
 
 
-async def _create_mock_spot(db, spot: MockSpot, *, now: int) -> int:
+async def _create_mock_spot(
+    db,
+    spot: MockSpot,
+    *,
+    now: int,
+    apply_final_status: bool = True,
+) -> int:
     starts_at = None if spot.starts_offset_seconds is None else int(now + spot.starts_offset_seconds)
     # SPOT.ends_at stores seconds after starts_at, not an absolute unix timestamp.
     if spot.ends_offset_seconds is None:
@@ -175,7 +181,7 @@ async def _create_mock_spot(db, spot: MockSpot, *, now: int) -> int:
         country=TEST_COUNTRY,
     )
 
-    if spot.status != const.SPOT_STATUS_DRAFT:
+    if apply_final_status and spot.status != const.SPOT_STATUS_DRAFT:
         await db_access.modify_spot_status(db, spot_id=spot_id, status=spot.status)
 
     return int(spot_id)
@@ -212,6 +218,36 @@ async def _create_confirmed_deposit_for_spot(
         db,
         trans_id=trans_id,
         block_number=1_234_567,
+    )
+    return int(trans_id)
+
+
+async def _create_confirmed_creation_fee_for_spot(
+    db,
+    *,
+    user_id: int,
+    spot_id: int,
+) -> int | None:
+    spot = await db_access.get_spot(db, spot_id=int(spot_id))
+    if spot is None:
+        raise RuntimeError(f"Mock Spot {spot_id} disappeared")
+    amount = int(spot.get(schema.SPOT_CREATION_FEE) or 0)
+    if amount <= 0:
+        return None
+
+    trans_id = await db_access.create_spot_creation_fee_transaction(
+        db,
+        user_id=int(user_id),
+        spot_id=int(spot_id),
+        amount=amount,
+        from_address=str(spot[schema.SPOT_DEPOSIT_ADDRESS]),
+        to_address=str(spot[schema.SPOT_CREATION_FEE_ADDRESS]),
+        tx_hash="cfee" + f"{spot_id:060x}"[-60:],
+    )
+    await db_access.set_transaction_status_to_confirmed(
+        db,
+        trans_id=int(trans_id),
+        block_number=1_234_568,
     )
     return int(trans_id)
 
@@ -371,14 +407,33 @@ async def seed_mock_data() -> dict[str, Any]:
 
             spot_ids: list[int] = []
             for spot in normal_spots:
-                spot_id = await _create_mock_spot(db, spot, now=now)
+                # Funding and creation-fee transactions are draft-only lifecycle
+                # operations. Seed them first, then move the mock Spot to its final
+                # published status just as the real application does.
+                spot_id = await _create_mock_spot(
+                    db,
+                    spot,
+                    now=now,
+                    apply_final_status=False,
+                )
                 spot_ids.append(spot_id)
                 await _create_confirmed_deposit_for_spot(
                     db,
                     user_id=spot.user_id,
                     spot_id=spot_id,
-                    amount=spot.total_value,
+                    amount=spot.total_value + db_access.configured_spot_creation_fee(is_prizedraw=False),
                 )
+                await _create_confirmed_creation_fee_for_spot(
+                    db,
+                    user_id=spot.user_id,
+                    spot_id=spot_id,
+                )
+                if spot.status != const.SPOT_STATUS_DRAFT:
+                    await db_access.modify_spot_status(
+                        db,
+                        spot_id=spot_id,
+                        status=spot.status,
+                    )
 
             title_only_draft_id = await _create_title_only_draft(
                 db,
@@ -392,7 +447,12 @@ async def seed_mock_data() -> dict[str, Any]:
                 db,
                 user_id=test_user_id,
                 spot_id=paid_spot_id,
-                amount=draft_paid.total_value,
+                amount=draft_paid.total_value + db_access.configured_spot_creation_fee(is_prizedraw=False),
+            )
+            await _create_confirmed_creation_fee_for_spot(
+                db,
+                user_id=test_user_id,
+                spot_id=paid_spot_id,
             )
 
     return {

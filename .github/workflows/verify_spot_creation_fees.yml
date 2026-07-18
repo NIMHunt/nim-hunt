@@ -83,6 +83,10 @@ jobs:
           git apply --check /tmp/spot-fee-safety-delta.patch
           git apply /tmp/spot-fee-safety-delta.patch
 
+          printf '%s  %s\n' 357eb9dea47fcdd7e650444a8f2587c80c1a78ee716f9b15947fb14d0c0f8aaf .github/spot-fee-delta/ruff-cleanup.patch | sha256sum -c -
+          git apply --check .github/spot-fee-delta/ruff-cleanup.patch
+          git apply .github/spot-fee-delta/ruff-cleanup.patch
+
           rm -rf \
             .github/spot-fee-transfer \
             .github/spot-fee-compressed \
@@ -115,19 +119,25 @@ jobs:
       - name: Run complete Node suite
         run: npm --prefix helpers test
 
-      - name: Run static checks and dependency audits
+      - name: Run Python static checks
+        run: |
+          python -m py_compile *.py tests/*.py
+          ruff check .
+          git diff --check
+
+      - name: Run JavaScript and shell syntax checks
         shell: bash
         run: |
           set -euo pipefail
-          python -m py_compile *.py tests/*.py
-          ruff check .
           for file in static/*.js; do node --check --input-type=module < "$file"; done
           for file in helpers/*.mjs; do node --check "$file"; done
           for file in *.sh; do bash -n "$file"; done
+
+      - name: Run dependency audits
+        run: |
           python -m pip check
           python -m pip_audit
           npm audit --omit=dev --prefix helpers
-          git diff --check
 
       - name: Compile all templates
         run: |

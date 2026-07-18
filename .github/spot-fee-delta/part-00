@@ -1,0 +1,134 @@
+diff --git a/README.md b/README.md
+index eed0e3b1273ccc40320e2751d6cbb4bb536eb808..e3de4c84c50c5953b7a00888c64cddb0becc29b9 100644
+--- a/README.md
++++ b/README.md
+@@ -127,8 +127,14 @@ refund. If a draft is only partly funded, no creation fee is charged; the ordina
+ cancellation fee is applied to the confirmed deposit. Once deposits reach the full
+ Spot-plus-fee target, the creation fee is owed: cancellation waits until that fee
+ confirms, so a timing race cannot be used to avoid it. Cancellation also waits while
+-a deposit, payout, refund or cancellation-fee transaction is pending. An unfunded
+-draft should still be deleted normally.
++a deposit, payout, refund or cancellation-fee transaction is pending.
++
++A draft with no deposit history can still be deleted normally. Once any deposit
++transaction has been recorded, deletion is disabled so the Spot address and audit
++trail cannot disappear. A draft containing only failed deposit records can instead
++be archived as cancelled without an automatic refund; those records remain attached
++for manual review because a failed row may represent an abandoned hash or an
++on-chain wrong-wallet payment that NimHunt deliberately excluded from usable funds.
+ 
+ Already-confirmed claim payouts are also deducted before the refundable balance is
+ calculated. The Spot is marked cancelled only after every required outgoing leg
+diff --git a/db_access.py b/db_access.py
+index 4a8cce2e8c36088bb39f78e1321cd3a622d32eb1..43d437afae9518c9de1b309935b5c72fd7d0eb1e 100644
+--- a/db_access.py
++++ b/db_access.py
+@@ -1609,9 +1609,9 @@ async def delete_draft_spot(db, *, spot_id: int) -> None:
+         raise ValueError(f"spot id={spot_id} does not exist")
+     if int(spot[schema.SPOT_STATUS]) != const.SPOT_STATUS_DRAFT:
+         raise ValueError("only draft spots can be deleted")
+-    if await has_spot_nonfailed_deposit_transactions(db, spot_id=int(spot_id)):
++    if await has_spot_deposit_transactions(db, spot_id=int(spot_id)):
+         raise ValueError(
+-            "funded drafts cannot be deleted; cancel the draft from My Spots so remaining NIM can be returned safely"
++            "drafts with deposit history cannot be deleted; cancel the draft from My Spots so transaction records and any recoverable NIM are preserved"
+         )
+ 
+     cur = await db.execute(
+@@ -1818,7 +1818,10 @@ async def has_confirmed_spot_creation_fee_transaction(db, *, spot_id: int) -> bo
+         WHERE {schema.TRANS_SPOT_ID} = ?
+           AND {schema.TRANS_TYPE} = ?
+           AND {schema.TRANS_STATUS} = ?
++          AND {schema.TRANS_USER_ID} = ?
+           AND {schema.TRANS_AMOUNT} = ?
++          AND UPPER(REPLACE({schema.TRANS_FROM_ADDRESS}, ' ', '')) =
++              UPPER(REPLACE(?, ' ', ''))
+           AND UPPER(REPLACE({schema.TRANS_TO_ADDRESS}, ' ', '')) =
+               UPPER(REPLACE(?, ' ', ''))
+         LIMIT 1;
+@@ -1827,7 +1830,9 @@ async def has_confirmed_spot_creation_fee_transaction(db, *, spot_id: int) -> bo
+             int(spot_id),
+             const.TRANS_TYPE_CREATION_FEE,
+             const.TRANS_STATUS_CONFIRMED,
++            int(spot[schema.SPOT_CREATED_BY]),
+             fee_amount,
++            str(spot.get(schema.SPOT_DEPOSIT_ADDRESS) or ""),
+             str(spot.get(schema.SPOT_CREATION_FEE_ADDRESS) or ""),
+         ),
+     )
+@@ -3775,21 +3780,41 @@ async def create_spot_creation_fee_transaction(
+     if spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None:
+         raise ValueError("creation fee cannot be created after cancellation has started")
+ 
++    expected_owner_id = int(spot[schema.SPOT_CREATED_BY])
++    if int(user_id) != expected_owner_id:
++        raise ValueError("creation fee user does not match the Spot owner")
++
+     expected_amount = spot_creation_fee_amount(spot)
+     if expected_amount <= 0:
+         raise ValueError("this Spot has no creation fee")
+     if int(amount) != expected_amount:
+         raise ValueError("creation fee amount does not match the Spot snapshot")
+ 
++    allow_dev_placeholder = bool(
++        getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)
++    )
++    expected_from_address = wallet.normalise_nimiq_address(
++        str(spot.get(schema.SPOT_DEPOSIT_ADDRESS) or ""),
++        field_name="spot deposit address",
++        allow_dev_placeholder=allow_dev_placeholder,
++    )
++    submitted_from_address = wallet.normalise_nimiq_address(
++        from_address,
++        field_name="creation fee from_address",
++        allow_dev_placeholder=allow_dev_placeholder,
++    )
++    if submitted_from_address != expected_from_address:
++        raise ValueError("creation fee sender does not match the Spot deposit address")
++
+     expected_address = wallet.normalise_nimiq_address(
+         str(spot.get(schema.SPOT_CREATION_FEE_ADDRESS) or ""),
+         field_name="spot creation fee address",
+-        allow_dev_placeholder=bool(getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)),
++        allow_dev_placeholder=allow_dev_placeholder,
+     )
+     submitted_address = wallet.normalise_nimiq_address(
+         to_address,
+         field_name="creation fee to_address",
+-        allow_dev_placeholder=bool(getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)),
++        allow_dev_placeholder=allow_dev_placeholder,
+     )
+     if submitted_address != expected_address:
+         raise ValueError("creation fee recipient does not match the Spot snapshot")
+@@ -3806,12 +3831,12 @@ async def create_spot_creation_fee_transaction(
+     try:
+         return await _create_transaction(
+             db,
+-            user_id=user_id,
++            user_id=expected_owner_id,
+             spot_id=spot_id,
+             claim_id=None,
+             trans_type=const.TRANS_TYPE_CREATION_FEE,
+             amount=expected_amount,
+-            from_address=from_address,
++            from_address=expected_from_address,
+             to_address=expected_address,
+             tx_hash=tx_hash,
+         )
+diff --git a/public_html.py b/public_html.py
+index 247aa7d3eba238089cee292bce2439debc1e1218..2c1a61cb825d797da859da71858f4111c31a175f 100644
+--- a/public_html.py
++++ b/public_html.py
+@@ -586,11 +586,17 @@ def _transaction_status_label(status_code: int | None) -> str:
+     return "missing"
+ 
+ 
++def _address_compare_key(value: Any) -> str:
++    """Return a spacing-insensitive key for comparing Nimiq addresses."""
++    return "".join(str(value or "").strip().upper().split())
++
++
+ def _deposit_summary(
+     transactions: list[dict[str, Any]],
+     *,
+     total_value: i

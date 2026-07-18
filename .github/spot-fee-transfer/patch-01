@@ -1,0 +1,249 @@
+also
++  adds immutable Spot columns and uses schema version `2`. There is deliberately no
++  `ALTER` migration: existing development databases must be recreated, and public
++  deployments must start with a fresh volume/database for this release.
+ 
+ ### Testnet-to-mainnet cutover
+ 
+@@ -552,7 +602,7 @@ Mainnet is an environment and data-volume change, not a code rewrite:
+ 6. Do not copy testnet Spots, claims, transaction hashes, deposits or balances into
+    the mainnet database.
+ 7. Configure a separate private mainnet mnemonic or external signing setup.
+-8. Configure the real mainnet cancellation-fee address.
++8. Configure the real mainnet fee address and both desired creation-fee amounts.
+ 9. Set `NIMHUNT_DEPLOYMENT_MODE=production`, MainAlbatross, ID `24`, mainnet RPC
+    and mainnet Hub.
+ 10. Start the new service, allow validation to complete, then perform deliberately
+@@ -589,6 +639,8 @@ NIMHUNT_NIMIQ_MNEMONIC=SECRET_PRIVATE_TESTNET_MNEMONIC
+ NIMHUNT_NIMIQ_MNEMONIC_PASSWORD=SECRET_OPTIONAL_PASSPHRASE
+ NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND=node /app/helpers/nimiq_helper.mjs
+ NIMHUNT_NIMIQ_SEND_COMMAND=node /app/helpers/nimiq_helper.mjs
++NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=1
++NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=1
+ NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
+ NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS=OPERATOR_TESTNET_NQ_ADDRESS
+ ```
+@@ -614,6 +666,8 @@ NIMHUNT_NIMIQ_MNEMONIC=SECRET_PRIVATE_MAINNET_MNEMONIC
+ NIMHUNT_NIMIQ_MNEMONIC_PASSWORD=SECRET_OPTIONAL_PASSPHRASE
+ NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND=node /app/helpers/nimiq_helper.mjs
+ NIMHUNT_NIMIQ_SEND_COMMAND=node /app/helpers/nimiq_helper.mjs
++NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=1
++NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=1
+ NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
+ NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS=OPERATOR_MAINNET_NQ_ADDRESS
+ ```
+@@ -642,8 +696,8 @@ Before public launch:
+ 2. Store the private mnemonic and optional passphrase in the host's secret manager.
+ 3. Back up the mnemonic separately and verify recovery.
+ 4. Configure the correct deployment mode, network, ID, RPC and Hub.
+-5. Configure a real fee address and desired fee amount.
+-6. Use a fresh network-specific persistent database.
++5. Configure a real fee address, both creation fees and the cancellation fee.
++6. Use a fresh schema-version-2 network-specific persistent database.
+ 7. Serve over HTTPS with one application replica and worker.
+ 8. Confirm strict startup and `/healthz`.
+ 9. Complete a deliberately small-value end-to-end cycle.
+@@ -741,7 +795,7 @@ npm audit --omit=dev --prefix helpers
+ | `db_access.py` | validated database reads and writes |
+ | `cache.py` | in-memory public/owner cache |
+ | `wallet.py` | address validation and signer command boundary |
+-| `trans_updater.py` | blockchain verification and outgoing payments |
++| `trans_updater.py` | blockchain verification, creation-fee recovery and outgoing payments |
+ | `settlement_updater.py` | duration-claim and Prizedraw settlement |
+ | `helpers/` | official Nimiq JS helper and tests |
+ | `templates/` | Jinja page shells |
+@@ -758,6 +812,8 @@ npm audit --omit=dev --prefix helpers
+ - Public RPC and map-tile services have no NimHunt-specific availability guarantee.
+ - Location evidence reduces casual misuse but cannot make phone GPS impossible to spoof.
+ - On-chain transfers are irreversible; use TestAlbatross and small values first.
++- An ambiguous creation-fee send remains pending instead of being retried automatically;
++  this may require manual reconciliation, but prevents charging the same Spot twice.
+ 
+ These trade-offs are intentional and proportionate to the project's competition
+ scope. They should be revisited before substantially increasing user counts or
+ diff --git a/constants.py b/constants.py
+ index d860e49..83e0060 100644
+ --- a/constants.py
+ +++ b/constants.py
+@@ -231,9 +231,28 @@ MIN_STANDARD_CLAIM_PAYOUT = MIN_STANDARD_CLAIM_PAYOUT_NIM * LUNA_PER_NIM
+ MIN_PRIZEDRAW_PRIZE_PAYOUT_NIM = 1000
+ MIN_PRIZEDRAW_PRIZE_PAYOUT = MIN_PRIZEDRAW_PRIZE_PAYOUT_NIM * LUNA_PER_NIM
+ 
+-# Cancellation rules. The operator supplies a human-readable NIM fee, which is
+-# converted exactly to Luna at import time. The fee address remains an obvious
+-# development placeholder until a real pooled-fee address is configured.
++# Platform-fee rules. Creation fees are snapshotted onto each new Spot so a
++# later configuration change cannot alter an already-created draft's funding
++# target. Both creation and cancellation fees use the same operator-controlled
++# destination address.
++STANDARD_SPOT_CREATION_FEE = _env_nim_amount(
++    "NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM",
++    "1",
++    luna_per_nim=LUNA_PER_NIM,
++)
++PRIZEDRAW_SPOT_CREATION_FEE = _env_nim_amount(
++    "NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM",
++    "1",
++    luna_per_nim=LUNA_PER_NIM,
++)
++
++# This valid TestAlbatross address is derived from the repository's public
++# development mnemonic at a reserved path. It is convenient for local testing
++# only: anyone can derive its key, so public deployments explicitly reject it.
++DEV_PLATFORM_FEE_ADDRESS = "NQ35 6EUX JD08 6F88 KYA2 EDMC V3BC PXLB ELSB"
++
++# The operator supplies a human-readable cancellation fee, converted exactly
++# to Luna at import time. One shared address receives both fee types.
+ SPOT_CANCELLATION_FEE = _env_nim_amount(
+     "NIMHUNT_SPOT_CANCELLATION_FEE_NIM",
+     "1",
+@@ -241,7 +260,7 @@ SPOT_CANCELLATION_FEE = _env_nim_amount(
+ )
+ SPOT_CANCELLATION_FEE_ADDRESS = os.getenv(
+     "NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS",
+-    "NQ00 NIMHUNT DEV CANCELLATION FEE POOL",
++    DEV_PLATFORM_FEE_ADDRESS,
+ ).strip()
+ 
+ # Draft SPOT defaults used when a creator has only entered the initial title.
+@@ -435,6 +454,9 @@ TRANS_TYPE_CLAIM = 20
+ # Platform fee transaction.
+ TRANS_TYPE_PLAT_FEE = 30
+ 
++# One-time fee charged after a Spot's full funding target confirms.
++TRANS_TYPE_CREATION_FEE = 31
++
+ 
+ 
+ # -----------------------------
+ diff --git a/database.py b/database.py
+ index 4596908..11a88c2 100644
+ --- a/database.py
+ +++ b/database.py
+@@ -43,6 +43,7 @@ from constants import (
+     TRANS_STATUS_PENDING,
+     TRANS_TYPE_CANCEL_SPOT,
+     TRANS_TYPE_CLAIM,
++    TRANS_TYPE_CREATION_FEE,
+     TRANS_TYPE_PLAT_FEE,
+     USER_STATUS_ACTIVE,
+ )
+@@ -58,7 +59,7 @@ DB_PATH = os.getenv("NIMHUNT_DB_PATH", "records.db").strip() or "records.db"
+ # instead of carrying schema migrations. Increment this whenever the schema
+ # changes. Existing non-empty databases with another version are rejected
+ # with a clear instruction to recreate them.
+-SCHEMA_VERSION = 1
++SCHEMA_VERSION = 2
+ 
+ # Durable chain and deployment identity prevents a TestAlbatross database from
+ # being silently reinterpreted as MainAlbatross, and prevents a local/mock
+@@ -196,6 +197,8 @@ SPOT_MAX_TOTAL_CLAIMS = "max_total_claims"          # Total claim/entry limit. 0
+ SPOT_USE_PASSWORD = "use_password"                    # Boolean-ish. 1 means CLAIM_CODE rows are required.
+ 
+ SPOT_TOTAL_VALUE = "total_value"                    # Total value in Luna
++SPOT_CREATION_FEE = "creation_fee"                  # Snapshotted one-time creation fee in Luna
++SPOT_CREATION_FEE_ADDRESS = "creation_fee_address"  # Snapshotted fee recipient
+ 
+ SPOT_STARTS_AT = "starts_at"                        # Optional Unix timestamp
+ SPOT_ENDS_AT = "ends_at"                            # Seconds after starts_at when the SPOT ends
+@@ -244,6 +247,8 @@ SPOT_IMMUTABLE_FIELDS = {
+     SPOT_DEPOSIT_KEY_INDEX,
+     SPOT_DEPOSIT_KEY_PATH,
+     SPOT_DEPOSIT_KEY_VERSION,
++    SPOT_CREATION_FEE,
++    SPOT_CREATION_FEE_ADDRESS,
+     SPOT_CREATED_AT,
+ }
+ 
+@@ -297,6 +302,11 @@ CREATE TABLE IF NOT EXISTS {SPOT_TABLE_NAME} (
+     {SPOT_TOTAL_VALUE} INTEGER NOT NULL
+         DEFAULT {MIN_SPOT_TOTAL_VALUE},
+ 
++    {SPOT_CREATION_FEE} INTEGER NOT NULL
++        DEFAULT 0,
++
++    {SPOT_CREATION_FEE_ADDRESS} TEXT NOT NULL,
++
+     {SPOT_STARTS_AT} INTEGER,
+ 
+     -- Seconds after starts_at when the SPOT ends. This is intentionally
+@@ -324,6 +334,8 @@ CREATE TABLE IF NOT EXISTS {SPOT_TABLE_NAME} (
+     CHECK ({SPOT_MAX_TOTAL_CLAIMS} BETWEEN {MIN_PRIZEDRAW_MAX_TOTAL_CLAIMS} AND {MAX_SPOT_MAX_TOTAL_CLAIMS}),
+     CHECK ({SPOT_USE_PASSWORD} IN (0, 1)),
+     CHECK ({SPOT_TOTAL_VALUE} >= {MIN_SPOT_TOTAL_VALUE}),
++    CHECK ({SPOT_CREATION_FEE} >= 0),
++    CHECK (TRIM({SPOT_CREATION_FEE_ADDRESS}) != ''),
+ 
+     CHECK ({SPOT_STARTS_AT} IS NULL OR {SPOT_STARTS_AT} > 0),
+     CHECK ({SPOT_ENDS_AT} BETWEEN {MIN_SPOT_ENDS_AFTER_SECONDS} AND {MAX_SPOT_ENDS_AFTER_SECONDS}),
+@@ -817,7 +829,7 @@ TRANS_USER_ID = "user_id"                    # FK from USER.id
+ TRANS_SPOT_ID = "spot_id"                    # Optional FK from SPOT.id
+ TRANS_CLAIM_ID = "claim_id"                  # Optional FK from CLAIM.id
+ 
+-TRANS_TYPE = "type"                          # Enum-ish. FILL_SPOT, CANCEL_SPOT, CLAIM, PLAT_FEE
++TRANS_TYPE = "type"                          # Enum-ish. FILL_SPOT, CANCEL_SPOT, CLAIM, PLAT_FEE, CREATION_FEE
+ TRANS_AMOUNT = "amount"                      # Amount in Luna
+ 
+ TRANS_FROM_ADDRESS = "from_address"          # Sender Nimiq address
+@@ -939,6 +951,19 @@ WHERE {TRANS_SPOT_ID} IS NOT NULL
+ """
+ 
+ 
++# Prevents duplicate active creation-fee sends while keeping a definitively
++# failed on-chain attempt retryable. Ambiguous local intents remain pending and
++# therefore continue to block automatic retries.
++TRANS_INDEX_SPOT_ACTIVE_CREATION_FEE_UNIQUE = "idx_trans_spot_active_creation_fee_unique"
++TRANS_INDEX_SPOT_ACTIVE_CREATION_FEE_UNIQUE_QUERY = f"""
++CREATE UNIQUE INDEX IF NOT EXISTS {TRANS_INDEX_SPOT_ACTIVE_CREATION_FEE_UNIQUE}
++ON {TRANS_TABLE_NAME}({TRANS_SPOT_ID}, {TRANS_TYPE})
++WHERE {TRANS_SPOT_ID} IS NOT NULL
++  AND {TRANS_TYPE} = {TRANS_TYPE_CREATION_FEE}
++  AND {TRANS_STATUS} != {TRANS_STATUS_FAILED};
++"""
++
++
+ # Helps queue/review pending, confirmed, and failed transactions.
+ TRANS_INDEX_STATUS_CREATED = "idx_trans_status_created"
+ TRANS_INDEX_STATUS_CREATED_QUERY = f"""
+@@ -1591,6 +1616,7 @@ async def init_db():
+         await db.executescript(TRANS_INDEX_CLAIM_QUERY)
+         await db.executescript(TRANS_INDEX_CLAIM_ACTIVE_PAYOUT_UNIQUE_QUERY)
+         await db.executescript(TRANS_INDEX_SPOT_ACTIVE_CANCELLATION_UNIQUE_QUERY)
++        await db.executescript(TRANS_INDEX_SPOT_ACTIVE_CREATION_FEE_UNIQUE_QUERY)
+         await db.executescript(TRANS_INDEX_STATUS_CREATED_QUERY)
+         await db.executescript(TRANS_INDEX_TYPE_STATUS_CREATED_QUERY)
+         await db.executescript(TRANS_TRIGGER_SET_COMPLETED_AT_UPDATE_QUERY)
+ diff --git a/db_access.py b/db_access.py
+ index 15773d6..4a8cce2 100644
+ --- a/db_access.py
+ +++ b/db_access.py
+@@ -42,15 +42,19 @@ import wallet
+ # ---------------------------------------------------------------------------
+ 
+ @asynccontextmanager
+-async def transaction(db) -> AsyncIterator[None]:
++async def transaction(db, *, immediate: bool = False) -> AsyncIterator[None]:
+     """Small transaction wrapper for an existing aiosqlite connection.
+ 
++    ``immediate=True`` acquires SQLite's write reservation before any financial
++    eligibility checks. Use it when a competing workflow must not slip between
++    a balance/state check and creation of a durable transaction intent.
++
+     SQLite does not support arbitrary nested BEGIN blocks. If a caller needs
+     nested transaction-like behaviour later, use SQLite SAVEPOINTs deliberately;
+     do not silently nest this wrapper.
+     """
+     try:
+-        await db.execute("BEGIN;")
++        await db.execute("BEGIN IMMEDIATE;" if immediate else "BEGIN;")
+     except sqlite3.OperationalError as e:
+         raise RuntimeError(
+             "Nested transaction detected. Open one transaction at the top level."
+@@ -337,6 +341,23 @@ def _minimum_payout_nim(*, is_prizedraw: bool) -> int:
+     return int(getattr(const, "MIN_STANDARD_CLAIM_PAYOUT_NIM", 100))
+ 
+ 
++def configured_spot_creation_fee(*, is_prizedraw: bool) -> int:
++    """Return the creation fee configured for a newly-created Spot."""
++    if is_prizedraw:
++        return max(0, int(getattr(co

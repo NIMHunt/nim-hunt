@@ -98,10 +98,12 @@ jobs:
           import sqlite3
 
           connection = sqlite3.connect(os.environ["NIMHUNT_DB_PATH"])
-          version = connection.execute(
-              "SELECT value FROM app_metadata WHERE key = 'schema_version'"
-          ).fetchone()
-          assert version == ("2",), version
+          version = connection.execute("PRAGMA user_version;").fetchone()
+          assert version == (2,), version
+          metadata = dict(connection.execute("SELECT key, value FROM app_metadata"))
+          assert metadata["nimiq_network"] == "TestAlbatross", metadata
+          assert metadata["nimiq_network_id"] == "5", metadata
+          assert metadata["deployment_mode"] == "development", metadata
           connection.close()
           PY
 

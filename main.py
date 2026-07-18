@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import urllib.error
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -162,16 +163,16 @@ def validate_deployment_safety() -> None:
         # A private/custom TestAlbatross RPC hostname may not contain the word
         # "testnet", so reject only endpoints that clearly identify mainnet.
         if rpc_host == "rpc.nimiqwatch.com" or "mainnet" in rpc_host:
-            unsafe.append("NIMIQ_RPC_URL must not point at a mainnet RPC endpoint")
+            unsafe.append("NIMHUNT_NIMIQ_RPC_URL must not point at a mainnet RPC endpoint")
         if "testnet" not in hub_host:
             unsafe.append(
-                "NIMIQ_HUB_URL must clearly identify the TestAlbatross/testnet Hub"
+                "NIMHUNT_NIMIQ_HUB_URL must clearly identify the TestAlbatross/testnet Hub"
             )
     elif mode == "production":
         if "testnet" in rpc_host:
-            unsafe.append("NIMIQ_RPC_URL must point at a mainnet RPC endpoint")
+            unsafe.append("NIMHUNT_NIMIQ_RPC_URL must point at a mainnet RPC endpoint")
         if "testnet" in hub_host or "nimiq-testnet" in hub_host:
-            unsafe.append("NIMIQ_HUB_URL must point at the mainnet Hub")
+            unsafe.append("NIMHUNT_NIMIQ_HUB_URL must point at the mainnet Hub")
 
     database_path = Path(str(database.DB_PATH)).expanduser()
     if not database_path.is_absolute():
@@ -299,6 +300,16 @@ async def verify_public_rpc_network() -> None:
             timeout_seconds=timeout_seconds,
         )
         return
+    except urllib.error.HTTPError as exc:
+        # Nimiqwatch returns unsupported JSON-RPC methods as HTTP 400 instead
+        # of a successful HTTP response containing a JSON-RPC error object.
+        # A 400 therefore gets the same safe latest-block fallback; any other
+        # HTTP error remains fatal.
+        if exc.code != 400:
+            raise RuntimeError(
+                "Public deployment RPC network validation failed; check the selected "
+                "Nimiq network and RPC endpoint"
+            ) from None
     except RuntimeError as exc:
         message = str(exc).lower()
         if "method not found" not in message and "-32601" not in message:

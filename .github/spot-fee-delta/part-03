@@ -1,0 +1,146 @@
+D,
+         )
+         async with schema.get_db() as db:
+-            await db_access.delete_draft_spot(db, spot_id=failed_id)
+-            await db.commit()
+-            self.assertIsNone(await db_access.get_spot(db, spot_id=failed_id))
++            with self.assertRaisesRegex(ValueError, "deposit history cannot be deleted"):
++                await db_access.delete_draft_spot(db, spot_id=failed_id)
++
++            result = await trans_updater.submit_spot_cancellation_transactions(
++                db,
++                spot_id=failed_id,
++            )
++            final_spot = await db_access.get_spot(db, spot_id=failed_id)
++            transactions = await db_access.get_transactions_by_spot(
++                db,
++                spot_id=failed_id,
++                limit=db_access.MAX_LIMIT,
++            )
++
++        self.assertTrue(result["cancelled"])
++        self.assertTrue(result["manual_review_required"])
++        self.assertEqual(result["failed_deposit_count"], 1)
++        self.assertEqual(result["refund_amount"], 0)
++        self.assertEqual(final_spot[schema.SPOT_STATUS], const.SPOT_STATUS_CANCELLED)
++        self.assertEqual(len(transactions), 1)
++        self.assertEqual(transactions[0][schema.TRANS_STATUS], const.TRANS_STATUS_FAILED)
+ 
+ 
+ class CreationFeeDepositApiTests(SpotCreationFeeFixture):
+@@ -686,6 +733,53 @@ class CreationFeePresentationTests(unittest.TestCase):
+         self.assertEqual(summary["fee_status"], "pending")
+         self.assertEqual(summary["pending_fee_amount"], fee)
+ 
++
++    def test_cancellation_summary_flags_failed_deposits_for_manual_review(self):
++        amount = 7 * const.LUNA_PER_NIM
++        summary = public_html._cancellation_summary(
++            [
++                {
++                    schema.TRANS_TYPE: const.TRANS_TYPE_FILL_SPOT,
++                    schema.TRANS_STATUS: const.TRANS_STATUS_FAILED,
++                    schema.TRANS_AMOUNT: amount,
++                }
++            ]
++        )
++        self.assertTrue(summary["manual_review_required"])
++        self.assertEqual(summary["failed_deposit_count"], 1)
++        self.assertEqual(summary["failed_deposit_amount"], amount)
++        self.assertEqual(summary["remaining_amount"], 0)
++
++    def test_confirmed_fee_to_wrong_address_does_not_unlock_publishing_ui(self):
++        total = 100 * const.LUNA_PER_NIM
++        fee = const.LUNA_PER_NIM
++        deposit_address = "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF"
++        summary = public_html._deposit_summary(
++            total_value=total,
++            creation_fee=fee,
++            deposit_address=deposit_address,
++            creation_fee_address=const.DEV_PLATFORM_FEE_ADDRESS,
++            transactions=[
++                {
++                    schema.TRANS_TYPE: const.TRANS_TYPE_FILL_SPOT,
++                    schema.TRANS_STATUS: const.TRANS_STATUS_CONFIRMED,
++                    schema.TRANS_AMOUNT: total + fee,
++                },
++                {
++                    schema.TRANS_TYPE: const.TRANS_TYPE_CREATION_FEE,
++                    schema.TRANS_STATUS: const.TRANS_STATUS_CONFIRMED,
++                    schema.TRANS_AMOUNT: fee,
++                    schema.TRANS_FROM_ADDRESS: deposit_address,
++                    schema.TRANS_TO_ADDRESS: "NQ52 J5R7 4U5Y 5XDL YKJ2 96ME 3AQ9 V7DP 8MX8",
++                },
++            ],
++        )
++        self.assertTrue(summary["funding_complete"])
++        self.assertFalse(summary["fee_paid"])
++        self.assertEqual(summary["matching_confirmed_fee_amount"], 0)
++        self.assertEqual(summary["fee_status"], "verification_mismatch")
++        self.assertEqual(summary["status"], "processing")
++
+     def test_pending_deposit_is_counted_and_blocks_a_second_full_request(self):
+         total = 100 * const.LUNA_PER_NIM
+         pending = 40 * const.LUNA_PER_NIM
+diff --git a/trans_updater.py b/trans_updater.py
+index 1689fbee7c2f5446a2e200d3acf7a69e684954e6..3097775e5813df2d61dbabcc18176a62fc85d4c1 100644
+--- a/trans_updater.py
++++ b/trans_updater.py
+@@ -1804,31 +1804,61 @@ async def submit_spot_cancellation_transactions(
+         # the durable marker. Once marked, the database trigger rejects inserts.
+         await db_access.mark_spot_cancellation_started(db, spot_id=int(spot_id))
+ 
+-        transactions = await db_access.get_transactions_by_spot(db, spot_id=int(spot_id), limit=db_access.MAX_LIMIT)
+-        confirmed_deposits = [
+-            trans for trans in transactions
++        transactions = await db_access.get_transactions_by_spot(
++            db,
++            spot_id=int(spot_id),
++            limit=db_access.MAX_LIMIT,
++        )
++        deposit_transactions = [
++            trans
++            for trans in transactions
+             if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_FILL_SPOT
+-            and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+         ]
+-        confirmed_deposits.sort(key=lambda row: int(row.get(schema.TRANS_CREATED_AT) or 0))
+-        confirmed_deposit_total = sum(int(trans.get(schema.TRANS_AMOUNT) or 0) for trans in confirmed_deposits)
++        confirmed_deposits = [
++            trans
++            for trans in deposit_transactions
++            if int(
++                trans.get(schema.TRANS_STATUS)
++                if trans.get(schema.TRANS_STATUS) is not None
++                else -1
++            )
++            == const.TRANS_STATUS_CONFIRMED
++        ]
++        failed_deposits = [
++            trans
++            for trans in deposit_transactions
++            if int(
++                trans.get(schema.TRANS_STATUS)
++                if trans.get(schema.TRANS_STATUS) is not None
++                else -1
++            )
++            == const.TRANS_STATUS_FAILED
++        ]
++        confirmed_deposits.sort(
++            key=lambda row: int(row.get(schema.TRANS_CREATED_AT) or 0)
++        )
++        confirmed_deposit_total = sum(
++            int(trans.get(schema.TRANS_AMOUNT) or 0) for trans in confirmed_deposits
++        )
++        failed_deposit_total = sum(
++            int(trans.get(schema.TRANS_AMOUNT) or 0) for trans in failed_deposits
++        )
+ 
+         if spot_status == const.SPOT_STATUS_DRAFT:
+             pending_deposit = any(
+-                int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_FILL_SPOT
+-                and int(
++                int(
+                     trans.get(schema.TRANS_STATUS)
+                     if trans.get(schema.TRANS_STATUS) is not None
+                

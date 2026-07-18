@@ -23,6 +23,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          base64 -d .github/spot-fee-transfer/patch-06.b64 > .github/spot-fee-transfer/patch-06
+          base64 -d .github/spot-fee-transfer/patch-07.b64 > .github/spot-fee-transfer/patch-07
+          base64 -d .github/spot-fee-transfer/patch-09.b64 > .github/spot-fee-transfer/patch-09
           chunks=(
             .github/spot-fee-transfer/patch-00
             .github/spot-fee-transfer/patch-01

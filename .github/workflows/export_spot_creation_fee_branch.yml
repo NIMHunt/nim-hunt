@@ -1,0 +1,31 @@
+name: Export Spot creation fee branch
+
+on:
+  push:
+    branches:
+      - agent/spot-creation-fees
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/spot-creation-fees
+      - name: Archive branch
+        run: |
+          tar \
+            --exclude=.git \
+            --exclude='**/__pycache__' \
+            --exclude='*.pyc' \
+            -czf /tmp/nim-hunt-spot-fees.tar.gz .
+      - name: Upload branch snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: nim-hunt-spot-fees
+          path: /tmp/nim-hunt-spot-fees.tar.gz
+          retention-days: 1

@@ -1,0 +1,271 @@
+sitive amount allows deliberate/manual
++            # part-funding without weakening safety. Chain verification later
++            # replaces this expectation with the actual confirmed amount. Never
++            # record more than the current server-calculated amount due.
++            submitted_amount = min(
++                amount_due,
++                max(1, int(payload.amount if payload.amount is not None else amount_due)),
++            )
+             deposit_record = await trans_updater.record_spot_deposit_transaction(
+                 db,
+                 user_id=user_id,
+                 spot_id=spot_id,
+-                amount=amount_due,
++                amount=submitted_amount,
+                 from_address=payload.from_address,
+                 tx_hash=payload.tx_hash,
+                 to_address=spot.get(schema.SPOT_DEPOSIT_ADDRESS),
+@@ -2582,7 +2708,10 @@ async def my_spots_deposit_submitted_api(spot_id: int, payload: DepositSubmitted
+ async def my_spots_publish_api(spot_id: int, payload: HomeSessionRequest) -> JSONResponse:
+     """Publish one complete, fully funded draft SPOT."""
+     async with get_db() as db:
+-        async with db_access.transaction(db):
++        # Publishing and cancellation are competing terminal draft actions. A
++        # write reservation prevents either workflow from committing based on a
++        # stale eligibility decision.
++        async with db_access.transaction(db, immediate=True):
+             user, meta, http_status = await _identify_private_page_user(db, payload)
+             if user is None:
+                 return JSONResponse(meta, status_code=http_status)
+@@ -2615,7 +2744,7 @@ async def my_spots_publish_api(spot_id: int, payload: HomeSessionRequest) -> JSO
+ 
+ @router.post("/api/my-spots/{spot_id}/cancel")
+ async def my_spots_cancel_api(spot_id: int, payload: HomeSessionRequest) -> JSONResponse:
+-    """Cancel one owner-created published standard SPOT and submit refund/fee sends."""
++    """Cancel one funded draft or published standard Spot safely."""
+     async with get_db() as db:
+         async with db_access.transaction(db):
+             user, meta, http_status = await _identify_private_page_user(db, payload)
+ diff --git a/spoof.py b/spoof.py
+ index 141e76f..58efdf4 100644
+ --- a/spoof.py
+ +++ b/spoof.py
+@@ -147,7 +147,13 @@ async def _insert_mock_user(db, user: MockUser, *, now: int) -> None:
+     )
+ 
+ 
+-async def _create_mock_spot(db, spot: MockSpot, *, now: int) -> int:
++async def _create_mock_spot(
++    db,
++    spot: MockSpot,
++    *,
++    now: int,
++    apply_final_status: bool = True,
++) -> int:
+     starts_at = None if spot.starts_offset_seconds is None else int(now + spot.starts_offset_seconds)
+     # SPOT.ends_at stores seconds after starts_at, not an absolute unix timestamp.
+     if spot.ends_offset_seconds is None:
+@@ -175,7 +181,7 @@ async def _create_mock_spot(db, spot: MockSpot, *, now: int) -> int:
+         country=TEST_COUNTRY,
+     )
+ 
+-    if spot.status != const.SPOT_STATUS_DRAFT:
++    if apply_final_status and spot.status != const.SPOT_STATUS_DRAFT:
+         await db_access.modify_spot_status(db, spot_id=spot_id, status=spot.status)
+ 
+     return int(spot_id)
+@@ -216,6 +222,36 @@ async def _create_confirmed_deposit_for_spot(
+     return int(trans_id)
+ 
+ 
++async def _create_confirmed_creation_fee_for_spot(
++    db,
++    *,
++    user_id: int,
++    spot_id: int,
++) -> int | None:
++    spot = await db_access.get_spot(db, spot_id=int(spot_id))
++    if spot is None:
++        raise RuntimeError(f"Mock Spot {spot_id} disappeared")
++    amount = int(spot.get(schema.SPOT_CREATION_FEE) or 0)
++    if amount <= 0:
++        return None
++
++    trans_id = await db_access.create_spot_creation_fee_transaction(
++        db,
++        user_id=int(user_id),
++        spot_id=int(spot_id),
++        amount=amount,
++        from_address=str(spot[schema.SPOT_DEPOSIT_ADDRESS]),
++        to_address=str(spot[schema.SPOT_CREATION_FEE_ADDRESS]),
++        tx_hash="cfee" + f"{spot_id:060x}"[-60:],
++    )
++    await db_access.set_transaction_status_to_confirmed(
++        db,
++        trans_id=int(trans_id),
++        block_number=1_234_568,
++    )
++    return int(trans_id)
++
++
+ async def seed_mock_data() -> dict[str, Any]:
+     """Recreate the database, seed a dynamic mock dataset, and return a summary."""
+     if bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
+@@ -371,14 +407,33 @@ async def seed_mock_data() -> dict[str, Any]:
+ 
+             spot_ids: list[int] = []
+             for spot in normal_spots:
+-                spot_id = await _create_mock_spot(db, spot, now=now)
++                # Funding and creation-fee transactions are draft-only lifecycle
++                # operations. Seed them first, then move the mock Spot to its final
++                # published status just as the real application does.
++                spot_id = await _create_mock_spot(
++                    db,
++                    spot,
++                    now=now,
++                    apply_final_status=False,
++                )
+                 spot_ids.append(spot_id)
+                 await _create_confirmed_deposit_for_spot(
+                     db,
+                     user_id=spot.user_id,
+                     spot_id=spot_id,
+-                    amount=spot.total_value,
++                    amount=spot.total_value + db_access.configured_spot_creation_fee(is_prizedraw=False),
+                 )
++                await _create_confirmed_creation_fee_for_spot(
++                    db,
++                    user_id=spot.user_id,
++                    spot_id=spot_id,
++                )
++                if spot.status != const.SPOT_STATUS_DRAFT:
++                    await db_access.modify_spot_status(
++                        db,
++                        spot_id=spot_id,
++                        status=spot.status,
++                    )
+ 
+             title_only_draft_id = await _create_title_only_draft(
+                 db,
+@@ -392,7 +447,12 @@ async def seed_mock_data() -> dict[str, Any]:
+                 db,
+                 user_id=test_user_id,
+                 spot_id=paid_spot_id,
+-                amount=draft_paid.total_value,
++                amount=draft_paid.total_value + db_access.configured_spot_creation_fee(is_prizedraw=False),
++            )
++            await _create_confirmed_creation_fee_for_spot(
++                db,
++                user_id=test_user_id,
++                spot_id=paid_spot_id,
+             )
+ 
+     return {
+ diff --git a/static/create_spot.js b/static/create_spot.js
+ index fcc7434..020773a 100644
+ --- a/static/create_spot.js
+ +++ b/static/create_spot.js
+@@ -1101,6 +1101,10 @@ function populateForm(spot) {
+     });
+     els.description.value = spot.description || '';
+ 
++    if (els.delete) {
++        els.delete.hidden = spot.can_delete === false;
++    }
++
+     configureSpotTypeControls(spot);
+     setSliderValue('radius', Number(spot.radius || MIN_RADIUS), { updateState: false });
+     setSliderValue('duration', Number(spot.claim_duration ?? MIN_DURATION), { updateState: false });
+ diff --git a/static/interface_text.js b/static/interface_text.js
+ index 30df2d8..585a0cc 100644
+ --- a/static/interface_text.js
+ +++ b/static/interface_text.js
+@@ -175,6 +175,7 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
+         draftDeposit: {
+             ready: 'Ready',
+             partial: (amountText) => `Partial Deposit - ${amountText}`,
++            processingFee: 'Creation Fee Processing',
+             missing: 'No Deposit',
+         },
+         ownerActions: {
+@@ -182,6 +183,7 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
+             deposit: 'Deposit',
+             publish: 'Publish',
+             cancel: 'Cancel Spot',
++            cancelDraft: 'Cancel Draft',
+             publishStartTimePastTooltip: 'Change the start time before publishing.',
+             publishUnavailableTooltip: 'This draft cannot be published yet.',
+         },
+@@ -191,6 +193,11 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
+             confirming: 'Confirming…',
+             cancel: 'Cancel',
+             confirmBody: ({ title, amountText }) => `Deposit ${amountText} for '${title}'?`,
++            confirmLead: ({ title }) => `Deposit NIM for '${title}'?`,
++            spotFundingLine: (amountText) => `Spot funding: ${amountText}.`,
++            creationFeeLine: (amountText) => `Creation fee: ${amountText}.`,
++            creationFeeNotice: 'The creation fee is deducted after full funding and is not refundable once confirmed.',
++            depositNowLine: (amountText) => `Deposit now: ${amountText}.`,
+             intentFailed: {
+                 title: 'Could not prepare deposit',
+                 body: 'The deposit request could not be prepared. Refresh My Spots and try again.',
+ diff --git a/static/my_spots.js b/static/my_spots.js
+ index b51f627..04edf48 100644
+ --- a/static/my_spots.js
+ +++ b/static/my_spots.js
+@@ -493,13 +493,14 @@ function draftDepositText(spot) {
+ 
+     if (status === 'ready') return TEXT.draftDeposit.ready;
+     if (status === 'partial') return TEXT.draftDeposit.partial(nimFromLunaText(deposit.amount));
++    if (status === 'processing') return TEXT.draftDeposit.processingFee;
+     return TEXT.draftDeposit.missing;
+ }
+ 
+ function draftDepositClass(spot) {
+     const status = spot.deposit?.status || 'missing';
+     if (status === 'ready') return 'is-ready';
+-    if (status === 'partial') return 'is-partial';
++    if (status === 'partial' || status === 'processing') return 'is-partial';
+     return 'is-missing';
+ }
+ 
+@@ -640,7 +641,9 @@ function buildOwnerActions(spot) {
+ 
+     if (spot.can_cancel) {
+         actions.append(ownerActionButton({
+-            text: TEXT.ownerActions.cancel,
++            text: spot.status_label === 'draft'
++                ? TEXT.ownerActions.cancelDraft
++                : TEXT.ownerActions.cancel,
+             className: 'red',
+             onClick: () => openCancelModal(spot),
+         }));
+@@ -937,11 +940,26 @@ async function openDepositModal(spot) {
+         state.depositIntent = data;
+ 
+         const amountText = nimFromLunaText(data.amount || spot.deposit?.amount_due || 0);
++        const spotValueText = nimFromLunaText(data.spot_value ?? spot.total_value ?? 0);
++        const creationFeeText = nimFromLunaText(data.creation_fee ?? spot.creation_fee ?? 0);
+         els.depositTitle.textContent = TEXT.deposit.title;
+-        els.depositBody.textContent = TEXT.deposit.confirmBody({
+-            title: data.spot?.title || spot.title || SPOT_TEXT.fallbackTitle,
+-            amountText,
+-        });
++        const title = data.spot?.title || spot.title || SPOT_TEXT.fallbackTitle;
++        const creationFee = Number(data.creation_fee ?? spot.creation_fee ?? 0);
++        const lines = [
++            TEXT.deposit.confirmLead({ title }),
++            TEXT.deposit.spotFundingLine(spotValueText),
++            TEXT.deposit.creationFeeLine(creationFeeText),
++            TEXT.deposit.depositNowLine(amountText),
++        ];
++        if (creationFee > 0) {
++            lines.push(TEXT.deposit.creationFeeNotice);
++        }
++        els.depositBody.replaceChildren(...lines.map((line) => {
++            const span = document.createElement('span');
++            span.className = 'cancel-spot-body-line';
++            span.textContent = line;
++            return span;
++        }));
+         els.depositConfirm.textContent = TEXT.deposit.confirm;
+         els.depositCancel.textContent = TEXT.deposit.cancel;
+         els.depositConfirm.disabled = false;
+ diff --git a/tests/test_deployment_modes.py b/tests/test_deployment_modes.py
+ index ca6a4f0..7696f38 100644
+ --- a/tests/test_deployment_modes.py
+ +++ b/tests/test_deployment_modes.py
+@@ -27,12 +27,15 @@ def clean_environment() -> dict[str, str]:
+         "NIMHUNT_NIMIQ_NETWORK_ID",
+         "NIMHUNT_NIMIQ_RPC_URL",
+         "NIMHUNT_NIMIQ_HUB_URL",
++        "NIMHUNT_NIMIQ_TR

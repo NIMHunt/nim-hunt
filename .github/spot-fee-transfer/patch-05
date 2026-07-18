@@ -36,10 +36,10 @@ sitive amount allows deliberate/manual
      async with get_db() as db:
          async with db_access.transaction(db):
              user, meta, http_status = await _identify_private_page_user(db, payload)
- diff --git a/spoof.py b/spoof.py
- index 141e76f..58efdf4 100644
- --- a/spoof.py
- +++ b/spoof.py
+diff --git a/spoof.py b/spoof.py
+index 141e76f..58efdf4 100644
+--- a/spoof.py
++++ b/spoof.py
 @@ -147,7 +147,13 @@ async def _insert_mock_user(db, user: MockUser, *, now: int) -> None:
      )
  
@@ -151,10 +151,10 @@ sitive amount allows deliberate/manual
              )
  
      return {
- diff --git a/static/create_spot.js b/static/create_spot.js
- index fcc7434..020773a 100644
- --- a/static/create_spot.js
- +++ b/static/create_spot.js
+diff --git a/static/create_spot.js b/static/create_spot.js
+index fcc7434..020773a 100644
+--- a/static/create_spot.js
++++ b/static/create_spot.js
 @@ -1101,6 +1101,10 @@ function populateForm(spot) {
      });
      els.description.value = spot.description || '';
@@ -166,10 +166,10 @@ sitive amount allows deliberate/manual
      configureSpotTypeControls(spot);
      setSliderValue('radius', Number(spot.radius || MIN_RADIUS), { updateState: false });
      setSliderValue('duration', Number(spot.claim_duration ?? MIN_DURATION), { updateState: false });
- diff --git a/static/interface_text.js b/static/interface_text.js
- index 30df2d8..585a0cc 100644
- --- a/static/interface_text.js
- +++ b/static/interface_text.js
+diff --git a/static/interface_text.js b/static/interface_text.js
+index 30df2d8..585a0cc 100644
+--- a/static/interface_text.js
++++ b/static/interface_text.js
 @@ -175,6 +175,7 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
          draftDeposit: {
              ready: 'Ready',
@@ -198,10 +198,10 @@ sitive amount allows deliberate/manual
              intentFailed: {
                  title: 'Could not prepare deposit',
                  body: 'The deposit request could not be prepared. Refresh My Spots and try again.',
- diff --git a/static/my_spots.js b/static/my_spots.js
- index b51f627..04edf48 100644
- --- a/static/my_spots.js
- +++ b/static/my_spots.js
+diff --git a/static/my_spots.js b/static/my_spots.js
+index b51f627..04edf48 100644
+--- a/static/my_spots.js
++++ b/static/my_spots.js
 @@ -493,13 +493,14 @@ function draftDepositText(spot) {
  
      if (status === 'ready') return TEXT.draftDeposit.ready;
@@ -260,10 +260,10 @@ sitive amount allows deliberate/manual
          els.depositConfirm.textContent = TEXT.deposit.confirm;
          els.depositCancel.textContent = TEXT.deposit.cancel;
          els.depositConfirm.disabled = false;
- diff --git a/tests/test_deployment_modes.py b/tests/test_deployment_modes.py
- index ca6a4f0..7696f38 100644
- --- a/tests/test_deployment_modes.py
- +++ b/tests/test_deployment_modes.py
+diff --git a/tests/test_deployment_modes.py b/tests/test_deployment_modes.py
+index ca6a4f0..7696f38 100644
+--- a/tests/test_deployment_modes.py
++++ b/tests/test_deployment_modes.py
 @@ -27,12 +27,15 @@ def clean_environment() -> dict[str, str]:
          "NIMHUNT_NIMIQ_NETWORK_ID",
          "NIMHUNT_NIMIQ_RPC_URL",

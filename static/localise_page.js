@@ -3,6 +3,7 @@ import {
     getReportReasonOptions,
 } from './interface_text.js?v=qol-v1-20260717';
 import { installCreateSpotDeleteNavigationGuard } from './create_spot_delete_guard.js?v=ios-delete-guard-v1-20260718';
+import { installNetworkModeBanner } from './network_mode_banner.js?v=network-mode-banner-v1-20260718';
 
 function ensureResponsiveStylesheets() {
     const stylesheets = [
@@ -20,6 +21,11 @@ function ensureResponsiveStylesheets() {
             selector: 'link[data-nimhunt-responsive="home"]',
             href: '/static/responsive_home.css?v=mobile-hero-v1-20260718',
             marker: 'home',
+        },
+        {
+            selector: 'link[data-nimhunt-responsive="network-mode"]',
+            href: '/static/network_mode_banner.css?v=network-mode-banner-v1-20260718',
+            marker: 'network-mode',
         },
     ];
 
@@ -48,6 +54,11 @@ installCreateSpotDeleteNavigationGuard();
 // responsive layers here keeps the narrow-screen fixes consistent without
 // duplicating stylesheet tags across every template.
 ensureResponsiveStylesheets();
+
+// Read the server's verified network selection from its secret-free health
+// endpoint. TestAlbatross and DevAlbatross receive a prominent banner; mainnet
+// deliberately receives no banner at all.
+installNetworkModeBanner();
 
 // Module scripts run after the document has been parsed. This pass translates
 // only elements explicitly marked with data-i18n attributes, so public Spot

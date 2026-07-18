@@ -40,6 +40,15 @@ function ensureResponsiveStylesheets() {
     }
 }
 
+function upgradeBackLinkArrows() {
+    for (const link of document.querySelectorAll('.back-link')) {
+        for (const node of link.childNodes) {
+            if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.includes('‹')) continue;
+            node.textContent = node.textContent.replaceAll('‹', '←');
+        }
+    }
+}
+
 // find_spots.js historically read this catalogue as a global constant. Keep the
 // binding available until that page module is next consolidated, so opening the
 // report form cannot fail before it renders its reason options.
@@ -54,6 +63,10 @@ installCreateSpotDeleteNavigationGuard();
 // responsive layers here keeps the narrow-screen fixes consistent without
 // duplicating stylesheet tags across every template.
 ensureResponsiveStylesheets();
+
+// Keep every existing and future backlink on the proper left-arrow character,
+// including older templates that still contain the former single chevron.
+upgradeBackLinkArrows();
 
 // Read the server's verified network selection from its secret-free health
 // endpoint. TestAlbatross and DevAlbatross receive a prominent banner; mainnet

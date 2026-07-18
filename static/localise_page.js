@@ -2,6 +2,7 @@ import {
     applyStaticInterfaceText,
     getReportReasonOptions,
 } from './interface_text.js?v=qol-v1-20260717';
+import { installCreateSpotDeleteNavigationGuard } from './create_spot_delete_guard.js?v=ios-delete-guard-v1-20260718';
 
 function ensureResponsiveStylesheets() {
     const stylesheets = [
@@ -32,6 +33,11 @@ function ensureResponsiveStylesheets() {
 // binding available until that page module is next consolidated, so opening the
 // report form cannot fail before it renders its reason options.
 globalThis.REPORT_REASON_OPTIONS = getReportReasonOptions();
+
+// The Create Spot page loads this shared module before create_spot.js. Installing
+// the guard here means its fetch observer is in place before a draft can be
+// deleted, without affecting any non-Create page.
+installCreateSpotDeleteNavigationGuard();
 
 // Every public page already loads this small module. Loading the shared
 // responsive layers here keeps the narrow-screen fixes consistent without

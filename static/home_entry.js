@@ -66,6 +66,37 @@ function homeCopy() {
     });
 }
 
+function placeCaretAtEnd(input) {
+    if (!input?.isConnected) return;
+
+    const end = input.value.length;
+    try {
+        input.setSelectionRange(end, end);
+    } catch (err) {
+        // Some embedded browsers do not expose selection APIs consistently.
+    }
+}
+
+function focusDisplayNameInputFromTap() {
+    const input = document.getElementById('display-name-input');
+    if (!input) return;
+
+    // Keep focus inside the original tap/click event. Mobile browsers are much
+    // more likely to open the software keyboard when focus is not deferred.
+    try {
+        input.focus({ preventScroll: true });
+    } catch (err) {
+        input.focus();
+    }
+
+    placeCaretAtEnd(input);
+
+    // home.js performs a delayed select() for desktop convenience. Restore the
+    // mobile-friendly caret position after that callback has run.
+    window.requestAnimationFrame(() => placeCaretAtEnd(input));
+    window.setTimeout(() => placeCaretAtEnd(input), 0);
+}
+
 function enhanceDisplayNameEditControl() {
     const welcomeLine = document.getElementById('welcome-line');
     const editButton = welcomeLine?.querySelector(':scope > .welcome-edit-button');
@@ -91,6 +122,10 @@ function enhanceDisplayNameEditControl() {
     editButton.classList.add('welcome-edit-control');
     editButton.replaceChildren(name);
     if (icon) editButton.append(icon);
+
+    // home.js attached its edit handler when this button was created. This
+    // listener therefore runs afterwards, once the text input exists.
+    editButton.addEventListener('click', focusDisplayNameInputFromTap);
 
     welcomeLine.replaceChildren(
         document.createTextNode(hasKnownPrefix ? welcomePrefix : ''),

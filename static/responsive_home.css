@@ -1,0 +1,13 @@
+/*
+ * Home-page narrow-screen refinements.
+ *
+ * Keep the NimHunt wordmark close to its normal 25vw scale on phones while
+ * retaining a small safety margin against clipping at the narrowest widths.
+ */
+
+@media (max-width: 560px) {
+    .hero-title {
+        font-size: clamp(4.5rem, 24.5vw, 8.75rem) !important;
+        letter-spacing: -0.075em;
+    }
+}

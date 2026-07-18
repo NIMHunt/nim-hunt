@@ -139,12 +139,12 @@
        controls stay anchored in place; the title/meta text truncates first. */
     .spot-list-toggle {
         min-height: 0;
-        padding: 14px 8.9rem 14px 12px;
+        padding: 14px 12.5rem 14px 12px;
     }
 
     .spot-list-toggle.has-claim-action {
         min-height: 7.8rem;
-        padding-right: 13.8rem;
+        padding-right: 14.8rem;
     }
 
     .spot-list-toggle .spot-list-actions,

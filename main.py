@@ -1,5 +1,6 @@
 """NimHunt FastAPI application setup and background-service lifecycle."""
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -236,15 +237,81 @@ def verify_public_signing_access() -> None:
         ) from None
 
 
+def _canonical_rpc_network_name(value: object) -> str:
+    """Normalise network labels returned by Nimiq RPC block responses."""
+    clean = str(value or "").strip().lower().replace("-", "").replace("_", "")
+    aliases = {
+        "testalbatross": "TestAlbatross",
+        "testnet": "TestAlbatross",
+        "test": "TestAlbatross",
+        "5": "TestAlbatross",
+        "mainalbatross": "MainAlbatross",
+        "mainnet": "MainAlbatross",
+        "main": "MainAlbatross",
+        "24": "MainAlbatross",
+        "devalbatross": "DevAlbatross",
+        "devnet": "DevAlbatross",
+        "dev": "DevAlbatross",
+        "6": "DevAlbatross",
+    }
+    return aliases.get(clean, str(value or "").strip())
+
+
+async def _verify_rpc_network_from_latest_block(
+    *,
+    expected_network: str,
+    rpc_url: str,
+    timeout_seconds: int,
+) -> None:
+    """Verify network via getLatestBlock when getNetworkId is unavailable."""
+    result = await asyncio.to_thread(
+        trans_updater._json_rpc_post_sync,
+        rpc_url=rpc_url,
+        method="getLatestBlock",
+        params=[False],
+        timeout_seconds=timeout_seconds,
+    )
+    block, _metadata = trans_updater._unwrap_rpc_result(result)
+    if not isinstance(block, dict) or "network" not in block:
+        raise RuntimeError("Nimiq RPC getLatestBlock did not expose a network")
+    actual_network = _canonical_rpc_network_name(block.get("network"))
+    if actual_network != expected_network:
+        raise RuntimeError(
+            f"Configured Nimiq RPC serves {actual_network or 'an unknown network'}, "
+            f"expected {expected_network}"
+        )
+
+
 async def verify_public_rpc_network() -> None:
     """Prove that the configured public RPC actually serves the selected network."""
     if not bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
         return
+
+    expected_network = str(getattr(const, "NIMIQ_NETWORK", "")).strip()
+    expected_network_id = int(getattr(const, "NIMIQ_NETWORK_ID", 0))
+    rpc_url = str(getattr(const, "NIMIQ_RPC_URL", "")).strip()
+    timeout_seconds = int(getattr(const, "NIMIQ_RPC_TIMEOUT_SECONDS", 12))
+
     try:
         await trans_updater.verify_configured_rpc_network(
-            expected_network_id=int(getattr(const, "NIMIQ_NETWORK_ID", 0)),
-            rpc_url=str(getattr(const, "NIMIQ_RPC_URL", "")),
-            timeout_seconds=int(getattr(const, "NIMIQ_RPC_TIMEOUT_SECONDS", 12)),
+            expected_network_id=expected_network_id,
+            rpc_url=rpc_url,
+            timeout_seconds=timeout_seconds,
+        )
+        return
+    except RuntimeError as exc:
+        message = str(exc).lower()
+        if "method not found" not in message and "-32601" not in message:
+            raise RuntimeError(
+                "Public deployment RPC network validation failed; check the selected "
+                "Nimiq network and RPC endpoint"
+            ) from None
+
+    try:
+        await _verify_rpc_network_from_latest_block(
+            expected_network=expected_network,
+            rpc_url=rpc_url,
+            timeout_seconds=timeout_seconds,
         )
     except Exception:
         raise RuntimeError(

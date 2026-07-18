@@ -44,7 +44,7 @@ import settlement_updater
 router = APIRouter()
 templates = Jinja2Templates(directory=str(const.TEMPLATES_DIR))
 
-_ASSET_VERSION = "qol-v1-20260717"
+_ASSET_VERSION = "spot-fee-copy-v1-20260718"
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ALLOWED_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$")

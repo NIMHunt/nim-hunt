@@ -193,11 +193,10 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
             confirming: 'Confirming…',
             cancel: 'Cancel',
             confirmBody: ({ title, amountText }) => `Deposit ${amountText} for '${title}'?`,
-            confirmLead: ({ title }) => `Deposit NIM for '${title}'?`,
-            spotFundingLine: (amountText) => `Spot funding: ${amountText}.`,
-            creationFeeLine: (amountText) => `Creation fee: ${amountText}.`,
-            creationFeeNotice: 'The creation fee is deducted after full funding and is not refundable once confirmed.',
-            depositNowLine: (amountText) => `Deposit now: ${amountText}.`,
+            confirmLead: ({ title }) => `Deposit NIM for ${title}?`,
+            spotFundingLine: (amountText) => `Spot Funds: ${amountText}`,
+            creationFeeLine: (amountText) => `Creation Fee: ${amountText}`,
+            depositNowLine: (amountText) => `Total Deposit: ${amountText}`,
             intentFailed: {
                 title: 'Could not prepare deposit',
                 body: 'The deposit request could not be prepared. Refresh My Spots and try again.',
@@ -231,7 +230,7 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
                 if (remainingLost) {
                     return `Are you sure you want to cancel '${title}'? Remaining funds will be lost.`;
                 }
-                return `Are you sure you want to cancel '${title}'? Remaining funds will be returned, minus the cancellation fee. Estimated refund: ${refundText}. Cancellation fee: ${feeText}.`;
+                return `Are you sure you want to cancel '${title}'? Remaining funds will be returned, minus the cancellation fee. Estimated refund: ${refundText} Cancellation fee: ${feeText}`;
             },
             failed: {
                 title: 'Could not cancel Spot',

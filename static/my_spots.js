@@ -17,7 +17,7 @@ import {
 } from './spot_ui.js?v=qol-v1-20260717';
 import { createReusableSpotMap } from './spot_map.js';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
-import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=qol-v1-20260717';
+import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=spot-fee-copy-v1-20260718';
 import {
     createNoticePresenter,
     getLanguage,
@@ -944,16 +944,12 @@ async function openDepositModal(spot) {
         const creationFeeText = nimFromLunaText(data.creation_fee ?? spot.creation_fee ?? 0);
         els.depositTitle.textContent = TEXT.deposit.title;
         const title = data.spot?.title || spot.title || SPOT_TEXT.fallbackTitle;
-        const creationFee = Number(data.creation_fee ?? spot.creation_fee ?? 0);
         const lines = [
             TEXT.deposit.confirmLead({ title }),
             TEXT.deposit.spotFundingLine(spotValueText),
             TEXT.deposit.creationFeeLine(creationFeeText),
             TEXT.deposit.depositNowLine(amountText),
         ];
-        if (creationFee > 0) {
-            lines.push(TEXT.deposit.creationFeeNotice);
-        }
         els.depositBody.replaceChildren(...lines.map((line) => {
             const span = document.createElement('span');
             span.className = 'cancel-spot-body-line';
@@ -1149,8 +1145,8 @@ function setCancelBodyContent({
 
     const lines = [
         `Are you sure you want to cancel '${title}'? Remaining funds will be returned, minus the cancellation fee.`,
-        `Estimated refund: ${refundText}.`,
-        `Cancellation fee: ${feeText}.`,
+        `Estimated refund: ${refundText}`,
+        `Cancellation fee: ${feeText}`,
     ];
     if (manualReviewRequired) {
         lines.push(TEXT.cancelSpot.manualReviewNotice);

@@ -97,6 +97,24 @@ function focusDisplayNameInputFromTap() {
     window.setTimeout(() => placeCaretAtEnd(input), 0);
 }
 
+function cancelDisplayNameEditIfActive() {
+    const input = document.getElementById('display-name-input');
+    const cancelButton = document.getElementById('display-name-cancel');
+    if (!input || !cancelButton || cancelButton.disabled) return;
+
+    // Reuse home.js's existing Cancel path so state, validation messages, and
+    // the normal welcome control are restored in one place.
+    cancelButton.click();
+}
+
+function isInsideDisplayNameEditor(target) {
+    if (!(target instanceof Node)) return false;
+
+    const input = document.getElementById('display-name-input');
+    const editorActions = document.getElementById('display-name-editor');
+    return Boolean(input?.contains(target) || editorActions?.contains(target));
+}
+
 function enhanceDisplayNameEditControl() {
     const welcomeLine = document.getElementById('welcome-line');
     const editButton = welcomeLine?.querySelector(':scope > .welcome-edit-button');
@@ -141,3 +159,24 @@ if (welcomeLine) {
     observer.observe(welcomeLine, { childList: true });
     enhanceDisplayNameEditControl();
 }
+
+// A tap/click outside the input or its Save/Cancel controls abandons the draft
+// name. Capture the pointer before links navigate so the Home page cannot be
+// stored in the browser's back/forward cache with a live, partly edited input.
+document.addEventListener('pointerdown', (event) => {
+    if (!document.getElementById('display-name-input')) return;
+    if (isInsideDisplayNameEditor(event.target)) return;
+    cancelDisplayNameEditIfActive();
+}, true);
+
+// Apply the same rule to keyboard navigation on desktop and tablet devices.
+document.addEventListener('focusin', (event) => {
+    if (!document.getElementById('display-name-input')) return;
+    if (isInsideDisplayNameEditor(event.target)) return;
+    cancelDisplayNameEditIfActive();
+});
+
+// pagehide runs for ordinary navigation and for pages entering the back/forward
+// cache. pageshow is a defensive fallback for browsers that restore old DOM.
+window.addEventListener('pagehide', cancelDisplayNameEditIfActive);
+window.addEventListener('pageshow', cancelDisplayNameEditIfActive);

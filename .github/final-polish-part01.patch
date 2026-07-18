@@ -1,0 +1,200 @@
+diff --git a/database.py b/database.py
+index 11a88c2..70f7da5 100644
+--- a/database.py
++++ b/database.py
+@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS {APP_METADATA_TABLE_NAME} (
+ #################
+ # User
+ # Spot
+-# PrizeDraw
++# Prizedraw
+ # Claim
+ # Claim-Code
+ # Transaction
+@@ -458,7 +458,7 @@ END;
+ # PRIZEDRAW #
+ # A PRIZEDRAW is an optional extension of a SPOT.
+ #
+-# If a SPOT has a matching PRIZEDRAW row, the SPOT works as a prize draw:
++# If a SPOT has a matching PRIZEDRAW row, the SPOT works as a Prizedraw:
+ #   - eligible USERS become participants
+ #   - one or more winners are selected later
+ #   - the SPOT total_value is split between those winners
+@@ -490,7 +490,7 @@ CREATE TABLE IF NOT EXISTS {PRIZEDRAW_TABLE_NAME} (
+ """
+ 
+ 
+-# A prize draw cannot have more winners than possible participants/claims.
++# A Prizedraw cannot have more winners than possible participants/claims.
+ PRIZEDRAW_TRIGGER_PRIZE_COUNT_INSERT = "trg_prizedraw_prize_count_insert"
+ PRIZEDRAW_TRIGGER_PRIZE_COUNT_INSERT_QUERY = f"""
+ CREATE TRIGGER IF NOT EXISTS {PRIZEDRAW_TRIGGER_PRIZE_COUNT_INSERT}
+diff --git a/db_access.py b/db_access.py
+index 43d437a..6db719b 100644
+--- a/db_access.py
++++ b/db_access.py
+@@ -422,8 +422,8 @@ def _validate_bool_flag(value: bool | int, *, field_name: str) -> int:
+         return 1 if value else 0
+     try:
+         int_value = int(value)
+-    except (TypeError, ValueError):
+-        raise ValueError(f"{field_name} must be 0 or 1")
++    except (TypeError, ValueError) as exc:
++        raise ValueError(f"{field_name} must be 0 or 1") from exc
+     if int_value not in (0, 1):
+         raise ValueError(f"{field_name} must be 0 or 1")
+     return int_value
+@@ -3881,23 +3881,6 @@ async def derive_spot_deposit_address_from_record(db, *, spot_id: int) -> wallet
+     )
+ 
+ 
+-async def create_claim_send_transaction(*args, **kwargs) -> int:
+-    """Deprecated: use trans_updater.submit_claim_reward_transaction().
+-
+-    db_access.py records database facts only. Chain-facing sends belong in
+-    trans_updater.py, which may call wallet.py for signing/address management.
+-    """
+-    raise RuntimeError("Use trans_updater.submit_claim_reward_transaction()")
+-
+-
+-async def create_spot_refund_send_transaction(*args, **kwargs) -> int:
+-    """Deprecated: use trans_updater.submit_spot_cancellation_transactions()."""
+-    raise RuntimeError("Use trans_updater.submit_spot_cancellation_transactions()")
+-
+-
+-async def cancel_published_standard_spot(*args, **kwargs) -> RowDict:
+-    """Deprecated: use trans_updater.submit_spot_cancellation_transactions()."""
+-    raise RuntimeError("Use trans_updater.submit_spot_cancellation_transactions()")
+ 
+ 
+ async def modify_transaction_status(db, *, trans_id: int, status: int) -> None:
+diff --git a/helpers/helper_safety.test.mjs b/helpers/helper_safety.test.mjs
+index bcf693f..556c1b7 100644
+--- a/helpers/helper_safety.test.mjs
++++ b/helpers/helper_safety.test.mjs
+@@ -28,6 +28,17 @@ function runHelper(extraEnvironment) {
+   });
+ }
+ 
++test('development accepts documented true aliases for the public test mnemonic flag', () => {
++  const result = runHelper({
++    NIMHUNT_DEPLOYMENT_MODE: 'development',
++    NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: 'true',
++  });
++  assert.equal(result.status, 0, result.stdout || result.stderr);
++  const response = JSON.parse(result.stdout);
++  assert.equal(response.ok, true);
++  assert.match(response.address, /^NQ/);
++});
++
+ test('public-testnet rejects the public default mnemonic flag', () => {
+   const result = runHelper({
+     NIMHUNT_DEPLOYMENT_MODE: 'public-testnet',
+diff --git a/helpers/nimiq_helper.mjs b/helpers/nimiq_helper.mjs
+index 756a663..b03cf38 100644
+--- a/helpers/nimiq_helper.mjs
++++ b/helpers/nimiq_helper.mjs
+@@ -51,7 +51,7 @@ function mnemonicForNetwork(network) {
+   const mnemonic = env('NIMHUNT_NIMIQ_MNEMONIC');
+   if (mnemonic) return mnemonic;
+ 
+-  const allowDefaultTestMnemonic = env('NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC', '0') === '1';
++  const allowDefaultTestMnemonic = envEnabled('NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC');
+   if (allowDefaultTestMnemonic && network !== 'MainAlbatross') {
+     return DEFAULT_TEST_MNEMONIC;
+   }
+diff --git a/public_html.py b/public_html.py
+index 39168ce..a981270 100644
+--- a/public_html.py
++++ b/public_html.py
+@@ -7,12 +7,9 @@ This file is the first frontend-facing layer. The browser/webview calls these
+ routes, and these routes then call db_access.py/cache.py. The frontend should
+ not talk directly to the database.
+ 
+-Current scope:
+-- Home page HTML.
+-- Home/session API: identify or create the USER from the Nimiq Pay device id.
+-- Display-name update API.
+-- My Spots page/API for creator-owned spots.
+-- My Claims page/API for claims made by the current device.
++It owns the page/API boundary: device identification, ownership checks,
++request validation and response serialisation. Database rules stay in
++``db_access.py`` and chain-facing work stays in ``trans_updater.py``.
+ """
+ 
+ from __future__ import annotations
+@@ -30,16 +27,14 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
+ from fastapi.templating import Jinja2Templates
+ from pydantic import BaseModel, Field
+ 
++import cache
+ import constants as const
+ import database as schema
+ import db_access
++import settlement_updater
+ import trans_updater
+-from transaction_descriptions import build_transaction_description
+ from database import get_db
+-
+-import cache
+-import settlement_updater
+-
++from transaction_descriptions import build_transaction_description
+ 
+ router = APIRouter()
+ templates = Jinja2Templates(directory=str(const.TEMPLATES_DIR))
+@@ -994,8 +989,10 @@ async def _identify_private_page_user(
+             "language": language,
+         }, status.HTTP_200_OK
+ 
+-    assert payload.device_id_hash is not None
+-    device_id_hash = payload.device_id_hash.strip().lower()
++    raw_device_id_hash = payload.device_id_hash
++    if raw_device_id_hash is None:  # Defensive: _valid_device_id_hash() was checked above.
++        raise RuntimeError("validated device identifier is unexpectedly missing")
++    device_id_hash = raw_device_id_hash.strip().lower()
+     user_id, created = await db_access.get_or_create_user(db, device_id_hash=device_id_hash)
+     await db_access.touch_user_last_seen(db, user_id=user_id)
+     user = await db_access.get_user_by_id(db, user_id=user_id)
+@@ -2924,8 +2921,13 @@ async def home_session(payload: HomeSessionRequest) -> JSONResponse:
+             status_code=status.HTTP_200_OK,
+         )
+ 
+-    assert payload.device_id_hash is not None
+-    device_id_hash = payload.device_id_hash.strip().lower()
++    raw_device_id_hash = payload.device_id_hash
++    if raw_device_id_hash is None:  # Defensive: _valid_device_id_hash() was checked above.
++        raise HTTPException(
++            status_code=status.HTTP_400_BAD_REQUEST,
++            detail="A valid device identifier is required.",
++        )
++    device_id_hash = raw_device_id_hash.strip().lower()
+ 
+     async with get_db() as db:
+         async with db_access.transaction(db):
+diff --git a/pyproject.toml b/pyproject.toml
+new file mode 100644
+index 0000000..786dc0f
+--- /dev/null
++++ b/pyproject.toml
+@@ -0,0 +1,11 @@
++[tool.pytest.ini_options]
++testpaths = ["tests"]
++pythonpath = ["."]
++filterwarnings = ["error::ResourceWarning"]
++
++[tool.ruff]
++target-version = "py311"
++extend-exclude = ["helpers/node_modules", "venv", ".venv"]
++
++[tool.ruff.lint]
++select = ["E4", "E7", "E9", "F", "I", "B"]
+diff --git a/requirements-dev.txt b/requirements-dev.txt
+new file mode 100644
+index 0000000..e4e159c
+--- /dev/null
++++ b/requirements-dev.txt
+@@ -0,0 +1,3 @@
++pip-audit==2.10.1
++pytest==9.1.1
++ruff==0.15.22

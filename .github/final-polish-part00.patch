@@ -1,0 +1,237 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+new file mode 100644
+index 0000000..d47c831
+--- /dev/null
++++ b/.github/workflows/ci.yml
+@@ -0,0 +1,90 @@
++name: CI
++
++on:
++  push:
++    branches:
++      - main
++  pull_request:
++
++permissions:
++  contents: read
++
++concurrency:
++  group: ci-${{ github.workflow }}-${{ github.ref }}
++  cancel-in-progress: true
++
++jobs:
++  verify:
++    runs-on: ubuntu-latest
++    timeout-minutes: 15
++
++    steps:
++      - name: Check out repository
++        uses: actions/checkout@v6
++
++      - name: Set up Python 3.11
++        uses: actions/setup-python@v6
++        with:
++          python-version: "3.11"
++          cache: pip
++          cache-dependency-path: |
++            requirements.txt
++            requirements-dev.txt
++
++      - name: Set up Node.js 20
++        uses: actions/setup-node@v6
++        with:
++          node-version: "20"
++          cache: npm
++          cache-dependency-path: helpers/package-lock.json
++
++      - name: Install dependencies
++        run: |
++          python -m pip install --upgrade pip
++          python -m pip install -r requirements.txt -r requirements-dev.txt
++          npm ci --prefix helpers
++
++      - name: Run Python tests
++        run: python -m pytest -q
++
++      - name: Run Node tests
++        run: npm test --prefix helpers
++
++      - name: Run Python lint and compilation checks
++        run: |
++          ruff check .
++          python -m compileall -q *.py tests
++
++      - name: Run JavaScript and shell syntax checks
++        run: |
++          for file in static/*.js; do node --check --input-type=module < "$file"; done
++          for file in helpers/*.mjs; do node --check "$file"; done
++          for file in *.sh; do bash -n "$file"; done
++
++      - name: Compile Jinja templates
++        run: |
++          python - <<'PY'
++          from pathlib import Path
++          from jinja2 import Environment, FileSystemLoader
++
++          templates = Path("templates")
++          environment = Environment(loader=FileSystemLoader(templates))
++          for path in sorted(templates.glob("*.html")):
++              environment.get_template(path.name)
++          PY
++
++      - name: Seed a fresh development database
++        env:
++          NIMHUNT_DB_PATH: ${{ runner.temp }}/nimhunt-ci.db
++          NIMHUNT_DEPLOYMENT_MODE: development
++          NIMHUNT_NIMIQ_NETWORK: TestAlbatross
++          NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: "1"
++        run: python spoof.py
++
++      - name: Check installed dependencies
++        run: python -m pip check
++
++      - name: Audit dependencies
++        run: |
++          python -m pip_audit --progress-spinner off
++          npm audit --omit=dev --prefix helpers
+diff --git a/.gitignore b/.gitignore
+index 329e9a1..7505272 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -3,6 +3,10 @@ __pycache__/
+ *.py[cod]
+ .pytest_cache/
+ .mypy_cache/
++.ruff_cache/
++.coverage
++coverage.xml
++htmlcov/
+ 
+ # Virtual environments
+ venv/
+diff --git a/README.md b/README.md
+index e3de4c8..6eff321 100644
+--- a/README.md
++++ b/README.md
+@@ -1,5 +1,7 @@
+ # NimHunt
+ 
++![CI](https://github.com/NIMHunt/nim-hunt/actions/workflows/ci.yml/badge.svg)
++
+ NimHunt is a small geofaucet-style and Prizedraw mini-app for Nimiq Pay.
+ 
+ Creators fund geographic **Spots** with NIM. Other users find those Spots on a
+@@ -225,13 +227,15 @@ python3 -m venv venv
+ source venv/bin/activate
+ ```
+ 
+-Install Python and Nimiq helper dependencies:
++Install the runtime, development and Nimiq helper dependencies:
+ 
+ ```bash
+-pip install -r requirements.txt
++pip install -r requirements.txt -r requirements-dev.txt
+ npm ci --prefix helpers
+ ```
+ 
++`requirements.txt` contains only runtime packages; `requirements-dev.txt` adds
++the pinned test, lint and dependency-audit tools used by contributors and CI.
+ `npm ci` uses `helpers/package-lock.json` and installs the exact pinned
+ `@nimiq/core` version rather than a moving latest release.
+ 
+@@ -279,7 +283,7 @@ script and `spoof.py` refuse to run in either public deployment mode.
+ 
+ NimHunt currently follows a fresh-development-database policy rather than
+ maintaining a general migration framework. The creation-fee release raises the
+-schema to version `2`, so after switching to this branch stop the server and run
++schema to version `2`, so after pulling this release stop the server and run
+ this reset once before ordinary local testing. Never use the reset script on a
+ public deployment database; public TestAlbatross and MainAlbatross must use fresh
+ persistent databases for this release.
+@@ -768,12 +772,16 @@ descriptions, locations or display names with `data-i18n`.
+ Activate the virtual environment, then run:
+ 
+ ```bash
+-PYTHONPATH=. python -W error::ResourceWarning -m pytest -q
+-npm --prefix helpers test
+-python -m py_compile *.py tests/*.py
++python -m pytest -q
++npm test --prefix helpers
+ ruff check .
++python -m compileall -q *.py tests
+ ```
+ 
++`pyproject.toml` keeps the Python test path, warning policy and Ruff rules in one
++place. GitHub Actions runs the same deterministic checks for every pull request
++and every update to `main`.
++
+ Check every browser/helper module and shell script:
+ 
+ ```bash
+@@ -807,6 +815,9 @@ npm audit --omit=dev --prefix helpers
+ | `templates/` | Jinja page shells |
+ | `static/` | browser JavaScript, localisation, CSS and icons |
+ | `tests/` | Python regression and integration tests |
++| `.github/workflows/ci.yml` | permanent pull-request and `main` verification |
++| `pyproject.toml` | shared pytest and Ruff configuration |
++| `requirements-dev.txt` | pinned test, lint and audit tooling |
+ | `spoof.py` | destructive development-only mock-data seed |
+ 
+ ## Operational limitations
+diff --git a/constants.py b/constants.py
+index 83e0060..fe2b50a 100644
+--- a/constants.py
++++ b/constants.py
+@@ -120,8 +120,6 @@ NIMIQ_PAY_URL = "https://nimpay.app"
+ # NIMHUNT_DEPLOYMENT_MODE is preferred; NIMHUNT_PRODUCTION remains a strict
+ # compatibility alias for production only. Public modes disable every local
+ # shortcut, while production specifically means real-NIM MainAlbatross.
+-NIMHUNT_DEPLOYMENT_MODE_ENV = "NIMHUNT_DEPLOYMENT_MODE"
+-NIMHUNT_LEGACY_PRODUCTION_ENV = "NIMHUNT_PRODUCTION"
+ DEPLOYMENT_MODE = _deployment_mode()
+ PUBLIC_TESTNET_MODE = DEPLOYMENT_MODE == "public-testnet"
+ PRODUCTION_MODE = DEPLOYMENT_MODE == "production"
+@@ -165,8 +163,7 @@ LEAFLET_JS_URL = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+ MAP_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+ MAP_TILE_ATTRIBUTION = "&copy; OpenStreetMap contributors"
+ 
+-# Future page URLs. These are centralised even before the pages exist, so copy
+-# and links remain easy to change later.
++# Page URLs are centralised so browser copy and redirects stay consistent.
+ CREATE_SPOT_URL = "/create"
+ SPOT_PAGE_URL_PREFIX = "/spot"
+ CLAIM_PAGE_URL_PREFIX = "/claim"
+@@ -329,8 +326,6 @@ NIMIQ_HUB_URL = os.getenv(
+     "NIMHUNT_NIMIQ_HUB_URL",
+     _DEFAULT_NIMIQ_HUB_URLS.get(NIMIQ_NETWORK, ""),
+ ).strip()
+-NIMIQ_PAY_PROVIDER = "nimiq-pay-mini-app-sdk"
+-
+ # Address/signing integration. If NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND or
+ # NIMHUNT_NIMIQ_SEND_COMMAND are set, wallet.py calls those commands with JSON
+ # on stdin and expects JSON on stdout. This lets the Python app remain small
+@@ -349,7 +344,6 @@ NIMHUNT_NIMIQ_MNEMONIC_ENV = "NIMHUNT_NIMIQ_MNEMONIC"
+ NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC_ENV = "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC"
+ NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND_ENV = "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND"
+ NIMHUNT_NIMIQ_SEND_COMMAND_ENV = "NIMHUNT_NIMIQ_SEND_COMMAND"
+-NIMHUNT_NIMIQ_CONFIRM_COMMAND_ENV = "NIMHUNT_NIMIQ_CONFIRM_COMMAND"
+ NIMHUNT_NIMIQ_EXTERNAL_SIGNER_ENV = "NIMHUNT_NIMIQ_EXTERNAL_SIGNER"
+ 
+ # Development fallbacks. Placeholder addresses are automatically disabled in
+@@ -391,13 +385,13 @@ CLAIM_LOCATION_HARD_PENALTY = 0.35
+ # USER Statuses
+ # -----------------------------
+ 
+-# Normal user. Can create SPOTs and CLAIM caches.
++# Normal user. Can create Spots and make claims.
+ USER_STATUS_ACTIVE = 1
+ 
+-# Restricted user. Can CLAIM caches, but cannot create new SPOTs.
++# Restricted user. Can make claims, but cannot create new Spots.
+ USER_STATUS_LIMITED = 2
+ 
+-# Banned user. Cannot create SPOTs or CLAIM caches.
++# Banned user. Cannot create Spots or make claims.
+ USER_STATUS_BANNED = 3
+ 
+ 

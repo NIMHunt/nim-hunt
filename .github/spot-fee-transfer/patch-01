@@ -61,10 +61,10 @@ also
  
  These trade-offs are intentional and proportionate to the project's competition
  scope. They should be revisited before substantially increasing user counts or
- diff --git a/constants.py b/constants.py
- index d860e49..83e0060 100644
- --- a/constants.py
- +++ b/constants.py
+diff --git a/constants.py b/constants.py
+index d860e49..83e0060 100644
+--- a/constants.py
++++ b/constants.py
 @@ -231,9 +231,28 @@ MIN_STANDARD_CLAIM_PAYOUT = MIN_STANDARD_CLAIM_PAYOUT_NIM * LUNA_PER_NIM
  MIN_PRIZEDRAW_PRIZE_PAYOUT_NIM = 1000
  MIN_PRIZEDRAW_PRIZE_PAYOUT = MIN_PRIZEDRAW_PRIZE_PAYOUT_NIM * LUNA_PER_NIM
@@ -116,10 +116,10 @@ also
  
  
  # -----------------------------
- diff --git a/database.py b/database.py
- index 4596908..11a88c2 100644
- --- a/database.py
- +++ b/database.py
+diff --git a/database.py b/database.py
+index 4596908..11a88c2 100644
+--- a/database.py
++++ b/database.py
 @@ -43,6 +43,7 @@ from constants import (
      TRANS_STATUS_PENDING,
      TRANS_TYPE_CANCEL_SPOT,
@@ -213,10 +213,10 @@ also
          await db.executescript(TRANS_INDEX_STATUS_CREATED_QUERY)
          await db.executescript(TRANS_INDEX_TYPE_STATUS_CREATED_QUERY)
          await db.executescript(TRANS_TRIGGER_SET_COMPLETED_AT_UPDATE_QUERY)
- diff --git a/db_access.py b/db_access.py
- index 15773d6..4a8cce2 100644
- --- a/db_access.py
- +++ b/db_access.py
+diff --git a/db_access.py b/db_access.py
+index 15773d6..4a8cce2 100644
+--- a/db_access.py
++++ b/db_access.py
 @@ -42,15 +42,19 @@ import wallet
  # ---------------------------------------------------------------------------
  

@@ -1,4 +1,4 @@
-name: Recover Spot creation fee work
+name: Verify Spot creation fees
 
 on:
   pull_request:
@@ -6,28 +6,246 @@ on:
       - agent/public-testnet-deployment
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  snapshot:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - name: Check out stacked branch
         uses: actions/checkout@v4
         with:
           ref: agent/spot-creation-fees
-      - name: Archive exact branch
+          fetch-depth: 0
+
+      - name: Reassemble reviewed implementation and safety delta
+        shell: bash
         run: |
-          tar \
-            --exclude=.git \
-            --exclude=venv \
-            --exclude='**/__pycache__' \
-            --exclude='*.pyc' \
-            --exclude=records.db \
-            -czf /tmp/nimhunt-pr12-recovery.tar.gz .
-      - name: Upload recovery archive
-        uses: actions/upload-artifact@v4
+          set -euo pipefail
+
+          base64 -d .github/spot-fee-transfer/patch-06.b64 > /tmp/original-06
+          base64 -d .github/spot-fee-transfer/patch-09.b64 > /tmp/original-09
+          original_chunks=(
+            .github/spot-fee-transfer/patch-00
+            .github/spot-fee-transfer/patch-01
+            .github/spot-fee-transfer/patch-02
+            .github/spot-fee-transfer/patch-03
+            .github/spot-fee-transfer/patch-04
+            .github/spot-fee-transfer/patch-05
+            /tmp/original-06
+            .github/spot-fee-transfer/patch-07
+            .github/spot-fee-transfer/patch-08
+            /tmp/original-09
+            .github/spot-fee-transfer/patch-10
+          )
+          original_expected=(
+            daee3a363e57e8517895951eb8e5033888da779e4c558c545004dbddbf79f9f9
+            5a32f50a1c3476e4e5708ca5b19d9fe7ad8447cedb9292b569becc02dc87b1a1
+            b3052a6e0d40eb8a78b57fb27e5190614a8ea796a368c23e2520f71016845c62
+            f09aa23d6d3fe77fc5e770c11a6351a7af862056aa75a8d6845669c3861da3af
+            fd5d6f5f2cca8f99a42eed8ccf12efb07e8ec30c528572ce003289d29bb09480
+            a7103ec8247b1870e00d4c7706bb5c12efd8522e33f2531defe06fdcbed0b021
+            e839d822cade183958e2e89a52b91b139bba7033e8ebc076f0e3b7d0d8da695c
+            0a866b53a41207dcc4322dde42775eb453235d3c312629aff7e132db9e0add61
+            24102a8bd024a944d4a741248cbbd4e4540d0be72a8cf774cff1a22f40598264
+            16d86f2afab7a9ba2ec52b691a17cd64aa1e29f25f56dc48d12dfd96d136dc82
+            5915975b9b1f37e3a6bbce59797bd93828486bd16ecf9feb3c8eba0ffe16fe17
+          )
+          for index in "${!original_chunks[@]}"; do
+            printf '%s  %s\n' "${original_expected[$index]}" "${original_chunks[$index]}" | sha256sum -c -
+          done
+          cat "${original_chunks[@]}" > /tmp/spot-fees-original.patch
+          printf '%s  %s\n' c041b66f47d0eaf0b63dff40c839585497c3e028ac3b0425f5f220ccdeae5db8 /tmp/spot-fees-original.patch | sha256sum -c -
+          git apply --check /tmp/spot-fees-original.patch
+          git apply /tmp/spot-fees-original.patch
+
+          delta_chunks=(
+            .github/spot-fee-delta/part-00
+            .github/spot-fee-delta/part-01
+            .github/spot-fee-delta/part-02
+            .github/spot-fee-delta/part-03
+            .github/spot-fee-delta/part-04
+          )
+          delta_expected=(
+            900234a3383f205da72ece512a3b2a6a8d0fa26c4cf9452886f59389c7377541
+            cb6ff12672ef9a63b914c1f76b26af7043012d9af4618698cf0a0461eff432aa
+            5684be2ac672f727531e7332edab9fdc8a786cdfe449f41757fdd9c3c4e0b308
+            9aecf9054f0e93f44f14ecebf397dc296334c2f297bb3278f892b3befbbcd695
+            f5f6facf8ba86a26fc9d6a24968ba4955c81de142ce994166b8471b98486227f
+          )
+          for index in "${!delta_chunks[@]}"; do
+            printf '%s  %s\n' "${delta_expected[$index]}" "${delta_chunks[$index]}" | sha256sum -c -
+          done
+          cat "${delta_chunks[@]}" > /tmp/spot-fee-safety-delta.patch
+          printf '%s  %s\n' a40ed5695794d75adc7b0874a8588155020f148ef3ee835545dcc7b35c26630c /tmp/spot-fee-safety-delta.patch | sha256sum -c -
+          git apply --check /tmp/spot-fee-safety-delta.patch
+          git apply /tmp/spot-fee-safety-delta.patch
+
+          rm -rf \
+            .github/spot-fee-transfer \
+            .github/spot-fee-compressed \
+            .github/spot-fee-delta
+          rm .github/workflows/verify_spot_creation_fees.yml
+          git diff --check
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
         with:
-          name: nimhunt-pr12-recovery
-          path: /tmp/nimhunt-pr12-recovery.tar.gz
-          retention-days: 1
+          python-version: '3.11'
+          cache: pip
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: helpers/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest ruff pip-audit
+          npm ci --prefix helpers
+
+      - name: Run complete Python suite
+        run: PYTHONPATH=. python -W error::ResourceWarning -m pytest -q
+
+      - name: Run complete Node suite
+        run: npm --prefix helpers test
+
+      - name: Run static checks and dependency audits
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile *.py tests/*.py
+          ruff check .
+          for file in static/*.js; do node --check --input-type=module < "$file"; done
+          for file in helpers/*.mjs; do node --check "$file"; done
+          for file in *.sh; do bash -n "$file"; done
+          python -m pip check
+          python -m pip_audit
+          npm audit --omit=dev --prefix helpers
+          git diff --check
+
+      - name: Compile all templates
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from jinja2 import Environment, FileSystemLoader
+          root = Path('templates')
+          env = Environment(loader=FileSystemLoader(str(root)))
+          templates = sorted(path.relative_to(root).as_posix() for path in root.rglob('*.html'))
+          for template in templates:
+              env.get_template(template)
+          print(f'Compiled {len(templates)} templates')
+          PY
+
+      - name: Seed and inspect a fresh schema-version-2 development database
+        env:
+          NIMHUNT_DB_PATH: /tmp/nimhunt-fee-mock.db
+        run: |
+          rm -f "$NIMHUNT_DB_PATH" "$NIMHUNT_DB_PATH-wal" "$NIMHUNT_DB_PATH-shm"
+          python - <<'PY'
+          import asyncio
+          import sqlite3
+          import spoof
+          import constants as const
+          import database as schema
+
+          result = asyncio.run(spoof.seed_mock_data())
+          assert result['published_spot_count'] == 8, result
+          with sqlite3.connect(schema.DB_PATH) as db:
+              assert db.execute('PRAGMA user_version').fetchone()[0] == 2
+              columns = {row[1] for row in db.execute('PRAGMA table_info(spot)')}
+              assert {'creation_fee', 'creation_fee_address'} <= columns
+              missing = db.execute(
+                  '''
+                  SELECT COUNT(*)
+                  FROM spot s
+                  WHERE s.s_status = ?
+                    AND s.creation_fee > 0
+                    AND NOT EXISTS (
+                        SELECT 1 FROM trans t
+                        WHERE t.spot_id = s.id
+                          AND t.type = ?
+                          AND t.t_status = ?
+                          AND t.user_id = s.created_by
+                          AND t.amount = s.creation_fee
+                          AND UPPER(REPLACE(t.from_address, ' ', '')) = UPPER(REPLACE(s.deposit_address, ' ', ''))
+                          AND UPPER(REPLACE(t.to_address, ' ', '')) = UPPER(REPLACE(s.creation_fee_address, ' ', ''))
+                    )
+                  ''',
+                  (const.SPOT_STATUS_PUBLISHED, const.TRANS_TYPE_CREATION_FEE, const.TRANS_STATUS_CONFIRMED),
+              ).fetchone()[0]
+              assert missing == 0
+          print('Fresh mock database and exact creation-fee lifecycle verified')
+          PY
+
+      - name: Exercise development startup and shutdown
+        env:
+          NIMHUNT_DB_PATH: /tmp/nimhunt-fee-development-startup.db
+        run: |
+          rm -f "$NIMHUNT_DB_PATH" "$NIMHUNT_DB_PATH-wal" "$NIMHUNT_DB_PATH-shm"
+          python - <<'PY'
+          import asyncio
+          import main
+
+          async def exercise():
+              await main.startup()
+              await main.shutdown()
+
+          asyncio.run(exercise())
+          print('Development startup/shutdown passed')
+          PY
+
+      - name: Exercise safe public TestAlbatross startup without broadcasting
+        env:
+          NIMHUNT_DEPLOYMENT_MODE: public-testnet
+          NIMHUNT_DB_PATH: /tmp/nimhunt-fee-public-testnet.db
+          NIMHUNT_NIMIQ_NETWORK: TestAlbatross
+          NIMHUNT_NIMIQ_NETWORK_ID: '5'
+          NIMHUNT_NIMIQ_RPC_URL: https://rpc.testnet.nimiqwatch.com/
+          NIMHUNT_NIMIQ_HUB_URL: https://hub.nimiq-testnet.com
+          NIMHUNT_NIMIQ_MNEMONIC: legal winner thank year wave sausage worth useful legal winner thank yellow
+          NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND: node /home/runner/work/nim-hunt/nim-hunt/helpers/nimiq_helper.mjs
+          NIMHUNT_NIMIQ_SEND_COMMAND: node /home/runner/work/nim-hunt/nim-hunt/helpers/nimiq_helper.mjs
+          NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM: '1'
+          NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM: '2'
+          NIMHUNT_SPOT_CANCELLATION_FEE_NIM: '1'
+          NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS: NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF
+          NIMHUNT_NIMIQ_TRANSACTION_FEE: '0'
+        run: |
+          rm -f "$NIMHUNT_DB_PATH" "$NIMHUNT_DB_PATH-wal" "$NIMHUNT_DB_PATH-shm"
+          python - <<'PY'
+          import asyncio
+          import sqlite3
+          import database
+          import main
+
+          async def exercise():
+              await main.startup()
+              response = await main.healthz()
+              assert response.status_code == 200
+              await main.shutdown()
+
+          asyncio.run(exercise())
+          with sqlite3.connect(database.DB_PATH) as db:
+              metadata = dict(db.execute('SELECT key, value FROM app_metadata'))
+              assert metadata['nimiq_network'] == 'TestAlbatross'
+              assert metadata['nimiq_network_id'] == '5'
+              assert metadata['deployment_mode'] == 'public-testnet'
+              assert db.execute('PRAGMA user_version').fetchone()[0] == 2
+          print('Public TestAlbatross startup passed without a transaction broadcast')
+          PY
+
+      - name: Commit verified implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m "Add safe configurable Spot creation fees"
+          git push origin HEAD:agent/spot-creation-fees

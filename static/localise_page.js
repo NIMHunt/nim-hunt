@@ -1,14 +1,22 @@
-import { applyStaticInterfaceText } from './interface_text.js?v=qol-v1-20260717';
+import {
+    applyStaticInterfaceText,
+    getReportReasonOptions,
+} from './interface_text.js?v=qol-v1-20260717';
 
 function ensureResponsiveStylesheet() {
     if (document.querySelector('link[data-nimhunt-responsive]')) return;
 
     const stylesheet = document.createElement('link');
     stylesheet.rel = 'stylesheet';
-    stylesheet.href = '/static/responsive.css?v=mobile-layout-v1-20260718';
+    stylesheet.href = '/static/responsive.css?v=mobile-layout-v2-20260718';
     stylesheet.dataset.nimhuntResponsive = 'true';
     document.head.append(stylesheet);
 }
+
+// find_spots.js historically read this catalogue as a global constant. Keep the
+// binding available until that page module is next consolidated, so opening the
+// report form cannot fail before it renders its reason options.
+globalThis.REPORT_REASON_OPTIONS = getReportReasonOptions();
 
 // Every public page already loads this small module. Loading the shared
 // responsive layer here keeps the narrow-screen fixes consistent without

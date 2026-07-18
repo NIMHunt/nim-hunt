@@ -1,9 +1,9 @@
 name: Verify Spot creation fees
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/spot-creation-fees
+      - agent/public-testnet-deployment
 
 permissions:
   contents: write

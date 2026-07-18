@@ -1,0 +1,344 @@
+/*
+ * Narrow-screen safeguards for NimHunt.
+ *
+ * The main stylesheet deliberately keeps the existing mobile-first visual
+ * language. These rules only relax fixed sizes and reflow controls when the
+ * available width would otherwise cause clipping or overlap.
+ */
+
+@media (max-width: 560px) {
+    html,
+    body {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+
+    .nq-style .home-shell,
+    .nq-style .home-shell.find-shell,
+    .nq-style .find-shell {
+        padding-left: max(12px, env(safe-area-inset-left)) !important;
+        padding-right: max(12px, env(safe-area-inset-right)) !important;
+    }
+
+    .hero-title {
+        /* Remove the old 5.8rem mobile floor, which clips on 320–390px screens. */
+        font-size: clamp(4rem, 20vw, 7rem) !important;
+        letter-spacing: -0.075em;
+    }
+
+    .hero-diamond {
+        margin-left: 0.18em;
+    }
+
+    .home-actions {
+        gap: 8px;
+    }
+
+    .action-button {
+        min-width: 0 !important;
+        padding: 14px 12px !important;
+        overflow: hidden;
+    }
+
+    .action-title,
+    .secondary-action .action-title {
+        min-width: 0;
+        max-width: 100%;
+        font-size: clamp(1.5rem, 6vw, 2rem);
+        overflow-wrap: anywhere;
+    }
+
+    .action-detail {
+        min-width: 0;
+        max-width: 100%;
+        font-size: clamp(0.98rem, 4vw, 1.2rem);
+        overflow-wrap: anywhere;
+    }
+
+    .secondary-action {
+        min-width: 0;
+        min-height: 106px;
+    }
+
+    .display-name-actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .display-name-actions .nq-button {
+        width: 100% !important;
+        min-width: 0 !important;
+        padding-inline: 0.7rem !important;
+        font-size: 1.25rem !important;
+    }
+
+    .debug-panel div {
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .debug-panel dt,
+    .debug-panel dd {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .notice-backdrop {
+        padding-left: max(12px, env(safe-area-inset-left));
+        padding-right: max(12px, env(safe-area-inset-right));
+    }
+
+    .notice-card,
+    .nh-confirm-card,
+    .delete-spot-card {
+        padding: 18px !important;
+    }
+
+    .page-top-card {
+        padding: 16px 14px;
+        gap: 10px;
+    }
+
+    .page-top-card h1 {
+        min-width: 0;
+        font-size: clamp(2rem, 8vw, 3rem);
+        overflow-wrap: anywhere;
+    }
+
+    .back-link {
+        max-width: 42%;
+        flex: 0 1 auto;
+        overflow-wrap: anywhere;
+    }
+
+    .map-card {
+        padding: 8px;
+    }
+
+    .spot-map {
+        min-height: 260px;
+    }
+
+    .spot-list-card,
+    .my-spots-section-card,
+    .my-claims-section-card,
+    .create-spot-page-card {
+        padding: 14px;
+    }
+
+    .filter-toggle {
+        max-width: 100%;
+        min-width: min(12.5rem, 100%);
+        padding-inline: 1.35rem;
+    }
+
+    .spot-list-toggle,
+    .spot-list-toggle.has-claim-action {
+        min-height: 0;
+        padding: 14px 12px;
+        padding-right: 12px;
+    }
+
+    .spot-list-toggle .spot-list-actions {
+        position: static !important;
+        top: auto !important;
+        right: auto !important;
+        transform: none !important;
+    }
+
+    .spot-list-top-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .spot-list-toggle.has-claim-action .spot-list-top-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .spot-list-toggle.has-claim-action .spot-list-actions {
+        width: 100%;
+        margin-top: 8px;
+        justify-content: flex-end;
+    }
+
+    .spot-list-title,
+    .spot-list-toggle .spot-list-meta {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .spot-list-toggle .spot-list-meta {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .spot-claim-button.nq-button-pill,
+    .spot-claim-button.is-unavailable {
+        min-width: 8.6rem !important;
+        height: 4.8rem !important;
+        min-height: 4.8rem !important;
+        padding-inline: 0.9rem !important;
+        font-size: 1.3rem !important;
+    }
+
+    .spot-list-detail {
+        padding-right: 12px;
+        padding-left: 12px;
+    }
+
+    .nh-spot-popup .leaflet-popup-content {
+        font-size: 1.6rem;
+    }
+
+    .report-captcha-row,
+    .create-spot-captcha-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .report-captcha-input,
+    .create-spot-captcha-input {
+        min-width: 0;
+    }
+
+    .create-spot-page-actions,
+    .spot-owner-actions {
+        min-width: 0;
+    }
+
+    .create-spot-page-actions .nq-button,
+    .spot-owner-action-button,
+    .nh-modal-actions .nq-button,
+    .delete-spot-actions .nq-button {
+        min-width: 0 !important;
+        padding-inline: 0.75rem !important;
+        overflow-wrap: anywhere;
+    }
+
+    .create-spot-range-bubble {
+        max-width: min(11rem, 100%);
+        padding: 8px 10px;
+        font-size: 1.05rem;
+    }
+
+    .create-spot-label-with-help {
+        min-width: 0;
+        flex-wrap: wrap;
+    }
+
+    .create-spot-value-rate,
+    .create-spot-readonly-value {
+        overflow-wrap: anywhere;
+    }
+}
+
+@media (max-width: 390px) {
+    .hero-title {
+        font-size: clamp(3.75rem, 19.5vw, 5rem) !important;
+    }
+
+    .home-shell {
+        gap: 12px;
+    }
+
+    .hero-card {
+        padding-inline: 8px;
+    }
+
+    .welcome-card {
+        padding-inline: 12px;
+    }
+
+    .action-title,
+    .secondary-action .action-title {
+        font-size: clamp(1.4rem, 5.8vw, 1.75rem);
+    }
+
+    .action-detail {
+        font-size: clamp(0.92rem, 3.8vw, 1.05rem);
+    }
+
+    .spot-list-title {
+        white-space: normal;
+        text-overflow: clip;
+        overflow-wrap: anywhere;
+    }
+
+    .spot-password-row {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .spot-password-status {
+        width: 100%;
+        text-align: left;
+    }
+
+    .create-spot-field-row {
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: 8px;
+        align-items: stretch;
+    }
+
+    .create-spot-field-row > label,
+    .create-spot-field-label,
+    .create-spot-location-field,
+    .create-spot-radius-label,
+    .create-spot-radius-control {
+        grid-column: 1 !important;
+        grid-row: auto !important;
+        width: 100%;
+        padding-top: 0 !important;
+    }
+
+    .create-spot-description-row > label,
+    .create-spot-map-row .create-spot-field-label {
+        padding-top: 0;
+    }
+
+    .create-spot-map {
+        min-height: 230px;
+    }
+
+    .create-spot-range-wrap {
+        padding-top: 3.25rem !important;
+    }
+}
+
+@media (max-width: 340px) {
+    .nq-style .home-shell,
+    .nq-style .home-shell.find-shell,
+    .nq-style .find-shell {
+        padding-left: max(9px, env(safe-area-inset-left)) !important;
+        padding-right: max(9px, env(safe-area-inset-right)) !important;
+    }
+
+    .home-actions {
+        gap: 6px;
+    }
+
+    .action-button {
+        padding-inline: 9px !important;
+    }
+
+    .display-name-actions,
+    .nh-modal-actions,
+    .delete-spot-actions {
+        grid-template-columns: minmax(0, 1fr) !important;
+    }
+
+    .spot-owner-actions,
+    .create-spot-page-actions,
+    .create-spot-modal-actions {
+        flex-direction: column;
+    }
+
+    .back-link {
+        max-width: 38%;
+    }
+}

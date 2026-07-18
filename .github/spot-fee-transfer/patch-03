@@ -55,10 +55,10 @@
  
  
  async def get_spot_deposit_key_record(db, *, spot_id: int) -> RowDict:
- diff --git a/main.py b/main.py
- index 60e4744..9dcb8f7 100644
- --- a/main.py
- +++ b/main.py
+diff --git a/main.py b/main.py
+index 60e4744..9dcb8f7 100644
+--- a/main.py
++++ b/main.py
 @@ -176,9 +176,20 @@ def validate_deployment_safety() -> None:
      if not database_path.is_absolute():
          unsafe.append("NIMHUNT_DB_PATH must be an absolute persistent path")
@@ -103,10 +103,10 @@
  
      if unsafe:
          raise RuntimeError(f"Unsafe {mode} configuration: {', '.join(unsafe)}")
- diff --git a/public_html.py b/public_html.py
- index f7f4701..247aa7d 100644
- --- a/public_html.py
- +++ b/public_html.py
+diff --git a/public_html.py b/public_html.py
+index f7f4701..247aa7d 100644
+--- a/public_html.py
++++ b/public_html.py
 @@ -586,52 +586,98 @@ def _transaction_status_label(status_code: int | None) -> str:
      return "missing"
  

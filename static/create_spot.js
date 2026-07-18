@@ -1101,6 +1101,10 @@ function populateForm(spot) {
     });
     els.description.value = spot.description || '';
 
+    if (els.delete) {
+        els.delete.hidden = spot.can_delete === false;
+    }
+
     configureSpotTypeControls(spot);
     setSliderValue('radius', Number(spot.radius || MIN_RADIUS), { updateState: false });
     setSliderValue('duration', Number(spot.claim_duration ?? MIN_DURATION), { updateState: false });

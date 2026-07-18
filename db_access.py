@@ -42,15 +42,19 @@ import wallet
 # ---------------------------------------------------------------------------
 
 @asynccontextmanager
-async def transaction(db) -> AsyncIterator[None]:
+async def transaction(db, *, immediate: bool = False) -> AsyncIterator[None]:
     """Small transaction wrapper for an existing aiosqlite connection.
+
+    ``immediate=True`` acquires SQLite's write reservation before any financial
+    eligibility checks. Use it when a competing workflow must not slip between
+    a balance/state check and creation of a durable transaction intent.
 
     SQLite does not support arbitrary nested BEGIN blocks. If a caller needs
     nested transaction-like behaviour later, use SQLite SAVEPOINTs deliberately;
     do not silently nest this wrapper.
     """
     try:
-        await db.execute("BEGIN;")
+        await db.execute("BEGIN IMMEDIATE;" if immediate else "BEGIN;")
     except sqlite3.OperationalError as e:
         raise RuntimeError(
             "Nested transaction detected. Open one transaction at the top level."
@@ -335,6 +339,23 @@ def _minimum_payout_nim(*, is_prizedraw: bool) -> int:
     if is_prizedraw:
         return int(getattr(const, "MIN_PRIZEDRAW_PRIZE_PAYOUT_NIM", 1000))
     return int(getattr(const, "MIN_STANDARD_CLAIM_PAYOUT_NIM", 100))
+
+
+def configured_spot_creation_fee(*, is_prizedraw: bool) -> int:
+    """Return the creation fee configured for a newly-created Spot."""
+    if is_prizedraw:
+        return max(0, int(getattr(const, "PRIZEDRAW_SPOT_CREATION_FEE", 0)))
+    return max(0, int(getattr(const, "STANDARD_SPOT_CREATION_FEE", 0)))
+
+
+def spot_creation_fee_amount(spot: RowDict) -> int:
+    """Return the immutable creation fee snapshotted onto one Spot."""
+    return max(0, int(spot.get(schema.SPOT_CREATION_FEE) or 0))
+
+
+def spot_required_deposit_amount(spot: RowDict) -> int:
+    """Return reward-pool funding plus the one-time creation fee."""
+    return max(0, int(spot.get(schema.SPOT_TOTAL_VALUE) or 0)) + spot_creation_fee_amount(spot)
 
 
 async def spot_minimum_payout_summary(db, *, spot_id: int) -> RowDict:
@@ -783,6 +804,8 @@ async def _require_draft_spot(db, *, spot_id: int) -> RowDict:
         raise ValueError(f"spot id={spot_id} does not exist")
     if int(spot[schema.SPOT_STATUS]) != const.SPOT_STATUS_DRAFT:
         raise ValueError("spot fields can only be edited while the spot is a draft")
+    if spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None:
+        raise ValueError("spot fields cannot be edited after cancellation has started")
     return spot
 
 
@@ -862,6 +885,17 @@ async def create_spot(
 
     link = _clean_optional_text(link) or await _generate_unique_spot_link(db)
     deposit_record = await _generate_unique_spot_deposit_record(db)
+    creation_fee = configured_spot_creation_fee(is_prizedraw=bool(is_prizedraw))
+    creation_fee_address = str(
+        getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "") or ""
+    ).strip()
+    if not creation_fee_address:
+        raise ValueError("platform fee address must be configured before creating spots")
+    creation_fee_address = wallet.normalise_nimiq_address(
+        creation_fee_address,
+        field_name="platform fee address",
+        allow_dev_placeholder=bool(getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)),
+    )
 
     cur = await db.execute(
         f"""
@@ -885,11 +919,13 @@ async def create_spot(
             {schema.SPOT_MAX_TOTAL_CLAIMS},
             {schema.SPOT_USE_PASSWORD},
             {schema.SPOT_TOTAL_VALUE},
+            {schema.SPOT_CREATION_FEE},
+            {schema.SPOT_CREATION_FEE_ADDRESS},
             {schema.SPOT_STARTS_AT},
             {schema.SPOT_ENDS_AT},
             {schema.SPOT_STATUS}
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             int(created_by),
@@ -911,6 +947,8 @@ async def create_spot(
             max_total_claims,
             use_password,
             total_value,
+            creation_fee,
+            creation_fee_address,
             starts_at,
             ends_at,
             const.SPOT_STATUS_DRAFT,
@@ -1137,7 +1175,8 @@ async def publish_spot(db, *, spot_id: int) -> None:
         SET {schema.SPOT_STARTS_AT} = COALESCE({schema.SPOT_STARTS_AT}, unixepoch()),
             {schema.SPOT_STATUS} = ?
         WHERE {schema.SPOT_ID} = ?
-          AND {schema.SPOT_STATUS} = ?;
+          AND {schema.SPOT_STATUS} = ?
+          AND {schema.SPOT_CANCELLATION_STARTED_AT} IS NULL;
         """,
         (const.SPOT_STATUS_PUBLISHED, int(spot_id), const.SPOT_STATUS_DRAFT),
     )
@@ -1157,7 +1196,7 @@ async def set_spot_status_to_cancelled(db, *, spot_id: int) -> None:
 
 
 async def mark_spot_cancellation_started(db, *, spot_id: int) -> bool:
-    """Durably mark a published Spot cancellation as started.
+    """Durably mark a funded draft or published Spot cancellation as started.
 
     Returns True when this call established the marker and False when a previous
     cancellation attempt had already marked the Spot.
@@ -1167,10 +1206,14 @@ async def mark_spot_cancellation_started(db, *, spot_id: int) -> bool:
         UPDATE {schema.SPOT_TABLE_NAME}
         SET {schema.SPOT_CANCELLATION_STARTED_AT} = unixepoch()
         WHERE {schema.SPOT_ID} = ?
-          AND {schema.SPOT_STATUS} = ?
+          AND {schema.SPOT_STATUS} IN (?, ?)
           AND {schema.SPOT_CANCELLATION_STARTED_AT} IS NULL;
         """,
-        (int(spot_id), const.SPOT_STATUS_PUBLISHED),
+        (
+            int(spot_id),
+            const.SPOT_STATUS_DRAFT,
+            const.SPOT_STATUS_PUBLISHED,
+        ),
     )
     return int(cur.rowcount or 0) == 1
 
@@ -1566,6 +1609,10 @@ async def delete_draft_spot(db, *, spot_id: int) -> None:
         raise ValueError(f"spot id={spot_id} does not exist")
     if int(spot[schema.SPOT_STATUS]) != const.SPOT_STATUS_DRAFT:
         raise ValueError("only draft spots can be deleted")
+    if await has_spot_deposit_transactions(db, spot_id=int(spot_id)):
+        raise ValueError(
+            "drafts with deposit history cannot be deleted; cancel the draft from My Spots so transaction records and any recoverable NIM are preserved"
+        )
 
     cur = await db.execute(
         f"""
@@ -1688,7 +1735,7 @@ async def get_spot_deposit_totals(db, *, spot_id: int) -> dict[str, int]:
         "submitted_count": 0,
     }
     for row in rows:
-        status = int(row["status"] or -1)
+        status = int(row["status"] if row["status"] is not None else -1)
         amount = int(row["amount"] or 0)
         out["submitted_count"] += int(row["n"] or 0)
         if status == const.TRANS_STATUS_CONFIRMED:
@@ -1700,6 +1747,145 @@ async def get_spot_deposit_totals(db, *, spot_id: int) -> dict[str, int]:
     return out
 
 
+async def get_spot_creation_fee_totals(db, *, spot_id: int) -> dict[str, int]:
+    """Return creation-fee transaction totals by status for one Spot."""
+    rows = await db.execute_fetchall(
+        f"""
+        SELECT
+            {schema.TRANS_STATUS} AS status,
+            COALESCE(SUM({schema.TRANS_AMOUNT}), 0) AS amount,
+            COUNT(*) AS n
+        FROM {schema.TRANS_TABLE_NAME}
+        WHERE {schema.TRANS_SPOT_ID} = ?
+          AND {schema.TRANS_TYPE} = ?
+        GROUP BY {schema.TRANS_STATUS};
+        """,
+        (int(spot_id), const.TRANS_TYPE_CREATION_FEE),
+    )
+
+    out = {
+        "confirmed_amount": 0,
+        "pending_amount": 0,
+        "failed_amount": 0,
+        "submitted_count": 0,
+    }
+    for row in rows:
+        status = int(row["status"] if row["status"] is not None else -1)
+        amount = int(row["amount"] or 0)
+        out["submitted_count"] += int(row["n"] or 0)
+        if status == const.TRANS_STATUS_CONFIRMED:
+            out["confirmed_amount"] = amount
+        elif status == const.TRANS_STATUS_PENDING:
+            out["pending_amount"] = amount
+        elif status == const.TRANS_STATUS_FAILED:
+            out["failed_amount"] = amount
+    return out
+
+
+async def has_nonfailed_spot_creation_fee_transaction(db, *, spot_id: int) -> bool:
+    """Return True once a pending or confirmed creation-fee leg exists."""
+    cur = await db.execute(
+        f"""
+        SELECT 1
+        FROM {schema.TRANS_TABLE_NAME}
+        WHERE {schema.TRANS_SPOT_ID} = ?
+          AND {schema.TRANS_TYPE} = ?
+          AND {schema.TRANS_STATUS} != ?
+        LIMIT 1;
+        """,
+        (
+            int(spot_id),
+            const.TRANS_TYPE_CREATION_FEE,
+            const.TRANS_STATUS_FAILED,
+        ),
+    )
+    return await cur.fetchone() is not None
+
+
+async def has_confirmed_spot_creation_fee_transaction(db, *, spot_id: int) -> bool:
+    """Return True only when the snapshotted fee reached its snapshotted address."""
+    spot = await get_spot(db, spot_id=int(spot_id))
+    if spot is None:
+        return False
+    fee_amount = spot_creation_fee_amount(spot)
+    if fee_amount <= 0:
+        return True
+
+    cur = await db.execute(
+        f"""
+        SELECT 1
+        FROM {schema.TRANS_TABLE_NAME}
+        WHERE {schema.TRANS_SPOT_ID} = ?
+          AND {schema.TRANS_TYPE} = ?
+          AND {schema.TRANS_STATUS} = ?
+          AND {schema.TRANS_USER_ID} = ?
+          AND {schema.TRANS_AMOUNT} = ?
+          AND UPPER(REPLACE({schema.TRANS_FROM_ADDRESS}, ' ', '')) =
+              UPPER(REPLACE(?, ' ', ''))
+          AND UPPER(REPLACE({schema.TRANS_TO_ADDRESS}, ' ', '')) =
+              UPPER(REPLACE(?, ' ', ''))
+        LIMIT 1;
+        """,
+        (
+            int(spot_id),
+            const.TRANS_TYPE_CREATION_FEE,
+            const.TRANS_STATUS_CONFIRMED,
+            int(spot[schema.SPOT_CREATED_BY]),
+            fee_amount,
+            str(spot.get(schema.SPOT_DEPOSIT_ADDRESS) or ""),
+            str(spot.get(schema.SPOT_CREATION_FEE_ADDRESS) or ""),
+        ),
+    )
+    return await cur.fetchone() is not None
+
+
+async def get_spot_ids_ready_for_creation_fee(
+    db,
+    *,
+    limit: int = DEFAULT_LIMIT,
+) -> list[int]:
+    """Return fully funded drafts that still need their one-time creation fee.
+
+    A Spot remains excluded once a non-failed creation-fee intent exists. This
+    is the database-backed idempotency guard that prevents duplicate sends
+    across restarts or concurrent reconciliation passes.
+    """
+    rows = await db.execute_fetchall(
+        f"""
+        SELECT s.{schema.SPOT_ID} AS spot_id
+        FROM {schema.SPOT_TABLE_NAME} s
+        WHERE s.{schema.SPOT_STATUS} = ?
+          AND s.{schema.SPOT_CANCELLATION_STARTED_AT} IS NULL
+          AND s.{schema.SPOT_CREATION_FEE} > 0
+          AND (
+                SELECT COALESCE(SUM(t.{schema.TRANS_AMOUNT}), 0)
+                FROM {schema.TRANS_TABLE_NAME} t
+                WHERE t.{schema.TRANS_SPOT_ID} = s.{schema.SPOT_ID}
+                  AND t.{schema.TRANS_TYPE} = ?
+                  AND t.{schema.TRANS_STATUS} = ?
+          ) >= s.{schema.SPOT_TOTAL_VALUE} + s.{schema.SPOT_CREATION_FEE}
+          AND NOT EXISTS (
+                SELECT 1
+                FROM {schema.TRANS_TABLE_NAME} f
+                WHERE f.{schema.TRANS_SPOT_ID} = s.{schema.SPOT_ID}
+                  AND f.{schema.TRANS_TYPE} = ?
+                  AND f.{schema.TRANS_STATUS} != ?
+          )
+        ORDER BY s.{schema.SPOT_UPDATED_AT} ASC, s.{schema.SPOT_ID} ASC
+        LIMIT ?;
+        """,
+        (
+            const.SPOT_STATUS_DRAFT,
+            const.TRANS_TYPE_FILL_SPOT,
+            const.TRANS_STATUS_CONFIRMED,
+            const.TRANS_TYPE_CREATION_FEE,
+            const.TRANS_STATUS_FAILED,
+            _clamp_limit(limit),
+        ),
+    )
+    return [int(row["spot_id"]) for row in rows]
+
+
 async def can_publish_spot(db, *, spot_id: int) -> bool:
     """Return True when a draft SPOT is complete, creator-active, and funded."""
     spot = await get_spot(db, spot_id=spot_id)
@@ -1707,6 +1893,8 @@ async def can_publish_spot(db, *, spot_id: int) -> bool:
         return False
 
     if int(spot[schema.SPOT_STATUS]) != const.SPOT_STATUS_DRAFT:
+        return False
+    if spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None:
         return False
 
     if not await can_user_create_spot(db, user_id=int(spot[schema.SPOT_CREATED_BY])):
@@ -1762,7 +1950,9 @@ async def can_publish_spot(db, *, spot_id: int) -> bool:
             return False
 
     confirmed_amount = await get_confirmed_spot_deposit_total(db, spot_id=spot_id)
-    return confirmed_amount >= total_value
+    if confirmed_amount < spot_required_deposit_amount(spot):
+        return False
+    return await has_confirmed_spot_creation_fee_transaction(db, spot_id=spot_id)
 
 
 async def is_spot_claim_capacity_available(db, *, spot_id: int) -> bool:
@@ -3563,6 +3753,99 @@ async def create_platform_fee_transaction(
         to_address=to_address,
         tx_hash=tx_hash,
     )
+
+
+async def create_spot_creation_fee_transaction(
+    db,
+    *,
+    user_id: int,
+    spot_id: int,
+    amount: int,
+    from_address: str,
+    to_address: str,
+    tx_hash: str,
+) -> int:
+    """Create one durable creation-fee intent for a fully funded draft.
+
+    Re-check every financial prerequisite inside the same write transaction
+    that inserts the intent. This serialises safely against draft cancellation
+    and prevents a stale scheduler decision from charging a Spot after its
+    cancellation marker has been established.
+    """
+    spot = await get_spot(db, spot_id=int(spot_id))
+    if spot is None:
+        raise ValueError(f"spot id={spot_id} does not exist")
+    if int(spot[schema.SPOT_STATUS]) != const.SPOT_STATUS_DRAFT:
+        raise ValueError("creation fees can only be created for draft spots")
+    if spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None:
+        raise ValueError("creation fee cannot be created after cancellation has started")
+
+    expected_owner_id = int(spot[schema.SPOT_CREATED_BY])
+    if int(user_id) != expected_owner_id:
+        raise ValueError("creation fee user does not match the Spot owner")
+
+    expected_amount = spot_creation_fee_amount(spot)
+    if expected_amount <= 0:
+        raise ValueError("this Spot has no creation fee")
+    if int(amount) != expected_amount:
+        raise ValueError("creation fee amount does not match the Spot snapshot")
+
+    allow_dev_placeholder = bool(
+        getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)
+    )
+    expected_from_address = wallet.normalise_nimiq_address(
+        str(spot.get(schema.SPOT_DEPOSIT_ADDRESS) or ""),
+        field_name="spot deposit address",
+        allow_dev_placeholder=allow_dev_placeholder,
+    )
+    submitted_from_address = wallet.normalise_nimiq_address(
+        from_address,
+        field_name="creation fee from_address",
+        allow_dev_placeholder=allow_dev_placeholder,
+    )
+    if submitted_from_address != expected_from_address:
+        raise ValueError("creation fee sender does not match the Spot deposit address")
+
+    expected_address = wallet.normalise_nimiq_address(
+        str(spot.get(schema.SPOT_CREATION_FEE_ADDRESS) or ""),
+        field_name="spot creation fee address",
+        allow_dev_placeholder=allow_dev_placeholder,
+    )
+    submitted_address = wallet.normalise_nimiq_address(
+        to_address,
+        field_name="creation fee to_address",
+        allow_dev_placeholder=allow_dev_placeholder,
+    )
+    if submitted_address != expected_address:
+        raise ValueError("creation fee recipient does not match the Spot snapshot")
+
+    confirmed_deposit_total = await get_confirmed_spot_deposit_total(
+        db,
+        spot_id=int(spot_id),
+    )
+    if confirmed_deposit_total < spot_required_deposit_amount(spot):
+        raise ValueError("creation fee cannot be created before full funding confirms")
+    if await has_nonfailed_spot_creation_fee_transaction(db, spot_id=int(spot_id)):
+        raise RuntimeError(f"Spot id={spot_id} already has a non-failed creation fee transaction")
+
+    try:
+        return await _create_transaction(
+            db,
+            user_id=expected_owner_id,
+            spot_id=spot_id,
+            claim_id=None,
+            trans_type=const.TRANS_TYPE_CREATION_FEE,
+            amount=expected_amount,
+            from_address=expected_from_address,
+            to_address=expected_address,
+            tx_hash=tx_hash,
+        )
+    except sqlite3.IntegrityError as exc:
+        if await has_nonfailed_spot_creation_fee_transaction(db, spot_id=int(spot_id)):
+            raise RuntimeError(
+                f"Spot id={spot_id} already has a non-failed creation fee transaction"
+            ) from exc
+        raise
 
 
 

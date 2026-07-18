@@ -231,9 +231,28 @@ MIN_STANDARD_CLAIM_PAYOUT = MIN_STANDARD_CLAIM_PAYOUT_NIM * LUNA_PER_NIM
 MIN_PRIZEDRAW_PRIZE_PAYOUT_NIM = 1000
 MIN_PRIZEDRAW_PRIZE_PAYOUT = MIN_PRIZEDRAW_PRIZE_PAYOUT_NIM * LUNA_PER_NIM
 
-# Cancellation rules. The operator supplies a human-readable NIM fee, which is
-# converted exactly to Luna at import time. The fee address remains an obvious
-# development placeholder until a real pooled-fee address is configured.
+# Platform-fee rules. Creation fees are snapshotted onto each new Spot so a
+# later configuration change cannot alter an already-created draft's funding
+# target. Both creation and cancellation fees use the same operator-controlled
+# destination address.
+STANDARD_SPOT_CREATION_FEE = _env_nim_amount(
+    "NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM",
+    "1",
+    luna_per_nim=LUNA_PER_NIM,
+)
+PRIZEDRAW_SPOT_CREATION_FEE = _env_nim_amount(
+    "NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM",
+    "1",
+    luna_per_nim=LUNA_PER_NIM,
+)
+
+# This valid TestAlbatross address is derived from the repository's public
+# development mnemonic at a reserved path. It is convenient for local testing
+# only: anyone can derive its key, so public deployments explicitly reject it.
+DEV_PLATFORM_FEE_ADDRESS = "NQ35 6EUX JD08 6F88 KYA2 EDMC V3BC PXLB ELSB"
+
+# The operator supplies a human-readable cancellation fee, converted exactly
+# to Luna at import time. One shared address receives both fee types.
 SPOT_CANCELLATION_FEE = _env_nim_amount(
     "NIMHUNT_SPOT_CANCELLATION_FEE_NIM",
     "1",
@@ -241,7 +260,7 @@ SPOT_CANCELLATION_FEE = _env_nim_amount(
 )
 SPOT_CANCELLATION_FEE_ADDRESS = os.getenv(
     "NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS",
-    "NQ00 NIMHUNT DEV CANCELLATION FEE POOL",
+    DEV_PLATFORM_FEE_ADDRESS,
 ).strip()
 
 # Draft SPOT defaults used when a creator has only entered the initial title.
@@ -434,6 +453,9 @@ TRANS_TYPE_CLAIM = 20
 
 # Platform fee transaction.
 TRANS_TYPE_PLAT_FEE = 30
+
+# One-time fee charged after a Spot's full funding target confirms.
+TRANS_TYPE_CREATION_FEE = 31
 
 
 

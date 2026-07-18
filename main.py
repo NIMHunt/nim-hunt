@@ -176,9 +176,20 @@ def validate_deployment_safety() -> None:
     if not database_path.is_absolute():
         unsafe.append("NIMHUNT_DB_PATH must be an absolute persistent path")
 
+    # Current Spot funding targets reserve reward value and platform fees, but
+    # not an additional per-transaction miner/network-fee budget for every
+    # future payout. Zero-fee Nimiq transactions are the supported public
+    # accounting model; reject a non-zero setting rather than underfunding a
+    # Spot immediately when its creation fee is sent.
+    if int(getattr(const, "NIMIQ_TRANSACTION_FEE", 0)) != 0:
+        unsafe.append(
+            "NIMIQ_TRANSACTION_FEE must remain 0 in public deployments because "
+            "Spot funding targets do not reserve network fees"
+        )
+
     fee_address = str(getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "")).strip()
     try:
-        wallet.normalise_nimiq_address(
+        normalised_fee_address = wallet.normalise_nimiq_address(
             fee_address,
             field_name="SPOT_CANCELLATION_FEE_ADDRESS",
             allow_dev_placeholder=False,
@@ -187,6 +198,21 @@ def validate_deployment_safety() -> None:
         unsafe.append(
             "SPOT_CANCELLATION_FEE_ADDRESS must be a valid operator-controlled address"
         )
+    else:
+        dev_fee_address = str(getattr(const, "DEV_PLATFORM_FEE_ADDRESS", "")).strip()
+        if dev_fee_address:
+            try:
+                normalised_dev_fee_address = wallet.normalise_nimiq_address(
+                    dev_fee_address,
+                    field_name="DEV_PLATFORM_FEE_ADDRESS",
+                    allow_dev_placeholder=False,
+                )
+            except ValueError:
+                normalised_dev_fee_address = ""
+            if normalised_fee_address == normalised_dev_fee_address:
+                unsafe.append(
+                    "SPOT_CANCELLATION_FEE_ADDRESS must not use the public development fee address"
+                )
 
     if unsafe:
         raise RuntimeError(f"Unsafe {mode} configuration: {', '.join(unsafe)}")

@@ -64,6 +64,11 @@ class ConfirmedVerificationQuarantineTest(unittest.IsolatedAsyncioTestCase):
                  "verify_chain_details_for_record",
                  mock.AsyncMock(return_value=trans_updater.VerifiedChainDetails(ok=False, reason="recipient mismatch")),
              ), \
+             mock.patch.object(
+                 trans_updater,
+                 "submit_ready_spot_creation_fees",
+                 mock.AsyncMock(return_value={"ok": True, "submitted": [], "skipped": [], "errors": []}),
+             ), \
              mock.patch.object(trans_updater, "mark_trans_as_failed", mock.AsyncMock()) as mark_failed:
             result = await trans_updater.check_pending_transactions()
 

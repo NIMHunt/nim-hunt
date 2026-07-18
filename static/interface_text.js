@@ -175,6 +175,7 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
         draftDeposit: {
             ready: 'Ready',
             partial: (amountText) => `Partial Deposit - ${amountText}`,
+            processingFee: 'Creation Fee Processing',
             missing: 'No Deposit',
         },
         ownerActions: {
@@ -182,6 +183,7 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
             deposit: 'Deposit',
             publish: 'Publish',
             cancel: 'Cancel Spot',
+            cancelDraft: 'Cancel Draft',
             publishStartTimePastTooltip: 'Change the start time before publishing.',
             publishUnavailableTooltip: 'This draft cannot be published yet.',
         },
@@ -191,6 +193,10 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
             confirming: 'Confirming…',
             cancel: 'Cancel',
             confirmBody: ({ title, amountText }) => `Deposit ${amountText} for '${title}'?`,
+            confirmLead: ({ title }) => `Deposit NIM for ${title}?`,
+            spotFundingLine: (amountText) => `Spot Funds: ${amountText}`,
+            creationFeeLine: (amountText) => `Creation Fee: ${amountText}`,
+            depositNowLine: (amountText) => `Total Deposit: ${amountText}`,
             intentFailed: {
                 title: 'Could not prepare deposit',
                 body: 'The deposit request could not be prepared. Refresh My Spots and try again.',
@@ -216,6 +222,7 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
             confirm: 'Confirm',
             confirming: 'Cancelling…',
             cancel: 'Cancel',
+            manualReviewNotice: 'Failed deposit records will remain attached to this Spot for manual review and are not included in the estimated refund.',
             confirmBody: ({ title, refundText, feeText, remainingLost = false, noRemaining = false }) => {
                 if (noRemaining) {
                     return `Are you sure you want to cancel '${title}'? There are no remaining funds to return.`;
@@ -223,7 +230,7 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
                 if (remainingLost) {
                     return `Are you sure you want to cancel '${title}'? Remaining funds will be lost.`;
                 }
-                return `Are you sure you want to cancel '${title}'? Remaining funds will be returned, minus the cancellation fee. Estimated refund: ${refundText}. Cancellation fee: ${feeText}.`;
+                return `Are you sure you want to cancel '${title}'? Remaining funds will be returned, minus the cancellation fee. Estimated refund: ${refundText} Cancellation fee: ${feeText}`;
             },
             failed: {
                 title: 'Could not cancel Spot',

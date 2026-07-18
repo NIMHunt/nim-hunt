@@ -1,0 +1,40 @@
+/*
+ * Final narrow-screen label safeguards.
+ *
+ * Status badges and the Unavailable action are fixed right-side controls. They
+ * must remain fully readable; only the Spot title and location text may shrink
+ * and show an ellipsis when horizontal space is limited.
+ */
+
+@media (max-width: 560px) {
+    .spot-list-toggle {
+        padding-right: 13.5rem;
+    }
+
+    .spot-list-toggle.has-claim-action {
+        padding-right: 16rem;
+    }
+
+    .spot-list-toggle .spot-list-actions {
+        min-width: max-content;
+        flex: 0 0 auto;
+    }
+
+    .spot-badge {
+        max-width: none !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        white-space: nowrap !important;
+        flex: 0 0 auto;
+    }
+
+    .spot-claim-button.is-unavailable {
+        width: auto !important;
+        max-width: none !important;
+        min-width: 10.6rem !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        white-space: nowrap !important;
+        flex: 0 0 auto;
+    }
+}

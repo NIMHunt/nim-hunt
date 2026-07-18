@@ -1,0 +1,277 @@
+ANSACTION_FEE",
+         "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND",
+         "NIMHUNT_NIMIQ_SEND_COMMAND",
+         "NIMHUNT_NIMIQ_MNEMONIC",
+         "NIMHUNT_NIMIQ_EXTERNAL_SIGNER",
+         "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC",
+         "NIMHUNT_DEV_MASTER_SEED",
++        "NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM",
++        "NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM",
+         "NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS",
+         "NIMHUNT_DB_PATH",
+     ):
+@@ -120,6 +123,22 @@ class DeploymentModeParsingTest(unittest.TestCase):
+         self.assertNotEqual(result.returncode, 0)
+         self.assertIn("must be development, public-testnet, or production", result.stderr)
+ 
++    def test_creation_fees_are_independent_and_zero_is_supported(self):
++        environment = clean_environment()
++        environment.update(
++            {
++                "NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM": "0",
++                "NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM": "2.5",
++            }
++        )
++        result = run_python(
++            "import constants as c; print(c.STANDARD_SPOT_CREATION_FEE, "
++            "c.PRIZEDRAW_SPOT_CREATION_FEE)",
++            environment,
++        )
++        self.assertEqual(result.returncode, 0, result.stderr)
++        self.assertEqual(result.stdout.strip(), "0 250000")
++
+     def test_conflicting_legacy_and_preferred_settings_fail(self):
+         environment = clean_environment()
+         environment.update(
+@@ -173,6 +192,43 @@ class PublicDeploymentValidationTest(unittest.TestCase):
+         self.assertNotEqual(result.returncode, 0)
+         self.assertIn("public default test mnemonic", result.stderr)
+ 
++    def test_public_modes_reject_nonzero_network_fee_without_a_fee_reserve(self):
++        with (
++            mock.patch.object(const, "DEPLOYMENT_MODE", "public-testnet"),
++            mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
++            mock.patch.object(const, "NIMIQ_NETWORK", "TestAlbatross"),
++            mock.patch.object(const, "NIMIQ_NETWORK_ID", 5),
++            mock.patch.object(const, "NIMIQ_RPC_URL", "https://rpc.testnet.nimiqwatch.com/"),
++            mock.patch.object(const, "NIMIQ_HUB_URL", "https://hub.nimiq-testnet.com"),
++            mock.patch.object(const, "NIMIQ_TRANSACTION_FEE", 1),
++            mock.patch.object(const, "TEST_FEATURES_ENABLED", False),
++            mock.patch.object(const, "DEFAULT_TO_TEST_USER", False),
++            mock.patch.object(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False),
++            mock.patch.object(const, "ALLOW_DEV_WALLET_SENDS", False),
++            mock.patch.object(const, "SPOT_CANCELLATION_FEE_ADDRESS", VALID_FEE_ADDRESS),
++            mock.patch.object(main.database, "DB_PATH", "/srv/nimhunt/records.db"),
++            mock.patch.dict(
++                os.environ,
++                {
++                    "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND": "node /app/helpers/nimiq_helper.mjs",
++                    "NIMHUNT_NIMIQ_SEND_COMMAND": "node /app/helpers/nimiq_helper.mjs",
++                    "NIMHUNT_NIMIQ_MNEMONIC": "private operator mnemonic words",
++                    "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC": "",
++                    "NIMHUNT_DEV_MASTER_SEED": "",
++                },
++                clear=False,
++            ),
++        ):
++            with self.assertRaisesRegex(RuntimeError, "NIMIQ_TRANSACTION_FEE must remain 0"):
++                main.validate_deployment_safety()
++
++    def test_public_testnet_rejects_public_development_fee_address(self):
++        environment = valid_public_environment("public-testnet")
++        environment["NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS"] = const.DEV_PLATFORM_FEE_ADDRESS
++        result = run_python("import main; main.validate_deployment_safety()", environment)
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn("public development fee address", result.stderr)
++
+     def test_public_testnet_rejects_development_seed(self):
+         environment = valid_public_environment("public-testnet")
+         environment["NIMHUNT_DEV_MASTER_SEED"] = "development only"
+ diff --git a/tests/test_financial_finality.py b/tests/test_financial_finality.py
+ index acaa8c2..d4dc17f 100644
+ --- a/tests/test_financial_finality.py
+ +++ b/tests/test_financial_finality.py
+@@ -64,6 +64,11 @@ class ConfirmedVerificationQuarantineTest(unittest.IsolatedAsyncioTestCase):
+                  "verify_chain_details_for_record",
+                  mock.AsyncMock(return_value=trans_updater.VerifiedChainDetails(ok=False, reason="recipient mismatch")),
+              ), \
++             mock.patch.object(
++                 trans_updater,
++                 "submit_ready_spot_creation_fees",
++                 mock.AsyncMock(return_value={"ok": True, "submitted": [], "skipped": [], "errors": []}),
++             ), \
+              mock.patch.object(trans_updater, "mark_trans_as_failed", mock.AsyncMock()) as mark_failed:
+             result = await trans_updater.check_pending_transactions()
+ 
+ diff --git a/tests/test_funding_wallet_and_find_spots.py b/tests/test_funding_wallet_and_find_spots.py
+ index ffe1a1e..2ca53f4 100644
+ --- a/tests/test_funding_wallet_and_find_spots.py
+ +++ b/tests/test_funding_wallet_and_find_spots.py
+@@ -146,6 +146,8 @@ class FundingWalletSubmissionGuardTest(unittest.IsolatedAsyncioTestCase):
+         spot = {
+             schema.SPOT_ID: 7,
+             schema.SPOT_DEPOSIT_ADDRESS: "deposit-wallet",
++            schema.SPOT_STATUS: const.SPOT_STATUS_DRAFT,
++            schema.SPOT_CANCELLATION_STARTED_AT: None,
+         }
+         with (
+             mock.patch.object(
+ diff --git a/tests/test_spot_creation_fees.py b/tests/test_spot_creation_fees.py
+ new file mode 100644
+ index 0000000..bd91081
+ --- /dev/null
+ +++ b/tests/test_spot_creation_fees.py
+@@ -0,0 +1,709 @@
++import sqlite3
++import tempfile
++import time
++import unittest
++from contextlib import closing
++from unittest import mock
++
++import constants as const
++import database as schema
++import db_access
++import public_html
++import trans_updater
++import spoof
++
++
++class SpotCreationFeeFixture(unittest.IsolatedAsyncioTestCase):
++    async def asyncSetUp(self):
++        self._tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=True)
++        self._old_db_path = schema.DB_PATH
++        schema.DB_PATH = self._tmp.name
++        await schema.init_db()
++
++        async with schema.get_db() as db:
++            self.owner_id = await db_access.create_user(
++                db,
++                device_id_hash=f"owner-{id(self)}",
++            )
++            await db.commit()
++
++    async def asyncTearDown(self):
++        schema.DB_PATH = self._old_db_path
++        self._tmp.close()
++
++    async def create_standard_spot(
++        self,
++        *,
++        fee: int | None = None,
++        total_value: int | None = None,
++        title: str = "Creation Fee Spot",
++    ) -> int:
++        fee = const.STANDARD_SPOT_CREATION_FEE if fee is None else int(fee)
++        total_value = const.MIN_SPOT_TOTAL_VALUE if total_value is None else int(total_value)
++        with mock.patch.object(const, "STANDARD_SPOT_CREATION_FEE", fee), mock.patch.object(
++            const,
++            "SPOT_CANCELLATION_FEE_ADDRESS",
++            const.DEV_PLATFORM_FEE_ADDRESS,
++        ):
++            async with schema.get_db() as db:
++                spot_id = await db_access.create_spot(
++                    db,
++                    created_by=self.owner_id,
++                    title=title,
++                    desc="A fully configured standard Spot.",
++                    lat=51.5,
++                    long=-0.1,
++                    radius=100,
++                    claim_duration=0,
++                    max_claims_per_user=1,
++                    max_total_claims=1,
++                    total_value=total_value,
++                    starts_at=int(time.time()) + 3600,
++                    ends_at=const.MIN_SPOT_ENDS_AFTER_SECONDS,
++                    auto_reverse_geocode=False,
++                    city="London",
++                    country="United Kingdom",
++                )
++                await db.commit()
++                return spot_id
++
++    async def create_prizedraw_spot(self, *, fee: int) -> int:
++        with mock.patch.object(const, "PRIZEDRAW_SPOT_CREATION_FEE", int(fee)), mock.patch.object(
++            const,
++            "SPOT_CANCELLATION_FEE_ADDRESS",
++            const.DEV_PLATFORM_FEE_ADDRESS,
++        ):
++            async with schema.get_db() as db:
++                spot_id = await db_access.create_prizedraw(
++                    db,
++                    created_by=self.owner_id,
++                    title="Fee Prizedraw",
++                    desc="A fully configured Prizedraw.",
++                    lat=51.5,
++                    long=-0.1,
++                    radius=100,
++                    claim_duration=0,
++                    max_claims_per_user=1,
++                    max_total_claims=2,
++                    total_value=2 * const.MIN_PRIZEDRAW_PRIZE_PAYOUT,
++                    prize_count=1,
++                    starts_at=int(time.time()) + 3600,
++                    ends_at=const.MIN_SPOT_ENDS_AFTER_SECONDS,
++                    auto_reverse_geocode=False,
++                    city="London",
++                    country="United Kingdom",
++                )
++                await db.commit()
++                return spot_id
++
++    async def get_spot(self, spot_id: int):
++        async with schema.get_db() as db:
++            return await db_access.get_spot(db, spot_id=int(spot_id))
++
++    async def create_deposit(
++        self,
++        spot_id: int,
++        amount: int,
++        *,
++        status: int = const.TRANS_STATUS_CONFIRMED,
++        suffix: str = "deposit",
++    ) -> int:
++        async with schema.get_db() as db:
++            spot = await db_access.get_spot(db, spot_id=int(spot_id))
++            trans_id = await db_access.create_spot_deposit_transaction(
++                db,
++                user_id=self.owner_id,
++                spot_id=int(spot_id),
++                amount=int(amount),
++                from_address="NQ00 NIMHUNT DEV FUNDING WALLET",
++                to_address=str(spot[schema.SPOT_DEPOSIT_ADDRESS]),
++                tx_hash=f"{suffix}-{spot_id}-{time.time_ns()}",
++            )
++            if status == const.TRANS_STATUS_CONFIRMED:
++                await db_access.set_transaction_status_to_confirmed(
++                    db,
++                    trans_id=trans_id,
++                    block_number=123,
++                )
++            elif status == const.TRANS_STATUS_FAILED:
++                await db_access.set_transaction_status_to_failed(db, trans_id=trans_id)
++            await db.commit()
++            return trans_id
++
++    async def create_creation_fee_transaction(
++        self,
++        spot_id: int,
++        *,
++        status: int = const.TRANS_STATUS_PENDING,
++        suffix: str = "fee",
++    ) -> int:
++        async with schema.get_db() as db:
++            spot = await db_access.get_spot(db, spot_id=int(spot_id))
++            trans_id = await db_access.create_spot_creation_fee_transaction(
++                db,
++                user_id=self.owner_id,
++                spot_id=int(spot_id),
++                amount=int(spot[schema.SPOT_CREATION_FEE]),
++                from_address=str(spot[schema.SPOT_DEPOSIT_ADDRESS]),
++                to_address=str(spot[schema.SPOT_CREATION_FEE_ADDRESS]),
++                tx_hash=f"{suffix}-{spot_id}-{time.time_ns()}",
++            )
++            if status == const.TRANS_STATUS_CONFIRMED:
++                await db_access.set_transaction_status_to_confirmed(
++                    db,
++                    trans_id=trans_id,
++                    block_number=456,
++                )
++            elif status == const.TRANS_STATUS_FAILED:
++                await db_access.set_transaction_status_to_failed(db, trans_id=trans_id)
++            await db.commit()
++            return trans_id
++
++
++class CreationFeeSnapshotTests(Spo

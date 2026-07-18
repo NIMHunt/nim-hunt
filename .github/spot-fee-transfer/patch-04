@@ -1,0 +1,206 @@
+ const.TRANS_STATUS_FAILED
+     )
+     remaining_amount = max(0, confirmed_deposit_amount - nonfailed_outgoing_amount)
+     configured_fee = max(0, int(getattr(const, "SPOT_CANCELLATION_FEE", 0)))
+@@ -679,6 +736,12 @@ def _cancellation_summary(transactions: list[dict[str, Any]]) -> dict[str, Any]:
+     return {
+         "confirmed_deposit_amount": confirmed_deposit_amount,
+         "nonfailed_outgoing_amount": nonfailed_outgoing_amount,
++        "confirmed_creation_fee_amount": sum(
++            int(trans.get(schema.TRANS_AMOUNT) or 0)
++            for trans in transactions
++            if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CREATION_FEE
++            and int(trans.get(schema.TRANS_STATUS) if trans.get(schema.TRANS_STATUS) is not None else -1) == const.TRANS_STATUS_CONFIRMED
++        ),
+         "remaining_amount": remaining_amount,
+         "configured_fee": configured_fee,
+         "fee_amount": fee_amount,
+@@ -701,10 +764,18 @@ def _serialise_owner_spot(
+     """
+     status_label = _owner_spot_status_label(spot, now=now)
+     total_value = int(spot.get(schema.SPOT_TOTAL_VALUE) or 0)
+-    deposit = _deposit_summary(transactions, total_value=total_value)
++    creation_fee = int(spot.get(schema.SPOT_CREATION_FEE) or 0)
++    creation_fee_address = str(spot.get(schema.SPOT_CREATION_FEE_ADDRESS) or "")
++    deposit = _deposit_summary(
++        transactions,
++        total_value=total_value,
++        creation_fee=creation_fee,
++        creation_fee_address=creation_fee_address,
++    )
+     confirmed_deposit_amount = int(deposit.get("confirmed_amount") or 0)
+     is_prizedraw = _spot_is_prizedraw_row(spot)
+     cancellation = _cancellation_summary(transactions)
++    cancellation_started = spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None
+     bucket = _owner_spot_bucket(spot, now=now, status_label=status_label)
+ 
+     lat_value = spot.get(schema.SPOT_LAT)
+@@ -726,14 +797,19 @@ def _serialise_owner_spot(
+         else int(getattr(const, "MIN_STANDARD_CLAIM_PAYOUT", 100 * const.LUNA_PER_NIM))
+     )
+     minimum_payout_ok = total_value >= minimum_payout * payout_divisor
+-    fully_funded = total_value > 0 and confirmed_deposit_amount >= total_value
++    fully_funded = bool(deposit.get("funding_complete"))
++    creation_fee_paid = bool(deposit.get("fee_paid"))
++    ready_to_publish = fully_funded and creation_fee_paid
+ 
+     publish_block_reason = None
+     publish_block_message = None
+-    if fully_funded and draft_start_time_past:
++    if fully_funded and not creation_fee_paid:
++        publish_block_reason = "creation_fee_processing"
++        publish_block_message = "The creation fee must confirm before publishing."
++    elif ready_to_publish and draft_start_time_past:
+         publish_block_reason = "start_time_past"
+         publish_block_message = "Change the start time before publishing."
+-    elif fully_funded and not minimum_payout_ok:
++    elif ready_to_publish and not minimum_payout_ok:
+         publish_block_reason = "minimum_payout_too_low"
+         kind = "prize" if is_prizedraw else "claim"
+         minimum_nim = int(minimum_payout / const.LUNA_PER_NIM)
+@@ -753,6 +829,9 @@ def _serialise_owner_spot(
+         "max_claims_per_user": int(spot.get(schema.SPOT_MAX_CLAIMS_PER_USER) or 0),
+         "max_total_claims": int(spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) if spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) is not None else 1),
+         "total_value": total_value,
++        "creation_fee": creation_fee,
++        "creation_fee_address": creation_fee_address,
++        "required_deposit_total": int(deposit.get("required_total") or 0),
+         "starts_at": spot.get(schema.SPOT_STARTS_AT),
+         "ends_at": _spot_absolute_ends_at(spot),
+         "ends_after": spot.get(schema.SPOT_ENDS_AT),
+@@ -776,25 +855,46 @@ def _serialise_owner_spot(
+         "trans_count": int(spot.get("trans_count") or 0),
+         "trans_total_amount": int(spot.get("trans_total_amount") or 0),
+         "deposit": deposit,
++        "cancellation_started": cancellation_started,
+         "total_value_locked": bool(deposit.get("has_submitted")),
+-        "can_edit": status_label == "draft",
++        "can_edit": status_label == "draft" and not cancellation_started,
++        "can_delete": (
++            status_label == "draft"
++            and not cancellation_started
++            and not bool(deposit.get("has_submitted"))
++        ),
+         "can_deposit": (
+             status_label == "draft"
++            and not cancellation_started
+             and total_value > 0
+             and int(deposit.get("pending_amount") or 0) <= 0
+             and int(deposit.get("amount_due") or 0) > 0
+         ),
+         "can_publish": (
+             status_label == "draft"
+-            and fully_funded
++            and not cancellation_started
++            and ready_to_publish
+             and not draft_start_time_past
+             and minimum_payout_ok
+         ),
+         "publish_block_reason": publish_block_reason,
+         "publish_block_message": publish_block_message,
+         "can_cancel": (
+-            int(spot[schema.SPOT_STATUS]) == const.SPOT_STATUS_PUBLISHED
+-            and not is_prizedraw
++            (
++                int(spot[schema.SPOT_STATUS]) == const.SPOT_STATUS_PUBLISHED
++                and not is_prizedraw
++            )
++            or (
++                status_label == "draft"
++                and confirmed_deposit_amount > 0
++                and int(deposit.get("pending_amount") or 0) <= 0
++                and int(deposit.get("pending_fee_amount") or 0) <= 0
++                and (
++                    not bool(deposit.get("funding_complete"))
++                    or bool(deposit.get("fee_paid"))
++                )
++                and spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is None
++            )
+         ),
+         "cancellation": cancellation,
+         "edit_href": f"{const.CREATE_SPOT_URL}/{int(spot[schema.SPOT_ID])}",
+@@ -1169,19 +1269,19 @@ def _claim_payout_summary(claim_transactions: list[dict[str, Any]] | None = None
+     ]
+     nonfailed_rows = [
+         trans for trans in all_payout_rows
+-        if int(trans.get(schema.TRANS_STATUS) or -1) != const.TRANS_STATUS_FAILED
++        if int(trans.get(schema.TRANS_STATUS) if trans.get(schema.TRANS_STATUS) is not None else -1) != const.TRANS_STATUS_FAILED
+     ]
+     confirmed_rows = [
+         trans for trans in nonfailed_rows
+-        if int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
++        if int(trans.get(schema.TRANS_STATUS) if trans.get(schema.TRANS_STATUS) is not None else -1) == const.TRANS_STATUS_CONFIRMED
+     ]
+     pending_rows = [
+         trans for trans in nonfailed_rows
+-        if int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_PENDING
++        if int(trans.get(schema.TRANS_STATUS) if trans.get(schema.TRANS_STATUS) is not None else -1) == const.TRANS_STATUS_PENDING
+     ]
+     failed_rows = [
+         trans for trans in all_payout_rows
+-        if int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_FAILED
++        if int(trans.get(schema.TRANS_STATUS) if trans.get(schema.TRANS_STATUS) is not None else -1) == const.TRANS_STATUS_FAILED
+     ]
+     return {
+         "has_payout": bool(nonfailed_rows),
+@@ -2488,15 +2588,22 @@ async def my_spots_deposit_intent_api(spot_id: int, payload: HomeSessionRequest)
+ 
+         if int(spot[schema.SPOT_STATUS]) != const.SPOT_STATUS_DRAFT:
+             return JSONResponse({**meta, "ok": False, "code": "not_draft", "message": "Only draft spots can be funded from this page."}, status_code=status.HTTP_409_CONFLICT)
++        if spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None:
++            return JSONResponse({**meta, "ok": False, "code": "cancellation_started", "message": "This draft is being cancelled and cannot receive another deposit."}, status_code=status.HTTP_409_CONFLICT)
+ 
+         transactions = await db_access.get_transactions_by_spot(db, spot_id=spot_id, limit=50)
+-        deposit = _deposit_summary(transactions, total_value=int(spot.get(schema.SPOT_TOTAL_VALUE) or 0))
++        deposit = _deposit_summary(
++            transactions,
++            total_value=int(spot.get(schema.SPOT_TOTAL_VALUE) or 0),
++            creation_fee=int(spot.get(schema.SPOT_CREATION_FEE) or 0),
++            creation_fee_address=str(spot.get(schema.SPOT_CREATION_FEE_ADDRESS) or ""),
++        )
+         if int(deposit.get("pending_amount") or 0) > 0:
+             return JSONResponse({**meta, "ok": False, "code": "deposit_pending", "message": "This draft already has a pending deposit. Wait for it to confirm or fail before making another deposit."}, status_code=status.HTTP_409_CONFLICT)
+ 
+         amount_due = int(deposit.get("amount_due") or 0)
+         if amount_due <= 0:
+-            return JSONResponse({**meta, "ok": False, "code": "deposit_covered", "message": "This draft already has submitted deposits covering its total value."}, status_code=status.HTTP_409_CONFLICT)
++            return JSONResponse({**meta, "ok": False, "code": "deposit_covered", "message": "This draft already has submitted deposits covering its Spot value and creation fee."}, status_code=status.HTTP_409_CONFLICT)
+ 
+     return JSONResponse(
+         {
+@@ -2507,6 +2614,9 @@ async def my_spots_deposit_intent_api(spot_id: int, payload: HomeSessionRequest)
+                 "title": spot.get(schema.SPOT_TITLE) or "NimHunt Spot",
+             },
+             "amount": amount_due,
++            "spot_value": int(deposit.get("spot_value") or 0),
++            "creation_fee": int(deposit.get("creation_fee") or 0),
++            "required_total": int(deposit.get("required_total") or 0),
+             "recipient": spot.get(schema.SPOT_DEPOSIT_ADDRESS),
+             "transaction_description": build_transaction_description(
+                 "Funding",
+@@ -2539,21 +2649,37 @@ async def my_spots_deposit_submitted_api(spot_id: int, payload: DepositSubmitted
+ 
+             if int(spot[schema.SPOT_STATUS]) != const.SPOT_STATUS_DRAFT:
+                 return JSONResponse({**meta, "ok": False, "code": "not_draft", "message": "Only draft spots can receive creator deposits."}, status_code=status.HTTP_409_CONFLICT)
++            if spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None:
++                return JSONResponse({**meta, "ok": False, "code": "cancellation_started", "message": "This draft is being cancelled and cannot receive another deposit."}, status_code=status.HTTP_409_CONFLICT)
+ 
+             transactions = await db_access.get_transactions_by_spot(db, spot_id=spot_id, limit=50)
+-            deposit = _deposit_summary(transactions, total_value=int(spot.get(schema.SPOT_TOTAL_VALUE) or 0))
++            deposit = _deposit_summary(
++                transactions,
++                total_value=int(spot.get(schema.SPOT_TOTAL_VALUE) or 0),
++                creation_fee=int(spot.get(schema.SPOT_CREATION_FEE) or 0),
++                creation_fee_address=str(spot.get(schema.SPOT_CREATION_FEE_ADDRESS) or ""),
++            )
+             if int(deposit.get("pending_amount") or 0) > 0:
+                 return JSONResponse({**meta, "ok": False, "code": "deposit_pending", "message": "This draft already has a pending deposit. Wait for it to confirm or fail before making another deposit."}, status_code=status.HTTP_409_CONFLICT)
+ 
+             amount_due = int(deposit.get("amount_due") or 0)
+             if amount_due <= 0:
+-                return JSONResponse({**meta, "ok": False, "code": "deposit_covered", "message": "This draft already has submitted deposits covering its total value."}, status_code=status.HTTP_409_CONFLICT)
+-
++                return JSONResponse({**meta, "ok": False, "code": "deposit_covered", "message": "This draft already has submitted deposits covering its Spot value and creation fee."}, status_code=status.HTTP_409_CONFLICT)
++
++            # The normal Nimiq Pay flow submits the full requested amount, but
++            # recording a smaller po

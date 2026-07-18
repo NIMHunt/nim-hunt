@@ -319,7 +319,8 @@ def validate_public_signer_configuration() -> DerivedSpotAddress:
 
     validated: list[DerivedSpotAddress] = []
     for env_name, command in commands.items():
-        assert command is not None
+        if command is None:  # Kept defensive even though ``missing`` is checked above.
+            raise WalletConfigError(f"Missing signer helper command: {env_name}")
         data = _run_json_command(command, payload)
         address = normalise_nimiq_address(
             str(data.get("address") or ""),

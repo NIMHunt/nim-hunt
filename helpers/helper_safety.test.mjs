@@ -28,6 +28,17 @@ function runHelper(extraEnvironment) {
   });
 }
 
+test('development accepts documented true aliases for the public test mnemonic flag', () => {
+  const result = runHelper({
+    NIMHUNT_DEPLOYMENT_MODE: 'development',
+    NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: 'true',
+  });
+  assert.equal(result.status, 0, result.stdout || result.stderr);
+  const response = JSON.parse(result.stdout);
+  assert.equal(response.ok, true);
+  assert.match(response.address, /^NQ/);
+});
+
 test('public-testnet rejects the public default mnemonic flag', () => {
   const result = runHelper({
     NIMHUNT_DEPLOYMENT_MODE: 'public-testnet',

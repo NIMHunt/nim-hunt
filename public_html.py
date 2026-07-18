@@ -7,12 +7,9 @@ This file is the first frontend-facing layer. The browser/webview calls these
 routes, and these routes then call db_access.py/cache.py. The frontend should
 not talk directly to the database.
 
-Current scope:
-- Home page HTML.
-- Home/session API: identify or create the USER from the Nimiq Pay device id.
-- Display-name update API.
-- My Spots page/API for creator-owned spots.
-- My Claims page/API for claims made by the current device.
+It owns the page/API boundary: device identification, ownership checks,
+request validation and response serialisation. Database rules stay in
+``db_access.py`` and chain-facing work stays in ``trans_updater.py``.
 """
 
 from __future__ import annotations
@@ -30,16 +27,14 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+import cache
 import constants as const
 import database as schema
 import db_access
-import trans_updater
-from transaction_descriptions import build_transaction_description
-from database import get_db
-
-import cache
 import settlement_updater
-
+import trans_updater
+from database import get_db
+from transaction_descriptions import build_transaction_description
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(const.TEMPLATES_DIR))
@@ -994,8 +989,10 @@ async def _identify_private_page_user(
             "language": language,
         }, status.HTTP_200_OK
 
-    assert payload.device_id_hash is not None
-    device_id_hash = payload.device_id_hash.strip().lower()
+    raw_device_id_hash = payload.device_id_hash
+    if raw_device_id_hash is None:  # Defensive: _valid_device_id_hash() was checked above.
+        raise RuntimeError("validated device identifier is unexpectedly missing")
+    device_id_hash = raw_device_id_hash.strip().lower()
     user_id, created = await db_access.get_or_create_user(db, device_id_hash=device_id_hash)
     await db_access.touch_user_last_seen(db, user_id=user_id)
     user = await db_access.get_user_by_id(db, user_id=user_id)
@@ -2924,8 +2921,13 @@ async def home_session(payload: HomeSessionRequest) -> JSONResponse:
             status_code=status.HTTP_200_OK,
         )
 
-    assert payload.device_id_hash is not None
-    device_id_hash = payload.device_id_hash.strip().lower()
+    raw_device_id_hash = payload.device_id_hash
+    if raw_device_id_hash is None:  # Defensive: _valid_device_id_hash() was checked above.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A valid device identifier is required.",
+        )
+    device_id_hash = raw_device_id_hash.strip().lower()
 
     async with get_db() as db:
         async with db_access.transaction(db):

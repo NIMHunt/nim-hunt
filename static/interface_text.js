@@ -192,7 +192,6 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
             confirm: 'Confirm',
             confirming: 'Confirming…',
             cancel: 'Cancel',
-            confirmBody: ({ title, amountText }) => `Deposit ${amountText} for '${title}'?`,
             confirmLead: ({ title }) => `Deposit NIM for ${title}?`,
             spotFundingLine: (amountText) => `Spot Funds: ${amountText}`,
             creationFeeLine: (amountText) => `Creation Fee: ${amountText}`,
@@ -223,14 +222,14 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
             confirming: 'Cancelling…',
             cancel: 'Cancel',
             manualReviewNotice: 'Failed deposit records will remain attached to this Spot for manual review and are not included in the estimated refund.',
-            confirmBody: ({ title, refundText, feeText, remainingLost = false, noRemaining = false }) => {
+            confirmBody: ({ title, remainingLost = false, noRemaining = false }) => {
                 if (noRemaining) {
                     return `Are you sure you want to cancel '${title}'? There are no remaining funds to return.`;
                 }
                 if (remainingLost) {
                     return `Are you sure you want to cancel '${title}'? Remaining funds will be lost.`;
                 }
-                return `Are you sure you want to cancel '${title}'? Remaining funds will be returned, minus the cancellation fee. Estimated refund: ${refundText} Cancellation fee: ${feeText}`;
+                return `Are you sure you want to cancel '${title}'?`;
             },
             failed: {
                 title: 'Could not cancel Spot',

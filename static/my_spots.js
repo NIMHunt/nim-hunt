@@ -1126,8 +1126,6 @@ function setCancelBodyContent({
     if (noRemaining || remainingLost) {
         const lines = [TEXT.cancelSpot.confirmBody({
             title,
-            refundText,
-            feeText,
             remainingLost,
             noRemaining,
         })];

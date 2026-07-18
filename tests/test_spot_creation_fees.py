@@ -9,8 +9,8 @@ import constants as const
 import database as schema
 import db_access
 import public_html
-import trans_updater
 import spoof
+import trans_updater
 
 
 class SpotCreationFeeFixture(unittest.IsolatedAsyncioTestCase):
@@ -334,7 +334,7 @@ class CreationFeeFundingTests(SpotCreationFeeFixture):
         await self.create_deposit(spot_id, db_access.spot_required_deposit_amount(spot))
 
         first_id = await self.create_creation_fee_transaction(spot_id)
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             await self.create_creation_fee_transaction(spot_id, suffix="duplicate")
 
         async with schema.get_db() as db:

@@ -123,6 +123,20 @@ class DeploymentModeParsingTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must be development, public-testnet, or production", result.stderr)
 
+    def test_default_helper_accepts_documented_true_alias(self):
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "NIMHUNT_NIMIQ_MNEMONIC": "",
+                    "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC": "yes",
+                },
+                clear=False,
+            ),
+            mock.patch.object(const, "NIMIQ_NETWORK", "TestAlbatross"),
+        ):
+            self.assertTrue(trans_updater._helper_seed_configured())
+
     def test_creation_fees_are_independent_and_zero_is_supported(self):
         environment = clean_environment()
         environment.update(

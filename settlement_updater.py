@@ -83,7 +83,10 @@ def _prize_amounts_by_claim_id(*, total_value: int, prize_count: int, winner_cla
         prize_count=max(1, int(prize_count)),
         winner_count=len(clean_ids),
     )
-    return {claim_id: int(amount) for claim_id, amount in zip(clean_ids, amounts)}
+    return {
+        claim_id: int(amount)
+        for claim_id, amount in zip(clean_ids, amounts, strict=True)
+    }
 
 
 def _standard_claim_payout_amount(spot: RowDict) -> int:
@@ -530,8 +533,10 @@ async def run_settlement_pass() -> RowDict:
 async def _settlement_loop(interval_seconds: int) -> None:
     global _SETTLEMENT_LAST_RESULT, _SETTLEMENT_LAST_ERROR
 
-    assert _SETTLEMENT_STOP_EVENT is not None
-    while not _SETTLEMENT_STOP_EVENT.is_set():
+    stop_event = _SETTLEMENT_STOP_EVENT
+    if stop_event is None:  # Defensive: the loop is normally created only by start_settlement_refresher().
+        return
+    while not stop_event.is_set():
         try:
             _SETTLEMENT_LAST_RESULT = await run_settlement_pass()
             if bool(_SETTLEMENT_LAST_RESULT.get("ok", True)):
@@ -547,7 +552,7 @@ async def _settlement_loop(interval_seconds: int) -> None:
             logger.exception("Background settlement pass failed")
 
         with suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(_SETTLEMENT_STOP_EVENT.wait(), timeout=max(1, int(interval_seconds)))
+            await asyncio.wait_for(stop_event.wait(), timeout=max(1, int(interval_seconds)))
 
 
 async def start_settlement_refresher(

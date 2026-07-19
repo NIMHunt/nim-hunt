@@ -80,7 +80,7 @@ async def has_broadcast_spot_creation_fee_transaction(db, *, spot_id: int) -> bo
 
 
 async def can_publish_spot_after_fee_broadcast(db, *, spot_id: int) -> bool:
-    """Keep all existing checks but stop waiting for fee block confirmation."""
+    """Keep all existing checks but make the internal fee non-blocking."""
     if await _ORIGINAL_CAN_PUBLISH_SPOT(db, spot_id=int(spot_id)):
         return True
 
@@ -147,10 +147,7 @@ async def can_publish_spot_after_fee_broadcast(db, *, spot_id: int) -> bool:
     )
     if confirmed_amount < db_access.spot_required_deposit_amount(spot):
         return False
-    return await has_broadcast_spot_creation_fee_transaction(
-        db,
-        spot_id=int(spot_id),
-    )
+    return True
 
 
 def deposit_summary(
@@ -273,8 +270,6 @@ def deposit_summary(
         status_value, status_label = "processing", "Deposit Processing"
     elif not funding_complete:
         status_value, status_label = "partial", "Partial Deposit"
-    elif not fee_submitted:
-        status_value, status_label = "processing", "Deposit Processing"
     else:
         status_value, status_label = "ready", "Ready"
 
@@ -293,8 +288,9 @@ def deposit_summary(
         "creation_fee_address": creation_fee_address,
         "funding_submitted": funding_submitted,
         "funding_complete": funding_complete,
-        # Existing owner serialisation uses fee_paid as its readiness flag.
-        "fee_paid": fee_submitted,
+        # Existing owner serialisation uses fee_paid as its publish-readiness flag.
+        # The internal transfer is deliberately non-blocking for the creator.
+        "fee_paid": funding_complete,
         "fee_submitted": fee_submitted,
         "fee_confirmed": fee_confirmed,
         "fee_status": fee_status,

@@ -329,7 +329,7 @@ export function createPasswordRequiredIcon() {
     wrap.className = 'spot-title-lock-icon-wrap has-lock-tooltip';
     wrap.dataset.tooltip = SPOT_TEXT.passwordRequiredTooltip || 'This spot requires a password.';
     wrap.setAttribute('aria-label', SPOT_TEXT.passwordRequiredTooltip || 'This spot requires a password.');
-    wrap.append(createNimiqInlineIcon('nq-lock-unlocked'));
+    wrap.append(createNimiqInlineIcon('nq-lock-locked'));
     attachPasswordTooltip(wrap);
     return wrap;
 }

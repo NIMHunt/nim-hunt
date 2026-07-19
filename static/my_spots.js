@@ -49,6 +49,8 @@ const state = {
     draftSpotCount: 0,
     draftSpotLimit: Number.parseInt(document.body.dataset.draftLimit || '3', 10),
     createSpotCaptcha: null,
+    refreshTimerId: null,
+    refreshInFlight: false,
 };
 
 const APP_NAME = document.body.dataset.appName || 'NimHunt';
@@ -1235,9 +1237,44 @@ function renderLoadedMySpots(data) {
     renderSpots(spots);
 }
 
+function stopMySpotsRefresh() {
+    if (state.refreshTimerId) window.clearTimeout(state.refreshTimerId);
+    state.refreshTimerId = null;
+}
+
+function mySpotsRefreshBlocked() {
+    return state.refreshInFlight
+        || state.creatingSpot
+        || state.depositInProgress
+        || state.publishInProgress
+        || state.cancelInProgress
+        || !els.createSpotBackdrop?.hidden
+        || !els.depositBackdrop?.hidden
+        || !els.publishBackdrop?.hidden
+        || !els.cancelBackdrop?.hidden;
+}
+
+function scheduleMySpotsRefresh(delayMs = 10000) {
+    stopMySpotsRefresh();
+    if (document.visibilityState !== 'visible') return;
+    state.refreshTimerId = window.setTimeout(refreshMySpots, delayMs);
+}
+
 async function refreshMySpots() {
-    const data = await loadMySpots();
-    renderLoadedMySpots(data);
+    if (mySpotsRefreshBlocked() || document.visibilityState !== 'visible') {
+        scheduleMySpotsRefresh();
+        return;
+    }
+    state.refreshInFlight = true;
+    try {
+        const data = await loadMySpots();
+        renderLoadedMySpots(data);
+    } catch (err) {
+        console.warn('NimHunt could not refresh My Spots yet.', err);
+    } finally {
+        state.refreshInFlight = false;
+        scheduleMySpotsRefresh();
+    }
 }
 
 async function initMySpots() {
@@ -1270,6 +1307,7 @@ async function initMySpots() {
     }
 
     renderLoadedMySpots(data);
+    scheduleMySpotsRefresh();
 
     if (new URLSearchParams(window.location.search).get('create') === '1') {
         showCreateSpotModal();
@@ -1320,6 +1358,15 @@ els.publishBackdrop?.addEventListener('click', (event) => {
         closePublishModal();
     }
 });
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void refreshMySpots();
+    else stopMySpotsRefresh();
+});
+window.addEventListener('pageshow', () => {
+    if (state.user) void refreshMySpots();
+});
+window.addEventListener('beforeunload', stopMySpotsRefresh);
 
 window.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;

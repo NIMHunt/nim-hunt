@@ -129,6 +129,28 @@ def _clean_optional_text(value: str | None) -> str | None:
     return value or None
 
 
+_CLAIM_CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+_CLAIM_CODE_LENGTH = 10
+
+
+def _normalise_claim_code(value: str | None, *, required: bool = False) -> str | None:
+    """Return an uppercase ASCII claim code or None.
+
+    New claim codes deliberately avoid punctuation so they are easy to type on
+    a phone. Lowercase user input is accepted and normalised for convenience.
+    """
+    cleaned = _clean_optional_text(value)
+    if cleaned is None:
+        if required:
+            raise ValueError("A claim code is required for this spot.")
+        return None
+
+    cleaned = cleaned.upper()
+    if not cleaned.isascii() or not cleaned.isalnum():
+        raise ValueError("Claim codes contain uppercase letters and numbers only.")
+    return cleaned
+
+
 def _clean_optional_nimiq_address(value: str | None, *, required: bool = False) -> str | None:
     """Return a checksum-valid, normalised Nimiq address or None.
 
@@ -1935,12 +1957,13 @@ async def can_publish_spot(db, *, spot_id: int) -> bool:
         return False
 
     starts_at = spot.get(schema.SPOT_STARTS_AT)
-    if starts_at is not None and int(starts_at) <= await get_unixepoch(db):
-        return False
-
     ends_after = int(spot.get(schema.SPOT_ENDS_AT) or 0)
     if ends_after < const.MIN_SPOT_ENDS_AFTER_SECONDS:
         return False
+    if starts_at is not None:
+        now = await get_unixepoch(db)
+        if int(starts_at) + ends_after <= now:
+            return False
 
     use_password = int(spot.get(schema.SPOT_USE_PASSWORD) or 0) == 1
     if use_password:
@@ -3092,13 +3115,13 @@ async def create_claim_attempt(
         raise ValueError(rule.get("message") or "This spot cannot be claimed right now.")
 
     use_password = int(spot.get(schema.SPOT_USE_PASSWORD) or 0) == 1
-    clean_code = _clean_optional_text(claim_code)
+    clean_code = _normalise_claim_code(claim_code, required=use_password)
     if use_password:
-        if not clean_code:
-            raise ValueError("A claim code is required for this spot.")
         existing_code = await get_claim_code_by_code(db, spot_id=spot_id, claim_code=clean_code)
-        if existing_code is None or existing_code.get(schema.CLAIM_CODE_USED_BY) is not None:
+        if existing_code is None:
             raise ValueError("That claim code is not valid for this spot.")
+        if existing_code.get(schema.CLAIM_CODE_USED_BY) is not None:
+            raise ValueError("This code has already been used.")
 
     claim_duration = int(spot.get(schema.SPOT_CLAIM_DURATION) or 0)
     # CLAIM.accuracy now tracks the duration-claim health budget.
@@ -3297,7 +3320,7 @@ async def create_claim_code(db, *, spot_id: int, claim_code: str) -> int:
         )
         VALUES (?, ?, NULL);
         """,
-        (int(spot_id), str(claim_code)),
+        (int(spot_id), _normalise_claim_code(claim_code, required=True)),
     )
     return int(cur.lastrowid)
 
@@ -3351,11 +3374,18 @@ async def claim_code_for_claim(
           AND {schema.CLAIM_CODE_USED_BY} IS NULL
         RETURNING {schema.CLAIM_CODE_ID};
         """,
-        (int(claim_id), int(spot_id), str(claim_code)),
+        (int(claim_id), int(spot_id), _normalise_claim_code(claim_code, required=True)),
     )
     row = await cur.fetchone()
     if row is None:
-        raise RuntimeError("No available matching claim code found")
+        existing = await get_claim_code_by_code(
+            db,
+            spot_id=int(spot_id),
+            claim_code=claim_code,
+        )
+        if existing is not None and existing.get(schema.CLAIM_CODE_USED_BY) is not None:
+            raise ValueError("This code has already been used.")
+        raise ValueError("That claim code is not valid for this spot.")
     return int(row[schema.CLAIM_CODE_ID])
 
 
@@ -3384,7 +3414,7 @@ async def get_claim_code_by_code(
         WHERE {schema.CLAIM_CODE_SPOT_ID} = ?
           AND {schema.CLAIM_CODE_CODE} = ?;
         """,
-        (int(spot_id), str(claim_code)),
+        (int(spot_id), _normalise_claim_code(claim_code, required=True)),
     )
     return _row_to_dict(await cur.fetchone())
 
@@ -3431,7 +3461,7 @@ async def count_available_claim_codes(db, *, spot_id: int) -> int:
 
 
 def _make_placeholder_claim_code() -> str:
-    return secrets.token_urlsafe(8).rstrip("=").upper()
+    return "".join(secrets.choice(_CLAIM_CODE_ALPHABET) for _ in range(_CLAIM_CODE_LENGTH))
 
 
 async def _generate_unique_claim_codes_for_spot(db, *, spot_id: int, count: int) -> list[str]:

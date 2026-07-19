@@ -76,7 +76,7 @@
             <form id="claim-form" class="report-form claim-form" novalidate>
                 <div id="claim-password-field" class="claim-password-field" hidden>
                     <label id="claim-password-label" class="report-field-label" for="claim-password-input" data-i18n="findSpots.password">Password</label>
-                    <input id="claim-password-input" class="create-spot-input claim-password-input" type="text" autocomplete="off" spellcheck="false">
+                    <input id="claim-password-input" class="create-spot-input claim-password-input" type="text" maxlength="32" autocomplete="off" autocapitalize="characters" inputmode="text" pattern="[A-Z0-9]*" spellcheck="false">
 
                     <label id="claim-captcha-label" class="report-field-label" for="claim-captcha-input" data-i18n="findSpots.captcha">Captcha</label>
                     <div class="report-captcha-row claim-captcha-row">
@@ -136,6 +136,6 @@
 
     <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
     <script src="{{ leaflet_js_url }}"></script>
-    <script type="module" src="/static/find_spots.js?v={{ asset_version | default('claim-ui-polish-v1-20260704') }}"></script>
+    <script type="module" src="/static/find_spots.js?v={{ asset_version | default('claim-ui-polish-v1-20260704') }}-claim-live-v1-20260719"></script>
 </body>
 </html>

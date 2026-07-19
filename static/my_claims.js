@@ -30,6 +30,8 @@ const state = {
     user: null,
     claimMap: null,
     expandedClaimIds: new Set(),
+    refreshTimerId: null,
+    refreshInFlight: false,
 };
 
 const els = {
@@ -351,19 +353,59 @@ async function loadClaims() {
     });
 }
 
-async function initMyClaims() {
-    state.language = getLanguage();
-    await identify();
-    const data = await loadClaims();
+function renderLoadedClaims(data) {
     state.user = data.user || null;
     const claims = Array.isArray(data.claims) ? data.claims : [];
     renderMap(claims);
     renderClaims(claims);
 }
 
+function stopClaimRefresh() {
+    if (state.refreshTimerId) window.clearTimeout(state.refreshTimerId);
+    state.refreshTimerId = null;
+}
+
+function scheduleClaimRefresh(delayMs = 10000) {
+    stopClaimRefresh();
+    if (document.visibilityState !== 'visible') return;
+    state.refreshTimerId = window.setTimeout(refreshClaims, delayMs);
+}
+
+async function refreshClaims() {
+    if (state.refreshInFlight || document.visibilityState !== 'visible') {
+        scheduleClaimRefresh();
+        return;
+    }
+    state.refreshInFlight = true;
+    try {
+        renderLoadedClaims(await loadClaims());
+    } catch (err) {
+        console.warn('NimHunt could not refresh claim statuses yet.', err);
+    } finally {
+        state.refreshInFlight = false;
+        scheduleClaimRefresh();
+    }
+}
+
+async function initMyClaims() {
+    state.language = getLanguage();
+    await identify();
+    renderLoadedClaims(await loadClaims());
+    scheduleClaimRefresh();
+}
+
 els.noticeOk?.addEventListener('click', () => {
     els.noticeBackdrop.hidden = true;
 });
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void refreshClaims();
+    else stopClaimRefresh();
+});
+window.addEventListener('pageshow', () => {
+    if (state.user) void refreshClaims();
+});
+window.addEventListener('beforeunload', stopClaimRefresh);
 
 initMyClaims().catch((err) => {
     console.error(err);

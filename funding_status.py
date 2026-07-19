@@ -132,10 +132,13 @@ async def can_publish_spot_after_fee_broadcast(db, *, spot_id: int) -> bool:
         return False
 
     starts_at = spot.get(schema.SPOT_STARTS_AT)
-    if starts_at is not None and int(starts_at) <= await db_access.get_unixepoch(db):
+    ends_after = int(spot.get(schema.SPOT_ENDS_AT) or 0)
+    if ends_after < const.MIN_SPOT_ENDS_AFTER_SECONDS:
         return False
-    if int(spot.get(schema.SPOT_ENDS_AT) or 0) < const.MIN_SPOT_ENDS_AFTER_SECONDS:
-        return False
+    if starts_at is not None:
+        now = await db_access.get_unixepoch(db)
+        if int(starts_at) + ends_after <= now:
+            return False
 
     use_password = int(spot.get(schema.SPOT_USE_PASSWORD) or 0) == 1
     if use_password and (max_total_claims <= 0 or is_prizedraw):

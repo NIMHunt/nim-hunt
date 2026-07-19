@@ -51,6 +51,8 @@ const state = {
     claimSpot: null,
     claimSubmitting: false,
     claimCaptcha: null,
+    liveRefreshTimerId: null,
+    liveRefreshInFlight: false,
 };
 
 const APP_NAME = document.body.dataset.appName || 'NimHunt';
@@ -930,6 +932,10 @@ async function refreshClaimStatusesForSpots(spots) {
     }
 }
 
+function normaliseClaimCodeInput(value) {
+    return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
 function setClaimError(message) {
     if (!els.claimError) return;
     els.claimError.textContent = message || '';
@@ -953,7 +959,7 @@ function updateClaimConfirmState() {
     if (!els.claimConfirm || state.claimSubmitting || !state.claimSpot) return;
     const status = claimStatusForSpot(state.claimSpot);
     const needsPassword = Boolean(status.requires_password || state.claimSpot.use_password);
-    const passwordReady = !needsPassword || Boolean(String(els.claimPassword?.value || '').trim());
+    const passwordReady = !needsPassword || Boolean(normaliseClaimCodeInput(els.claimPassword?.value));
     const captchaReady = !needsPassword || Boolean(state.claimCaptcha?.passed());
     els.claimConfirm.disabled = !(status.allowed && passwordReady && captchaReady);
 }
@@ -1089,7 +1095,7 @@ async function submitClaim(event) {
     const spot = state.claimSpot;
     const status = claimStatusForSpot(spot);
     const needsPassword = Boolean(status.requires_password || spot.use_password);
-    if (needsPassword && (!String(els.claimPassword?.value || '').trim() || !state.claimCaptcha?.passed())) {
+    if (needsPassword && (!normaliseClaimCodeInput(els.claimPassword?.value) || !state.claimCaptcha?.passed())) {
         setClaimError(REPORT_TEXT.claim?.passwordIncomplete || 'Enter the password and complete the captcha.');
         updateClaimConfirmState();
         return;
@@ -1102,7 +1108,7 @@ async function submitClaim(event) {
 
     try {
         const data = await postClaimForSpot(spot, {
-            claimCode: needsPassword ? String(els.claimPassword?.value || '').trim() : null,
+            claimCode: needsPassword ? normaliseClaimCodeInput(els.claimPassword?.value) : null,
             captchaPayload: needsPassword && state.claimCaptcha ? state.claimCaptcha.payload() : {},
         });
         redirectToClaim(data);
@@ -1112,7 +1118,7 @@ async function submitClaim(event) {
         els.claimConfirm.textContent = claimActionText(spot);
         updateClaimConfirmState();
         setClaimError(err?.message || REPORT_TEXT.claim?.failed?.body || 'The claim could not be created.');
-        if (needsPassword && (data.code === 'invalid_claim_code' || data.code === 'captcha_failed')) {
+        if (needsPassword && ['invalid_claim_code', 'claim_code_used', 'captcha_failed'].includes(data.code)) {
             if (els.claimPassword) els.claimPassword.value = '';
             state.claimCaptcha?.reset();
             requestAnimationFrame(() => els.claimPassword?.focus());
@@ -1406,6 +1412,31 @@ function fitInitialMap(spots) {
     }
 }
 
+function stopLiveRefresh() {
+    if (state.liveRefreshTimerId) window.clearTimeout(state.liveRefreshTimerId);
+    state.liveRefreshTimerId = null;
+}
+
+function scheduleLiveRefresh(delayMs = 10000) {
+    stopLiveRefresh();
+    if (document.visibilityState !== 'visible') return;
+    state.liveRefreshTimerId = window.setTimeout(runLiveRefresh, delayMs);
+}
+
+async function runLiveRefresh() {
+    if (state.liveRefreshInFlight || document.visibilityState !== 'visible') {
+        scheduleLiveRefresh();
+        return;
+    }
+    state.liveRefreshInFlight = true;
+    try {
+        await refreshVisibleSpots();
+    } finally {
+        state.liveRefreshInFlight = false;
+        scheduleLiveRefresh();
+    }
+}
+
 async function refreshVisibleSpots() {
     if (!state.map) return;
 
@@ -1576,6 +1607,7 @@ async function initFindSpots() {
     fitInitialMap(initial.spots || []);
 
     await refreshVisibleSpots();
+    scheduleLiveRefresh();
 }
 
 els.noticeOk.addEventListener('click', () => {
@@ -1598,7 +1630,18 @@ if (els.claimForm) {
     els.claimForm.addEventListener('submit', submitClaim);
 }
 
-for (const input of [els.claimPassword, els.claimCaptchaInput]) {
+els.claimPassword?.addEventListener('input', () => {
+    const normalised = normaliseClaimCodeInput(els.claimPassword.value);
+    if (els.claimPassword.value !== normalised) els.claimPassword.value = normalised;
+    setClaimError(null);
+    updateClaimConfirmState();
+});
+els.claimPassword?.addEventListener('change', () => {
+    els.claimPassword.value = normaliseClaimCodeInput(els.claimPassword.value);
+    setClaimError(null);
+    updateClaimConfirmState();
+});
+for (const input of [els.claimCaptchaInput]) {
     input?.addEventListener('input', () => {
         setClaimError(null);
         updateClaimConfirmState();
@@ -1654,6 +1697,18 @@ els.filterTestLocation?.addEventListener('change', () => {
 });
 
 updateFilterToggleState();
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        void runLiveRefresh();
+    } else {
+        stopLiveRefresh();
+    }
+});
+window.addEventListener('pageshow', () => {
+    if (state.map) void runLiveRefresh();
+});
+window.addEventListener('beforeunload', stopLiveRefresh);
 
 initFindSpots().catch((err) => {
     console.error(err);

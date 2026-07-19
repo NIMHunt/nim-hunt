@@ -381,9 +381,9 @@ function currentUnixSeconds() {
 
 function updateStartsAtMin() {
     if (!els.startsAt) return;
-    // datetime-local does not include seconds; add a minute so the browser UI
-    // cannot choose a value that is already stale by the time it is saved.
-    els.startsAt.min = unixToDateTimeLocal(currentUnixSeconds() + 60);
+    // A Spot may start immediately or retain a start time in the recent past,
+    // provided its configured end time has not already elapsed.
+    els.startsAt.removeAttribute('min');
 }
 
 function startsAtValidation() {
@@ -394,8 +394,9 @@ function startsAtValidation() {
         return { ok: false, message: TEXT.form.startsInvalid };
     }
 
-    if (startsAt <= currentUnixSeconds()) {
-        return { ok: false, message: TEXT.form.startsInPast || TEXT.form.startsInvalid };
+    const endsAfter = Math.max(0, Number(sliderValue('endsAfter') || 0));
+    if (endsAfter <= 0 || startsAt + endsAfter <= currentUnixSeconds()) {
+        return { ok: false, message: TEXT.form.endsInPast || TEXT.form.startsInvalid };
     }
 
     return { ok: true, message: '' };
@@ -1171,6 +1172,8 @@ async function saveDraft() {
         }
 
         setInitialSnapshot();
+        window.location.assign(data.redirect_url || '/my-spots');
+        return;
     } catch (err) {
         const data = err?.data || {};
         if (data.redirect_url || data.code === 'not_owner') {

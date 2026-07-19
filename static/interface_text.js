@@ -184,7 +184,7 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
             publish: 'Publish',
             cancel: 'Cancel Spot',
             cancelDraft: 'Cancel Draft',
-            publishStartTimePastTooltip: 'Change the start time before publishing.',
+            publishStartTimePastTooltip: 'The configured end time has already elapsed.',
             publishUnavailableTooltip: 'This draft cannot be published yet.',
         },
         deposit: {
@@ -356,7 +356,8 @@ function buildCreateSpotFormTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUr
             payoutTooLow: ({ minimum, kind }) => `Per ${kind} payout must be at least ${minimum} NIM.`,
             payoutTooLowTooltip: ({ minimum, kind }) => `Per ${kind} payout is too low. Minimum: ${minimum} NIM.`,
             startsInvalid: 'Starts must be a valid date and time.',
-            startsInPast: 'Starts must be in the future.',
+            startsInPast: 'Starts may be in the past if the Spot has not ended.',
+            endsInPast: 'The configured end time has already elapsed.',
             standardParticipantsRequired: 'Standard spots require a finite Total Participants value.',
             prizedrawParticipantsMinimum: (minimum) => `Prizedraws require at least ${minimum} participants unless Total Participants is Unlimited.`,
             prizedrawLimitsInvalid: 'For a finite Prizedraw, Claims Per User and Prize Count must both be less than Total Participants.',

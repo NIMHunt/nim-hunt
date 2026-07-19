@@ -953,6 +953,15 @@ h2 {
     color: var(--nh-muted);
     font-style: italic;
     font-weight: 750;
+    text-align: center;
+}
+
+
+#claim-error,
+.claim-spot-card .create-spot-error {
+    color: var(--nh-danger);
+    font-weight: 900;
+    text-align: center;
 }
 
 .spot-detail-lines {

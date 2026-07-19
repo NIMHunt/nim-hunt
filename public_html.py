@@ -22,7 +22,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -39,7 +39,7 @@ from transaction_descriptions import build_transaction_description
 router = APIRouter()
 templates = Jinja2Templates(directory=str(const.TEMPLATES_DIR))
 
-_ASSET_VERSION = "spot-fee-copy-v1-20260718"
+_ASSET_VERSION = "claim-live-status-v1-20260719"
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ALLOWED_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$")
@@ -147,7 +147,7 @@ class ClaimSpotRequest(HomeSessionRequest):
     """Payload for starting/entering a claim from the Find Spots page."""
 
     payout_address: str | None = Field(default=None, max_length=const.CLAIM_PAYOUT_ADDRESS_MAX_CHARS)
-    claim_code: str | None = Field(default=None, max_length=120)
+    claim_code: str | None = Field(default=None, max_length=32)
     captcha_a: int | None = Field(default=None, ge=1, le=20)
     captcha_b: int | None = Field(default=None, ge=1, le=20)
     captcha_answer: int | None = Field(default=None, ge=0, le=40)
@@ -817,10 +817,12 @@ def _serialise_owner_spot(
     lat_value = spot.get(schema.SPOT_LAT)
     long_value = spot.get(schema.SPOT_LONG)
     starts_at_value = spot.get(schema.SPOT_STARTS_AT)
-    draft_start_time_past = (
+    ends_after_value = int(spot.get(schema.SPOT_ENDS_AT) or 0)
+    draft_end_time_elapsed = (
         status_label == "draft"
         and starts_at_value is not None
-        and int(starts_at_value) <= int(now)
+        and ends_after_value > 0
+        and int(starts_at_value) + ends_after_value <= int(now)
     )
     payout_divisor = (
         max(1, int(spot.get(schema.PRIZEDRAW_PRIZE_COUNT) or 1))
@@ -842,9 +844,9 @@ def _serialise_owner_spot(
     if fully_funded and not creation_fee_paid:
         publish_block_reason = "creation_fee_processing"
         publish_block_message = "The creation fee must confirm before publishing."
-    elif ready_to_publish and draft_start_time_past:
-        publish_block_reason = "start_time_past"
-        publish_block_message = "Change the start time before publishing."
+    elif ready_to_publish and draft_end_time_elapsed:
+        publish_block_reason = "end_time_elapsed"
+        publish_block_message = "The configured end time has already elapsed."
     elif ready_to_publish and not minimum_payout_ok:
         publish_block_reason = "minimum_payout_too_low"
         kind = "prize" if is_prizedraw else "claim"
@@ -910,7 +912,7 @@ def _serialise_owner_spot(
             status_label == "draft"
             and not cancellation_started
             and ready_to_publish
-            and not draft_start_time_past
+            and not draft_end_time_elapsed
             and minimum_payout_ok
         ),
         "publish_block_reason": publish_block_reason,
@@ -1356,11 +1358,11 @@ def _claim_display_status(
     # - SUCCESS + no confirmed payout = valid losing entry
     # - PENDING = selected winner awaiting a confirmed payout/retry
     if draw_settled and status_label == "pending":
-        if int(payout.get("payout_pending_count") or 0) > 0:
-            return {"label": "won_pending", "text": "Payout Pending", "class": "pending"}
+        # Winner selection is persisted in the database before any payout is sent.
+        # Show the result immediately; the NIM transfer can finish in the background.
         if int(payout.get("payout_failed_count") or 0) > 0:
-            return {"label": "won_retrying", "text": "Payout Retrying", "class": "pending"}
-        return {"label": "won_pending", "text": "Payout Pending", "class": "pending"}
+            return {"label": "won_retrying", "text": "Won!", "class": "success"}
+        return {"label": "won_pending", "text": "Won!", "class": "success"}
 
     if status_label == "success":
         if draw_settled:
@@ -1627,8 +1629,32 @@ async def spots_claim_status_api(payload: ClaimStatusRequest) -> JSONResponse:
     return JSONResponse({**meta, "ok": True, "user": _public_user(user), "statuses": statuses, "now": now})
 
 
+def _queue_claim_settlement(
+    background_tasks: BackgroundTasks,
+    *,
+    claim: dict[str, Any],
+    spot: dict[str, Any],
+) -> None:
+    """Queue chain-facing settlement after the HTTP response is ready."""
+    claim_id = int(claim[schema.CLAIM_ID])
+    spot_id = int(claim[schema.CLAIM_SPOT_ID])
+    claim_status = int(claim.get(schema.CLAIM_STATUS) or const.CLAIM_STATUS_PENDING)
+    is_prizedraw = _spot_is_prizedraw_row(spot)
+
+    if is_prizedraw:
+        background_tasks.add_task(
+            settlement_updater.settle_prizedraw_spot_if_ready,
+            spot_id=spot_id,
+        )
+    elif claim_status == const.CLAIM_STATUS_SUCCESS:
+        background_tasks.add_task(
+            settlement_updater.payout_standard_claim_if_ready,
+            claim_id=claim_id,
+        )
+
+
 @router.post("/api/spot/{spot_id}/claim")
-async def claim_spot_api(spot_id: int, payload: ClaimSpotRequest) -> JSONResponse:
+async def claim_spot_api(spot_id: int, payload: ClaimSpotRequest, background_tasks: BackgroundTasks) -> JSONResponse:
     """Start a CLAIM or Prizedraw entry for the current user."""
     async with get_db() as db:
         async with db_access.transaction(db):
@@ -1665,8 +1691,15 @@ async def claim_spot_api(spot_id: int, payload: ClaimSpotRequest) -> JSONRespons
                     payout_address=payload.payout_address,
                 )
             except ValueError as exc:
-                code = "invalid_claim_code" if "claim code" in str(exc).lower() else "claim_failed"
-                return JSONResponse({**meta, "ok": False, "code": code, "message": str(exc)}, status_code=status.HTTP_409_CONFLICT)
+                message = str(exc)
+                lowered = message.lower()
+                if "already been used" in lowered:
+                    code = "claim_code_used"
+                elif "claim code" in lowered:
+                    code = "invalid_claim_code"
+                else:
+                    code = "claim_failed"
+                return JSONResponse({**meta, "ok": False, "code": code, "message": message}, status_code=status.HTTP_409_CONFLICT)
 
         await _notify_all_cache_for_spot_owner_change(
             db,
@@ -1675,10 +1708,11 @@ async def claim_spot_api(spot_id: int, payload: ClaimSpotRequest) -> JSONRespons
         )
         await _notify_capacity_cleanup_cache(db, cleanup=claim.get("capacity_cleanup") if isinstance(claim, dict) else None)
 
-        await settlement_updater.payout_standard_claim_if_ready(
-            claim_id=int(claim[schema.CLAIM_ID])
+        _queue_claim_settlement(
+            background_tasks,
+            claim=claim,
+            spot=spot,
         )
-        await settlement_updater.settle_prizedraw_spot_if_ready(spot_id=int(spot_id))
 
         refreshed_claim = await db_access.get_claim(db, claim_id=int(claim[schema.CLAIM_ID]))
         claim_transactions = await db_access.get_transactions_by_claim(db, claim_id=int(claim[schema.CLAIM_ID]))
@@ -1706,7 +1740,7 @@ async def claim_spot_api(spot_id: int, payload: ClaimSpotRequest) -> JSONRespons
 
 
 @router.post("/api/claim/{claim_id}/detail")
-async def claim_detail_api(claim_id: int, payload: HomeSessionRequest) -> JSONResponse:
+async def claim_detail_api(claim_id: int, payload: HomeSessionRequest, background_tasks: BackgroundTasks) -> JSONResponse:
     """Return one CLAIM to its recipient or the SPOT creator."""
     async with get_db() as db:
         async with db_access.transaction(db):
@@ -1731,6 +1765,7 @@ async def claim_detail_api(claim_id: int, payload: HomeSessionRequest) -> JSONRe
         now = await db_access.get_unixepoch(db)
         await _notify_all_cache_for_spot_owner_change(db, user_id=user_id, spot_id=int(claim[schema.CLAIM_SPOT_ID]))
         await _notify_capacity_cleanup_cache(db, cleanup=claim.get("capacity_cleanup") if isinstance(claim, dict) else None)
+        _queue_claim_settlement(background_tasks, claim=claim, spot=spot)
 
     return JSONResponse({
         **meta,
@@ -1747,7 +1782,7 @@ async def claim_detail_api(claim_id: int, payload: HomeSessionRequest) -> JSONRe
 
 
 @router.post("/api/claim/{claim_id}/location")
-async def claim_location_heartbeat_api(claim_id: int, payload: HomeSessionRequest) -> JSONResponse:
+async def claim_location_heartbeat_api(claim_id: int, payload: HomeSessionRequest, background_tasks: BackgroundTasks) -> JSONResponse:
     """Record one fresh location ping for a pending duration-based claim."""
     if payload.lat is None or payload.long is None:
         return JSONResponse(
@@ -1783,9 +1818,7 @@ async def claim_location_heartbeat_api(claim_id: int, payload: HomeSessionReques
         await _notify_all_cache_for_spot_owner_change(db, user_id=user_id, spot_id=int(claim[schema.CLAIM_SPOT_ID]))
         await _notify_capacity_cleanup_cache(db, cleanup=claim.get("capacity_cleanup") if isinstance(claim, dict) else None)
 
-    if int(claim.get(schema.CLAIM_STATUS) or const.CLAIM_STATUS_PENDING) == const.CLAIM_STATUS_SUCCESS:
-        await settlement_updater.payout_standard_claim_if_ready(claim_id=int(claim_id))
-        await settlement_updater.settle_prizedraw_spot_if_ready(spot_id=int(claim[schema.CLAIM_SPOT_ID]))
+    _queue_claim_settlement(background_tasks, claim=claim, spot=spot)
 
     async with get_db() as db:
         refreshed_claim = await db_access.get_claim(db, claim_id=int(claim_id)) or claim
@@ -2379,6 +2412,7 @@ async def update_draft_spot_api(spot_id: int, payload: UpdateDraftSpotRequest) -
             "ok": True,
             "user": _public_user(user),
             "spot": _serialise_owner_spot(spot, now=now, transactions=transactions) if spot else None,
+            "redirect_url": "/my-spots",
         }
     )
 

@@ -1,0 +1,41 @@
+name: Claim Test Debug
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest-log:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Capture pytest output
+        id: pytest
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python -m pytest -q 2>&1 | tee pytest.log
+      - name: Upload pytest output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claim-pytest-log
+          path: pytest.log
+          if-no-files-found: error
+      - name: Preserve failure result
+        if: steps.pytest.outcome == 'failure'
+        run: exit 1

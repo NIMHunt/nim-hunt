@@ -1,0 +1,25 @@
+name: Source Snapshot
+
+on:
+  push:
+    branches:
+      - agent/fix-claim-responsiveness-and-spot-rules
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: nimhunt-source-snapshot
+          path: |
+            .
+            !.git
+          include-hidden-files: true
+          if-no-files-found: error

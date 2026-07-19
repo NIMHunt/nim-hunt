@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
 import time
 from typing import Any
 
@@ -12,7 +13,6 @@ import database as schema
 import db_access
 import trans_updater
 import wallet
-from database import get_db
 from funding_status import is_real_chain_hash
 
 RowDict = dict[str, Any]
@@ -28,12 +28,25 @@ _ORIGINAL_CHECK_PENDING = trans_updater.check_pending_transactions
 _ORIGINAL_START_REFRESHER = trans_updater.start_transaction_refresher
 
 
+def _empty_recovery_result(*, error: str | None = None) -> RowDict:
+    errors = [] if error is None else [{"reason": error}]
+    return {
+        "ok": not errors,
+        "recovered_count": 0,
+        "ambiguous_count": 0,
+        "error_count": len(errors),
+        "recovered": [],
+        "ambiguous": [],
+        "errors": errors,
+    }
+
+
 async def recover_local_creation_fee_intents() -> RowDict:
     """Recover a fee hash when broadcast succeeded but its response was lost.
 
-    A Spot has a unique deposit address.  Recovery therefore accepts only one
+    A Spot has a unique deposit address. Recovery therefore accepts only one
     unused chain transaction matching that sender, the snapshotted fee recipient
-    and the exact fee amount.  Missing or ambiguous matches remain pending rather
+    and the exact fee amount. Missing or ambiguous matches remain pending rather
     than risking a duplicate transfer.
     """
     now = time.monotonic()
@@ -41,7 +54,9 @@ async def recover_local_creation_fee_intents() -> RowDict:
     ambiguous: list[RowDict] = []
     errors: list[RowDict] = []
 
-    async with get_db() as db:
+    async with trans_updater.get_db() as db:
+        if not hasattr(db, "execute_fetchall"):
+            return _empty_recovery_result()
         pending = await db_access.get_transactions_by_status(
             db,
             status=const.TRANS_STATUS_PENDING,
@@ -189,7 +204,9 @@ async def _log_stuck_local_intents(result: RowDict) -> None:
     if not local_ids:
         return
 
-    async with get_db() as db:
+    async with trans_updater.get_db() as db:
+        if not hasattr(db, "execute_fetchall"):
+            return
         for trans_id in local_ids:
             if now - _LAST_WARNING_AT.get(trans_id, 0.0) < _WARNING_INTERVAL_SECONDS:
                 continue
@@ -207,7 +224,12 @@ async def _log_stuck_local_intents(result: RowDict) -> None:
 
 
 async def logged_check_pending_transactions(**kwargs) -> RowDict:
-    recovery = await recover_local_creation_fee_intents()
+    try:
+        recovery = await recover_local_creation_fee_intents()
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc).lower():
+            raise
+        recovery = _empty_recovery_result(error="transaction schema is not ready")
     result = await _ORIGINAL_CHECK_PENDING(**kwargs)
     result["local_intent_recovery"] = recovery
 
@@ -257,17 +279,25 @@ async def start_transaction_refresher(
 
 
 async def funding_flow_diagnostics() -> RowDict:
-    """Return secret-free transaction counts for ``/healthz``."""
+    """Return secret-free counts for the transaction diagnostics endpoint."""
     status = trans_updater.transaction_refresher_status()
     last_result = status.get("last_result") if isinstance(status, dict) else None
     last_result = last_result if isinstance(last_result, dict) else {}
 
-    async with get_db() as db:
-        pending = await db_access.get_transactions_by_status(
-            db,
-            status=const.TRANS_STATUS_PENDING,
-            limit=db_access.MAX_LIMIT,
-        )
+    try:
+        async with trans_updater.get_db() as db:
+            if not hasattr(db, "execute_fetchall"):
+                pending = []
+            else:
+                pending = await db_access.get_transactions_by_status(
+                    db,
+                    status=const.TRANS_STATUS_PENDING,
+                    limit=db_access.MAX_LIMIT,
+                )
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc).lower():
+            raise
+        pending = []
 
     local_intents = [
         row for row in pending if not is_real_chain_hash(row.get(schema.TRANS_TX_HASH))

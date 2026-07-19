@@ -1,0 +1,35 @@
+name: Funding Lint Debug
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ruff-log:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install Ruff
+        run: python -m pip install ruff
+      - name: Capture Ruff output
+        id: ruff
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ruff check . 2>&1 | tee ruff.log
+      - name: Upload Ruff output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: funding-ruff-log
+          path: ruff.log
+          if-no-files-found: error
+      - name: Preserve failure result
+        if: steps.ruff.outcome == 'failure'
+        run: exit 1

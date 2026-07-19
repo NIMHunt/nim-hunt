@@ -52,7 +52,8 @@ NimHunt intentionally uses a small stack:
 - **Leaflet/OpenStreetMap** display Spot locations.
 - **SQLite/aiosqlite** store users, Spots, claims, reports and transaction state.
 - **`helpers/nimiq_helper.mjs`** uses the official pinned `@nimiq/core` package
-  to derive addresses, sign outgoing transactions and broadcast them.
+  to derive addresses and sign outgoing transactions, then broadcasts their
+  serialized form through the configured Nimiq JSON-RPC endpoint.
 - **Background services** refresh caches, settle completed Prizedraws and reconcile
   pending blockchain transactions.
 
@@ -326,7 +327,10 @@ securely. Losing it makes remaining Spot funds unrecoverable; exposing it allows
 an attacker to spend those funds.
 
 Supply secrets through the host's secret manager or protected environment—not a
-committed file, shell history or the repository.
+committed file, shell history or the repository. The bundled sender uses
+`NIMHUNT_NIMIQ_RPC_URL` for `getLatestBlock` and `sendRawTransaction`; this is
+more suitable for hosted backends than requiring the Railway container to form
+its own peer-to-peer Nimiq consensus connection.
 
 ### Public test mnemonic
 

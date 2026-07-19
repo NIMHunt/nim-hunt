@@ -45,11 +45,13 @@ const SPOT_TEXT_EN = {
     },
     status: {
         draft: 'Draft',
+        deposited: 'Deposited',
         active: 'Active',
         upcoming: 'Upcoming',
         ended: 'Ended',
         completed: 'Completed',
         cancelled: 'Cancelled',
+        cancelling: 'Cancelling',
         banned: 'Banned',
         unknown: 'Unknown',
     },
@@ -548,6 +550,17 @@ export function makeFindSpotsText({
             ctaBeforeLink: "Not found what you're looking for? Try ",
             ctaLink: 'making one',
             ctaAfterLink: '.',
+        },
+        cancelSpot: {
+            title: 'Cancel Spot',
+            confirm: 'Confirm',
+            confirming: 'Cancelling…',
+            cancel: 'Cancel',
+            body: ({ title, refund, fee }) => `Cancel '${title}'? Estimated refund: ${refund}. Cancellation fee: ${fee}.`,
+            failed: {
+                title: 'Could not cancel Spot',
+                body: 'The Spot could not be cancelled.',
+            },
         },
     };
     return localiseSection('findSpots', english, language);

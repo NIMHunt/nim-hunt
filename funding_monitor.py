@@ -11,6 +11,7 @@ from typing import Any
 import constants as const
 import database as schema
 import db_access
+import settlement_updater
 import trans_updater
 import wallet
 from funding_status import is_real_chain_hash
@@ -279,53 +280,107 @@ async def start_transaction_refresher(
 
 
 async def funding_flow_diagnostics() -> RowDict:
-    """Return secret-free counts for the transaction diagnostics endpoint."""
+    """Return secret-free signing, transaction and settlement diagnostics."""
     status = trans_updater.transaction_refresher_status()
     last_result = status.get("last_result") if isinstance(status, dict) else None
     last_result = last_result if isinstance(last_result, dict) else {}
 
+    rows: list[RowDict] = []
     try:
         async with trans_updater.get_db() as db:
-            if not hasattr(db, "execute_fetchall"):
-                pending = []
-            else:
-                pending = await db_access.get_transactions_by_status(
-                    db,
-                    status=const.TRANS_STATUS_PENDING,
-                    limit=db_access.MAX_LIMIT,
-                )
+            if hasattr(db, "execute_fetchall"):
+                for transaction_status in (
+                    const.TRANS_STATUS_PENDING,
+                    const.TRANS_STATUS_CONFIRMED,
+                    const.TRANS_STATUS_FAILED,
+                ):
+                    rows.extend(await db_access.get_transactions_by_status(
+                        db, status=transaction_status, limit=db_access.MAX_LIMIT
+                    ))
     except sqlite3.OperationalError as exc:
         if "no such table" not in str(exc).lower():
             raise
-        pending = []
 
-    local_intents = [
-        row for row in pending if not is_real_chain_hash(row.get(schema.TRANS_TX_HASH))
-    ]
-    fee_local_intents = [
-        row
-        for row in local_intents
-        if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CREATION_FEE
-    ]
-    real_pending_fees = [
-        row
-        for row in pending
-        if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CREATION_FEE
-        and is_real_chain_hash(row.get(schema.TRANS_TX_HASH))
-    ]
+    type_names = {
+        const.TRANS_TYPE_CREATION_FEE: "creation_fee",
+        const.TRANS_TYPE_CLAIM: "claim_payout",
+        const.TRANS_TYPE_CANCEL_SPOT: "spot_refund",
+        const.TRANS_TYPE_PLAT_FEE: "platform_fee",
+    }
+    status_names = {
+        const.TRANS_STATUS_PENDING: "pending",
+        const.TRANS_STATUS_CONFIRMED: "confirmed",
+        const.TRANS_STATUS_FAILED: "failed",
+    }
+    by_type: dict[str, dict[str, int]] = {
+        name: {"pending": 0, "confirmed": 0, "failed": 0, "local_intents": 0}
+        for name in type_names.values()
+    }
+    for row in rows:
+        name = type_names.get(int(row.get(schema.TRANS_TYPE) or -1), "other")
+        state_name = status_names.get(int(row.get(schema.TRANS_STATUS) or -1), "unknown")
+        bucket = by_type.setdefault(
+            name,
+            {"pending": 0, "confirmed": 0, "failed": 0, "local_intents": 0},
+        )
+        bucket[state_name] = int(bucket.get(state_name, 0)) + 1
+        if state_name == "pending" and not is_real_chain_hash(row.get(schema.TRANS_TX_HASH)):
+            bucket["local_intents"] += 1
+
+    pending = [row for row in rows if int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_PENDING]
+    local_intents = [row for row in pending if not is_real_chain_hash(row.get(schema.TRANS_TX_HASH))]
     creation_fees = last_result.get("creation_fees") or {}
+    settlement = settlement_updater.settlement_refresher_status()
+    settlement_result = settlement.get("last_result") or {}
+    standard = settlement_result.get("standard_claim_payouts") or {}
+    prizedraw = settlement_result.get("prizedraw_payout_retries") or {}
+    cancellations = settlement_result.get("spot_cancellations") or {}
+
+    send_env = getattr(const, "NIMHUNT_NIMIQ_SEND_COMMAND_ENV", "NIMHUNT_NIMIQ_SEND_COMMAND")
+    mnemonic_env = getattr(const, "NIMHUNT_NIMIQ_MNEMONIC_ENV", "NIMHUNT_NIMIQ_MNEMONIC")
+    external_env = getattr(const, "NIMHUNT_NIMIQ_EXTERNAL_SIGNER_ENV", "NIMHUNT_NIMIQ_EXTERNAL_SIGNER")
+    send_command = os.getenv(send_env, "").strip()
+    mnemonic_configured = bool(os.getenv(mnemonic_env, "").strip())
+    external_signer = os.getenv(external_env, "").strip().lower() in {"1", "true", "yes", "on"}
+
     return {
-        "running": bool(status.get("running")) if isinstance(status, dict) else False,
-        "healthy": not bool(status.get("last_error")) if isinstance(status, dict) else False,
-        "poll_seconds": default_refresh_interval(),
+        "network": getattr(const, "NIMIQ_NETWORK", ""),
+        "signing": {
+            "send_command_configured": bool(send_command),
+            "bundled_helper_selected": "nimiq_helper.mjs" in send_command.lower(),
+            "mnemonic_configured": mnemonic_configured,
+            "external_signer_enabled": external_signer,
+            "signer_configured": mnemonic_configured or external_signer,
+            "shared_creation_cancellation_fee_address_configured": bool(
+                str(getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "")).strip()
+            ),
+            "shared_creation_cancellation_fee_address": str(
+                getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "")
+            ).strip() or None,
+        },
+        "refresher": {
+            "running": bool(status.get("running")) if isinstance(status, dict) else False,
+            "healthy": not bool(status.get("last_error")) if isinstance(status, dict) else False,
+            "last_error": wallet.redact_secret_values(status.get("last_error") or "") or None,
+            "poll_seconds": default_refresh_interval(),
+            "last_checked_count": int(last_result.get("checked_count") or 0),
+            "last_finalised_count": int(last_result.get("finalised_count") or 0),
+            "last_unknown_count": int(last_result.get("unknown_count") or 0),
+        },
         "pending_count": len(pending),
         "local_intent_count": len(local_intents),
-        "creation_fee_local_intent_count": len(fee_local_intents),
-        "creation_fee_pending_count": len(real_pending_fees),
-        "last_checked_count": int(last_result.get("checked_count") or 0),
-        "last_finalised_count": int(last_result.get("finalised_count") or 0),
-        "last_unknown_count": int(last_result.get("unknown_count") or 0),
         "last_creation_fee_error_count": int(creation_fees.get("error_count") or 0),
+        "by_type": by_type,
+        "settlement": {
+            "running": bool(settlement.get("running")),
+            "healthy": not bool(settlement.get("last_error")),
+            "last_error": wallet.redact_secret_values(settlement.get("last_error") or "") or None,
+            "interval_seconds": int(settlement.get("interval_seconds") or 0),
+            "standard_payout_failed_count": int(standard.get("failed_count") or 0),
+            "prizedraw_payout_failed_count": int(prizedraw.get("failed_count") or 0),
+            "cancellation_failed_count": int(cancellations.get("failed_count") or 0),
+            "cancellation_pending_count": int(cancellations.get("pending_count") or 0),
+        },
     }
 
 

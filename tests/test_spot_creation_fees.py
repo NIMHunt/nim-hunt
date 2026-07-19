@@ -423,21 +423,29 @@ class CreationFeeCancellationTests(SpotCreationFeeFixture):
         fee_send.assert_awaited_once()
         refund_send.assert_awaited_once()
 
-    async def test_fully_funded_draft_cannot_cancel_before_creation_fee_confirms(self):
+    async def test_fully_funded_draft_can_cancel_before_creation_fee_confirms(self):
         creation_fee = 5 * const.LUNA_PER_NIM
         spot_id = await self.create_standard_spot(fee=creation_fee)
         spot = await self.get_spot(spot_id)
         await self.create_deposit(spot_id, db_access.spot_required_deposit_amount(spot))
 
-        async with schema.get_db() as db:
-            with self.assertRaisesRegex(ValueError, "must finish paying its creation fee"):
-                await trans_updater.submit_spot_cancellation_transactions(
-                    db,
-                    spot_id=spot_id,
+        with mock.patch.object(
+            trans_updater,
+            "submit_platform_fee_transaction",
+            mock.AsyncMock(return_value={"ok": True, "trans_id": 21}),
+        ), mock.patch.object(
+            trans_updater,
+            "submit_spot_refund_transaction",
+            mock.AsyncMock(return_value={"ok": True, "trans_id": 22}),
+        ):
+            async with schema.get_db() as db:
+                result = await trans_updater.submit_spot_cancellation_transactions(
+                    db, spot_id=spot_id
                 )
 
         refreshed = await self.get_spot(spot_id)
-        self.assertIsNone(refreshed[schema.SPOT_CANCELLATION_STARTED_AT])
+        self.assertTrue(result["cancellation_pending"])
+        self.assertIsNotNone(refreshed[schema.SPOT_CANCELLATION_STARTED_AT])
 
     async def test_confirmed_creation_fee_is_retained_and_not_refunded(self):
         creation_fee = 5 * const.LUNA_PER_NIM
@@ -472,7 +480,7 @@ class CreationFeeCancellationTests(SpotCreationFeeFixture):
         self.assertEqual(result["refund_amount"], spot[schema.SPOT_TOTAL_VALUE] - cancellation_fee)
         self.assertEqual(refund_send.await_args.kwargs["amount"], spot[schema.SPOT_TOTAL_VALUE] - cancellation_fee)
 
-    async def test_pending_deposit_or_creation_fee_blocks_cancellation(self):
+    async def test_pending_deposit_or_creation_fee_queues_cancellation(self):
         spot_id = await self.create_standard_spot(fee=const.LUNA_PER_NIM)
         await self.create_deposit(
             spot_id,
@@ -480,16 +488,18 @@ class CreationFeeCancellationTests(SpotCreationFeeFixture):
             status=const.TRANS_STATUS_PENDING,
         )
         async with schema.get_db() as db:
-            with self.assertRaisesRegex(ValueError, "pending deposit"):
-                await trans_updater.submit_spot_cancellation_transactions(db, spot_id=spot_id)
+            result = await trans_updater.submit_spot_cancellation_transactions(db, spot_id=spot_id)
+        self.assertTrue(result["cancellation_pending"])
+        self.assertEqual(result["reason"], "deposit_pending")
 
         second_id = await self.create_standard_spot(fee=const.LUNA_PER_NIM, title="Fee Pending")
         second = await self.get_spot(second_id)
         await self.create_deposit(second_id, db_access.spot_required_deposit_amount(second))
         await self.create_creation_fee_transaction(second_id)
         async with schema.get_db() as db:
-            with self.assertRaisesRegex(ValueError, "pending cancellation, refund, fee, or reward"):
-                await trans_updater.submit_spot_cancellation_transactions(db, spot_id=second_id)
+            result = await trans_updater.submit_spot_cancellation_transactions(db, spot_id=second_id)
+        self.assertTrue(result["cancellation_pending"])
+        self.assertEqual(result["reason"], "outgoing_transaction_pending")
 
 
     async def test_creation_fee_intent_rechecks_cancellation_marker_inside_write_transaction(self):

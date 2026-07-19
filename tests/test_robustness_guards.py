@@ -232,6 +232,26 @@ class CancellationRetryGuardTest(unittest.IsolatedAsyncioTestCase):
         spot_changed.assert_awaited_once()
 
 
+    async def test_helper_failure_keeps_accepted_cancellation_queued(self):
+        spot = {schema.SPOT_ID: 7, schema.SPOT_STATUS: const.SPOT_STATUS_PUBLISHED, schema.SPOT_CREATED_BY: 1}
+        transactions = [
+            {schema.TRANS_TYPE: const.TRANS_TYPE_FILL_SPOT, schema.TRANS_STATUS: const.TRANS_STATUS_CONFIRMED, schema.TRANS_AMOUNT: 100, schema.TRANS_FROM_ADDRESS: "NQ12 payer", schema.TRANS_CREATED_AT: 1},
+        ]
+        with mock.patch.object(trans_updater.db_access, "get_spot", mock.AsyncMock(return_value=spot)), \
+             mock.patch.object(trans_updater.db_access, "is_prizedraw", mock.AsyncMock(return_value=False)), \
+             mock.patch.object(trans_updater.db_access, "get_transactions_by_spot", mock.AsyncMock(return_value=transactions)), \
+             mock.patch.object(trans_updater, "submit_platform_fee_transaction", mock.AsyncMock(side_effect=RuntimeError("helper unavailable"))), \
+             mock.patch.object(trans_updater.cache, "notify_spot_changed", mock.AsyncMock()), \
+             mock.patch.object(trans_updater.cache, "notify_user_changed", mock.AsyncMock()):
+            result = await trans_updater.submit_spot_cancellation_transactions(
+                FakeDb(), spot_id=7, cancellation_fee=10
+            )
+
+        self.assertTrue(result["cancellation_pending"])
+        self.assertTrue(result["deferred"])
+        self.assertEqual(result["reason"], "send_retry_pending")
+
+
 class PartialCancellationRetryGuardTest(unittest.IsolatedAsyncioTestCase):
     async def test_retry_after_confirmed_fee_and_failed_refund_only_sends_refund(self):
         spot = {schema.SPOT_ID: 7, schema.SPOT_STATUS: const.SPOT_STATUS_PUBLISHED, schema.SPOT_CREATED_BY: 1}
@@ -414,9 +434,13 @@ class AtomicCancellationInitiationGuardTest(unittest.IsolatedAsyncioTestCase):
              mock.patch.object(trans_updater.db_access, "get_transactions_by_spot", mock.AsyncMock(return_value=transactions)), \
              mock.patch.object(trans_updater, "submit_platform_fee_transaction", mock.AsyncMock()) as fee, \
              mock.patch.object(trans_updater, "submit_spot_refund_transaction", mock.AsyncMock()) as refund:
-            with self.assertRaisesRegex(ValueError, "already has a pending"):
-                await trans_updater.submit_spot_cancellation_transactions(FakeDb(), spot_id=7, cancellation_fee=10)
+            result = await trans_updater.submit_spot_cancellation_transactions(
+                FakeDb(), spot_id=7, cancellation_fee=10
+            )
 
+        self.assertTrue(result["cancellation_pending"])
+        self.assertTrue(result["deferred"])
+        self.assertEqual(result["reason"], "outgoing_transaction_pending")
         fee.assert_not_awaited()
         refund.assert_not_awaited()
 

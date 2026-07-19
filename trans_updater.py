@@ -1759,14 +1759,12 @@ async def submit_spot_cancellation_transactions(
     cancellation_fee: int | None = None,
     fee_address: str | None = None,
 ) -> RowDict:
-    """Cancel a funded draft or published standard Spot and submit refunds.
+    """Request cancellation and submit its refund as soon as it is safe.
 
-    A durable cancellation marker is written under a database write lock before
-    any chain send is attempted. The balances are then re-read under that same
-    lock so claims or competing cancellation requests cannot race into the gap
-    between calculation and transaction intent creation. Draft Prizedraws may
-    be cancelled before publication; published Prizedraws retain their existing
-    no-cancellation rule.
+    The cancellation marker is durable and immediately removes the Spot from
+    public claiming. Existing deposit/fee/reward transactions are allowed to
+    settle first; a background settlement pass retries this function until the
+    refund and cancellation fee can be submitted without double-spending.
     """
     spot = await db_access.get_spot(db, spot_id=int(spot_id))
     if spot is None:
@@ -1775,10 +1773,40 @@ async def submit_spot_cancellation_transactions(
     if spot_status not in {const.SPOT_STATUS_DRAFT, const.SPOT_STATUS_PUBLISHED}:
         raise ValueError("only funded drafts or published spots can be cancelled")
     if spot_status == const.SPOT_STATUS_PUBLISHED and await db_access.is_prizedraw(
-        db,
-        spot_id=int(spot_id),
+        db, spot_id=int(spot_id)
     ):
         raise ValueError("Prizedraw spots cannot be cancelled through this standard cancellation flow")
+
+    async def notify_cancellation_change() -> None:
+        try:
+            await cache.notify_spot_changed(db, spot_id=int(spot_id))
+            await cache.notify_user_changed(
+                db,
+                user_id=int(spot[schema.SPOT_CREATED_BY]),
+            )
+        except Exception as exc:
+            # Once the cancellation marker or terminal status is committed,
+            # a cache refresh failure must not turn an accepted cancellation
+            # into a misleading HTTP error. The periodic cache refresh remains
+            # able to repair the stale entry.
+            logger.warning(
+                "Cancellation cache notification failed: spot_id=%s error=%s",
+                int(spot_id),
+                wallet.redact_secret_values(exc),
+            )
+
+    async def deferred_result(*, reason: str, message: str) -> RowDict:
+        await db.commit()
+        await notify_cancellation_change()
+        return {
+            "ok": True,
+            "spot_id": int(spot_id),
+            "cancelled": False,
+            "cancellation_pending": True,
+            "deferred": True,
+            "reason": reason,
+            "message": message,
+        }
 
     try:
         await db.execute("BEGIN IMMEDIATE;")
@@ -1789,83 +1817,57 @@ async def submit_spot_cancellation_transactions(
         if spot_status not in {const.SPOT_STATUS_DRAFT, const.SPOT_STATUS_PUBLISHED}:
             raise ValueError("only funded drafts or published spots can be cancelled")
         if spot_status == const.SPOT_STATUS_PUBLISHED and await db_access.is_prizedraw(
-            db,
-            spot_id=int(spot_id),
+            db, spot_id=int(spot_id)
         ):
             raise ValueError("Prizedraw spots cannot be cancelled through this standard cancellation flow")
 
-        if spot_status == const.SPOT_STATUS_PUBLISHED:
-            unpaid_claim_ids = await db_access.get_unpaid_successful_standard_claim_ids(
-                db,
-                spot_id=int(spot_id),
-                limit=db_access.MAX_LIMIT,
-            )
-            if unpaid_claim_ids:
-                raise ValueError(
-                    "This spot has successful claims whose reward payment has not yet been safely recorded. "
-                    "Wait for settlement to create or retry those payouts before cancelling."
-                )
-
-        # The write lock prevents a claim from slipping between this check and
-        # the durable marker. Once marked, the database trigger rejects inserts.
+        # Once this marker commits, claim insertion is rejected and the Spot is
+        # removed from public results even when its refund must wait.
         await db_access.mark_spot_cancellation_started(db, spot_id=int(spot_id))
 
+        if spot_status == const.SPOT_STATUS_PUBLISHED:
+            unpaid_claim_ids = await db_access.get_unpaid_successful_standard_claim_ids(
+                db, spot_id=int(spot_id), limit=db_access.MAX_LIMIT
+            )
+            if unpaid_claim_ids:
+                return await deferred_result(
+                    reason="claim_payouts_pending",
+                    message="Cancellation is queued while existing successful claims are paid.",
+                )
+
         transactions = await db_access.get_transactions_by_spot(
-            db,
-            spot_id=int(spot_id),
-            limit=db_access.MAX_LIMIT,
+            db, spot_id=int(spot_id), limit=db_access.MAX_LIMIT
         )
         deposit_transactions = [
-            trans
-            for trans in transactions
+            trans for trans in transactions
             if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_FILL_SPOT
         ]
         confirmed_deposits = [
-            trans
-            for trans in deposit_transactions
-            if int(
-                trans.get(schema.TRANS_STATUS)
-                if trans.get(schema.TRANS_STATUS) is not None
-                else -1
-            )
+            trans for trans in deposit_transactions
+            if int(trans.get(schema.TRANS_STATUS) if trans.get(schema.TRANS_STATUS) is not None else -1)
             == const.TRANS_STATUS_CONFIRMED
         ]
         failed_deposits = [
-            trans
-            for trans in deposit_transactions
-            if int(
-                trans.get(schema.TRANS_STATUS)
-                if trans.get(schema.TRANS_STATUS) is not None
-                else -1
-            )
+            trans for trans in deposit_transactions
+            if int(trans.get(schema.TRANS_STATUS) if trans.get(schema.TRANS_STATUS) is not None else -1)
             == const.TRANS_STATUS_FAILED
         ]
-        confirmed_deposits.sort(
-            key=lambda row: int(row.get(schema.TRANS_CREATED_AT) or 0)
-        )
-        confirmed_deposit_total = sum(
-            int(trans.get(schema.TRANS_AMOUNT) or 0) for trans in confirmed_deposits
-        )
-        failed_deposit_total = sum(
-            int(trans.get(schema.TRANS_AMOUNT) or 0) for trans in failed_deposits
-        )
+        confirmed_deposits.sort(key=lambda row: int(row.get(schema.TRANS_CREATED_AT) or 0))
+        confirmed_deposit_total = sum(int(row.get(schema.TRANS_AMOUNT) or 0) for row in confirmed_deposits)
+        failed_deposit_total = sum(int(row.get(schema.TRANS_AMOUNT) or 0) for row in failed_deposits)
 
         if spot_status == const.SPOT_STATUS_DRAFT:
-            pending_deposit = any(
-                int(
-                    trans.get(schema.TRANS_STATUS)
-                    if trans.get(schema.TRANS_STATUS) is not None
-                    else -1
-                )
-                == const.TRANS_STATUS_PENDING
-                for trans in deposit_transactions
-            )
-            if pending_deposit:
-                raise ValueError(
-                    "This draft has a pending deposit. Wait for it to confirm or fail before cancelling."
-                )
             if not deposit_transactions:
                 raise ValueError("unfunded drafts should be deleted rather than cancelled")
+            if any(
+                int(row.get(schema.TRANS_STATUS) if row.get(schema.TRANS_STATUS) is not None else -1)
+                == const.TRANS_STATUS_PENDING
+                for row in deposit_transactions
+            ):
+                return await deferred_result(
+                    reason="deposit_pending",
+                    message="Cancellation is queued until the deposit transaction is resolved.",
+                )
 
         outgoing_types = {
             const.TRANS_TYPE_CLAIM,
@@ -1874,40 +1876,24 @@ async def submit_spot_cancellation_transactions(
             const.TRANS_TYPE_CREATION_FEE,
         }
         pending_outgoing = [
-            trans
-            for trans in transactions
-            if int(trans.get(schema.TRANS_TYPE) or -1) in outgoing_types
-            and int(
-                trans.get(schema.TRANS_STATUS)
-                if trans.get(schema.TRANS_STATUS) is not None
-                else -1
-            )
+            row for row in transactions
+            if int(row.get(schema.TRANS_TYPE) or -1) in outgoing_types
+            and int(row.get(schema.TRANS_STATUS) if row.get(schema.TRANS_STATUS) is not None else -1)
             == const.TRANS_STATUS_PENDING
         ]
         if pending_outgoing:
-            raise ValueError(
-                "This spot already has a pending cancellation, refund, fee, or reward transaction. "
-                "Wait for it to confirm or fail before cancelling again."
+            return await deferred_result(
+                reason="outgoing_transaction_pending",
+                message="Cancellation is queued until an existing fee, reward, or refund transaction is resolved.",
             )
 
-        # A failed deposit may be a harmless abandoned hash, or it may be an
-        # on-chain wrong-wallet payment retained for manual recovery. Never
-        # delete that audit trail. With no eligible confirmed funds there is
-        # nothing safe to send automatically, so archive the draft as cancelled.
         if spot_status == const.SPOT_STATUS_DRAFT and confirmed_deposit_total <= 0:
             await db_access.set_spot_status_to_cancelled(db, spot_id=int(spot_id))
             await db.commit()
-            await cache.notify_spot_changed(db, spot_id=int(spot_id))
-            await cache.notify_user_changed(
-                db,
-                user_id=int(spot[schema.SPOT_CREATED_BY]),
-            )
+            await notify_cancellation_change()
             return {
-                "ok": True,
-                "spot_id": int(spot_id),
-                "cancelled": True,
-                "cancellation_pending": False,
-                "confirmed_deposit_total": 0,
+                "ok": True, "spot_id": int(spot_id), "cancelled": True,
+                "cancellation_pending": False, "confirmed_deposit_total": 0,
                 "failed_deposit_count": len(failed_deposits),
                 "failed_deposit_total": failed_deposit_total,
                 "manual_review_required": bool(failed_deposits),
@@ -1922,49 +1908,21 @@ async def submit_spot_cancellation_transactions(
                 "fee_amount": 0,
                 "refund_amount": 0,
                 "refund_address": None,
-                "fee_address": fee_address
-                or getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", ""),
-                "fee": {
-                    "ok": True,
-                    "skipped": True,
-                    "reason": "no_confirmed_funds",
-                    "trans_id": None,
-                },
-                "refund": {
-                    "ok": True,
-                    "skipped": True,
-                    "reason": "no_confirmed_funds",
-                    "trans_id": None,
-                },
+                "fee_address": fee_address or getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", ""),
             }
 
         confirmed_claim_total = sum(
-            int(trans.get(schema.TRANS_AMOUNT) or 0)
-            for trans in transactions
-            if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CLAIM
-            and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+            int(row.get(schema.TRANS_AMOUNT) or 0) for row in transactions
+            if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CLAIM
+            and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
         )
         confirmed_creation_fee_total = sum(
-            int(trans.get(schema.TRANS_AMOUNT) or 0)
-            for trans in transactions
-            if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CREATION_FEE
-            and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+            int(row.get(schema.TRANS_AMOUNT) or 0) for row in transactions
+            if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CREATION_FEE
+            and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
         )
-        if spot_status == const.SPOT_STATUS_DRAFT:
-            required_deposit_total = db_access.spot_required_deposit_amount(spot)
-            creation_fee_due = db_access.spot_creation_fee_amount(spot)
-            if (
-                creation_fee_due > 0
-                and confirmed_deposit_total >= required_deposit_total
-                and confirmed_creation_fee_total < creation_fee_due
-            ):
-                raise ValueError(
-                    "This fully funded draft must finish paying its creation fee before "
-                    "it can be cancelled. Wait for the fee to confirm or retry."
-                )
         remaining_cancellable_total = max(
-            0,
-            confirmed_deposit_total - confirmed_claim_total - confirmed_creation_fee_total,
+            0, confirmed_deposit_total - confirmed_claim_total - confirmed_creation_fee_total
         )
         desired_fee_total = min(
             max(0, int(getattr(const, "SPOT_CANCELLATION_FEE", 0) if cancellation_fee is None else cancellation_fee)),
@@ -1972,39 +1930,33 @@ async def submit_spot_cancellation_transactions(
         )
         desired_refund_total = max(0, remaining_cancellable_total - desired_fee_total)
         confirmed_fee_total = sum(
-            int(trans.get(schema.TRANS_AMOUNT) or 0)
-            for trans in transactions
-            if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_PLAT_FEE
-            and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+            int(row.get(schema.TRANS_AMOUNT) or 0) for row in transactions
+            if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_PLAT_FEE
+            and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
         )
         confirmed_refund_total = sum(
-            int(trans.get(schema.TRANS_AMOUNT) or 0)
-            for trans in transactions
-            if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CANCEL_SPOT
-            and int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+            int(row.get(schema.TRANS_AMOUNT) or 0) for row in transactions
+            if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CANCEL_SPOT
+            and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
         )
         fee_amount = max(0, desired_fee_total - confirmed_fee_total)
         refund_amount = max(0, desired_refund_total - confirmed_refund_total)
         remaining_amount = fee_amount + refund_amount
         confirmed_outgoing_total = (
-            confirmed_claim_total
-            + confirmed_creation_fee_total
-            + confirmed_fee_total
-            + confirmed_refund_total
+            confirmed_claim_total + confirmed_creation_fee_total
+            + confirmed_fee_total + confirmed_refund_total
         )
 
-        refund_address = None
-        for trans in confirmed_deposits:
-            candidate = str(trans.get(schema.TRANS_FROM_ADDRESS) or "").strip()
-            if candidate:
-                refund_address = candidate
-                break
+        refund_address = next((
+            str(row.get(schema.TRANS_FROM_ADDRESS) or "").strip()
+            for row in confirmed_deposits
+            if str(row.get(schema.TRANS_FROM_ADDRESS) or "").strip()
+        ), None)
         if refund_amount > 0 and not refund_address:
             raise ValueError("cannot refund this spot because no original deposit sender address is recorded")
 
         result_base = {
-            "ok": True,
-            "spot_id": int(spot_id),
+            "ok": True, "spot_id": int(spot_id),
             "confirmed_deposit_total": confirmed_deposit_total,
             "failed_deposit_count": len(failed_deposits),
             "failed_deposit_total": failed_deposit_total,
@@ -2026,13 +1978,9 @@ async def submit_spot_cancellation_transactions(
         if remaining_amount <= 0:
             await db_access.set_spot_status_to_cancelled(db, spot_id=int(spot_id))
             await db.commit()
-            await cache.notify_spot_changed(db, spot_id=int(spot_id))
-            await cache.notify_user_changed(db, user_id=int(spot[schema.SPOT_CREATED_BY]))
+            await notify_cancellation_change()
             return {
-                **result_base,
-                "cancelled": True,
-                "cancellation_pending": False,
-                "remaining_amount": 0,
+                **result_base, "cancelled": True, "cancellation_pending": False,
                 "fee": {"ok": True, "skipped": True, "reason": "no_fee_due", "trans_id": None},
                 "refund": {"ok": True, "skipped": True, "reason": "no_refund_due", "trans_id": None},
             }
@@ -2045,37 +1993,48 @@ async def submit_spot_cancellation_transactions(
             raise
 
     try:
-        fee_result = await submit_platform_fee_transaction(
-            db,
-            spot_id=int(spot_id),
-            amount=fee_amount,
-            fee_address=fee_address,
-        ) if fee_amount > 0 else {"ok": True, "skipped": True, "reason": "no_fee", "trans_id": None}
-
-        refund_result = await submit_spot_refund_transaction(
-            db,
-            spot_id=int(spot_id),
-            to_address=str(refund_address),
-            amount=refund_amount,
-        ) if refund_amount > 0 else {"ok": True, "skipped": True, "reason": "no_refund", "trans_id": None}
+        fee_result = (
+            await submit_platform_fee_transaction(
+                db, spot_id=int(spot_id), amount=fee_amount, fee_address=fee_address
+            )
+            if fee_amount > 0
+            else {"ok": True, "skipped": True, "reason": "no_fee", "trans_id": None}
+        )
+        refund_result = (
+            await submit_spot_refund_transaction(
+                db, spot_id=int(spot_id), to_address=str(refund_address), amount=refund_amount
+            )
+            if refund_amount > 0
+            else {"ok": True, "skipped": True, "reason": "no_refund", "trans_id": None}
+        )
     except sqlite3.IntegrityError as exc:
         message = str(exc).lower()
         if "trans.spot_id" in message and "trans.type" in message:
-            raise ValueError(
-                "This spot already has an active cancellation transaction. "
-                "Wait for it to confirm or fail before retrying."
-            ) from exc
+            return {
+                **result_base, "cancelled": False, "cancellation_pending": True,
+                "deferred": True, "reason": "concurrent_cancellation_transaction",
+                "message": "Cancellation is already being processed.",
+            }
         raise
+    except Exception as exc:
+        logger.error(
+            "Cancellation send deferred after helper failure: spot_id=%s error=%s",
+            int(spot_id),
+            wallet.redact_secret_values(exc),
+        )
+        return {
+            **result_base,
+            "cancelled": False,
+            "cancellation_pending": True,
+            "deferred": True,
+            "reason": "send_retry_pending",
+            "message": "Cancellation was accepted and its transactions will retry automatically.",
+        }
 
-    await cache.notify_spot_changed(db, spot_id=int(spot_id))
-    await cache.notify_user_changed(db, user_id=int(spot[schema.SPOT_CREATED_BY]))
-
+    await notify_cancellation_change()
     return {
-        **result_base,
-        "cancelled": False,
-        "cancellation_pending": True,
-        "fee": fee_result,
-        "refund": refund_result,
+        **result_base, "cancelled": False, "cancellation_pending": True,
+        "fee": fee_result, "refund": refund_result,
     }
 
 

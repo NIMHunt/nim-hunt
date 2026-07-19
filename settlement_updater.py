@@ -510,23 +510,59 @@ async def settle_pending_duration_claims(*, max_claims: int = DEFAULT_MAX_DURATI
     }
 
 
+async def retry_pending_spot_cancellations(*, limit: int = 50) -> RowDict:
+    """Resume durable cancellation requests after their blockers resolve."""
+    async with get_db() as db:
+        spot_ids = await db_access.get_pending_cancellation_spot_ids(db, limit=int(limit))
+
+    results: list[RowDict] = []
+    for spot_id in spot_ids:
+        try:
+            async with get_db() as db:
+                result = await trans_updater.submit_spot_cancellation_transactions(
+                    db,
+                    spot_id=int(spot_id),
+                    cancellation_fee=getattr(const, "SPOT_CANCELLATION_FEE", 0),
+                    fee_address=getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", ""),
+                )
+            results.append(result)
+        except Exception as exc:
+            results.append({
+                "ok": False,
+                "spot_id": int(spot_id),
+                "reason": repr(exc),
+            })
+
+    return {
+        "ok": all(bool(result.get("ok")) for result in results),
+        "checked_count": len(spot_ids),
+        "completed_count": sum(1 for result in results if result.get("cancelled")),
+        "pending_count": sum(1 for result in results if result.get("cancellation_pending")),
+        "failed_count": sum(1 for result in results if not result.get("ok")),
+        "results": results,
+    }
+
+
 async def run_settlement_pass() -> RowDict:
     """Run all app-level settlement work once."""
     duration_result = await settle_pending_duration_claims()
     standard_payout_result = await retry_unpaid_standard_claim_payouts()
     prizedraw_result = await settle_ready_prizedraws()
     payout_retry_result = await retry_pending_prizedraw_payouts()
+    cancellation_result = await retry_pending_spot_cancellations()
     return {
         "ok": (
             bool(duration_result.get("ok"))
             and bool(standard_payout_result.get("ok"))
             and bool(prizedraw_result.get("ok"))
             and bool(payout_retry_result.get("ok"))
+            and bool(cancellation_result.get("ok"))
         ),
         "duration_claims": duration_result,
         "standard_claim_payouts": standard_payout_result,
         "prizedraws": prizedraw_result,
         "prizedraw_payout_retries": payout_retry_result,
+        "spot_cancellations": cancellation_result,
     }
 
 
@@ -592,6 +628,16 @@ async def start_settlement_refresher(
                 raise
 
     _SETTLEMENT_TASK = asyncio.create_task(_settlement_loop(int(interval_seconds)))
+
+
+def settlement_refresher_status() -> RowDict:
+    """Return a secret-free snapshot of the settlement worker."""
+    return {
+        "running": _SETTLEMENT_TASK is not None and not _SETTLEMENT_TASK.done(),
+        "last_error": _SETTLEMENT_LAST_ERROR,
+        "last_result": _SETTLEMENT_LAST_RESULT,
+        "interval_seconds": DEFAULT_SETTLEMENT_INTERVAL_SECONDS,
+    }
 
 
 async def stop_settlement_refresher() -> None:

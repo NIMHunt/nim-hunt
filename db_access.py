@@ -1240,6 +1240,30 @@ async def mark_spot_cancellation_started(db, *, spot_id: int) -> bool:
     return int(cur.rowcount or 0) == 1
 
 
+async def get_pending_cancellation_spot_ids(
+    db,
+    *,
+    limit: int = DEFAULT_LIMIT,
+) -> list[int]:
+    """Return draft/published Spots whose durable cancellation is unfinished."""
+    rows = await db.execute_fetchall(
+        f"""
+        SELECT {schema.SPOT_ID} AS spot_id
+        FROM {schema.SPOT_TABLE_NAME}
+        WHERE {schema.SPOT_STATUS} IN (?, ?)
+          AND {schema.SPOT_CANCELLATION_STARTED_AT} IS NOT NULL
+        ORDER BY {schema.SPOT_CANCELLATION_STARTED_AT} ASC, {schema.SPOT_ID} ASC
+        LIMIT ?;
+        """,
+        (
+            const.SPOT_STATUS_DRAFT,
+            const.SPOT_STATUS_PUBLISHED,
+            max(1, min(int(limit), int(MAX_LIMIT))),
+        ),
+    )
+    return [int(row["spot_id"]) for row in rows]
+
+
 async def clear_spot_cancellation_started(db, *, spot_id: int) -> None:
     """Clear a cancellation marker. Intended only for explicit administrative recovery."""
     await db.execute(

@@ -178,6 +178,31 @@ function keyPairForPath(payload) {
   return { keyPair, address, keyPath, network };
 }
 
+async function rpcCall(rpcUrl, method, params) {
+  const response = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.error) {
+    const detail = payload?.error?.message || `HTTP ${response.status}`;
+    throw new Error(`Nimiq RPC ${method} failed: ${detail}`);
+  }
+  const result = payload.result;
+  if (result && typeof result === 'object' && Object.hasOwn(result, 'data')) return result.data;
+  return result;
+}
+
+function blockHeight(block) {
+  const value = block?.number ?? block?.height ?? block?.blockNumber;
+  const height = Number(value);
+  if (!Number.isInteger(height) || height < 0) {
+    throw new Error('Nimiq RPC getLatestBlock did not return a valid block height.');
+  }
+  return height;
+}
+
 async function createClient(payload) {
   const network = networkFromPayload(payload);
   const config = new Nimiq.ClientConfiguration();
@@ -254,58 +279,65 @@ async function sendLunaFromSpotDeposit(payload) {
   }
 
   const recipient = parseAddress(payload.to_address, 'to_address');
-  const client = await createClient({ ...payload, network });
+  const rpcUrl = String(payload.rpc_url || env('NIMHUNT_NIMIQ_RPC_URL', '')).trim();
+  const fallbackNetworkIds = { TestAlbatross: 5, MainAlbatross: 24, DevAlbatross: 6 };
+  const networkId = Number(payload.network_id ?? fallbackNetworkIds[network] ?? 0);
+  let height;
+  let sendResult;
 
-  try {
-    const height = await client.getHeadHeight();
-    const fallbackNetworkIds = { TestAlbatross: 5, MainAlbatross: 24, DevAlbatross: 6 };
-    const networkId = typeof client.getNetworkId === 'function'
-      ? await client.getNetworkId()
-      : Number(payload.network_id ?? fallbackNetworkIds[network] ?? 0);
-
-    const data = encodeTransactionMemo(payload.memo);
-    const tx = data.byteLength > 0
-      ? Nimiq.TransactionBuilder.newBasicWithData(
-          keyPair.toAddress(),
-          recipient,
-          data,
-          amount,
-          fee,
-          height,
-          Number(networkId),
-        )
-      : Nimiq.TransactionBuilder.newBasic(
-          keyPair.toAddress(),
-          recipient,
-          amount,
-          fee,
-          height,
-          Number(networkId),
-        );
-    tx.sign(keyPair);
-    tx.verify(Number(networkId));
-
-    const txDetails = await client.sendTransaction(tx);
-    const hash = transactionHash(tx, txDetails);
-    if (!hash) throw new Error('Transaction was sent but no transaction hash could be determined.');
-
-    ok({
-      action: 'send_luna_from_spot_deposit',
-      network,
-      tx_hash: hash,
-      from_address: derivedAddress,
-      to_address: userFriendlyAddress(recipient),
-      amount: Number(amount),
-      fee: Number(fee),
-      memo: String(payload.memo || '').trim() || null,
-      deposit_key_path: keyPath,
-      validity_start_height: Number(height),
-      network_id: Number(networkId),
-      raw: txDetails ?? null,
-    });
-  } finally {
-    await closeClient(client);
+  if (rpcUrl) {
+    const latestBlock = await rpcCall(rpcUrl, 'getLatestBlock', [false]);
+    height = blockHeight(latestBlock);
+  } else {
+    const client = await createClient({ ...payload, network });
+    try {
+      height = await client.getHeadHeight();
+    } finally {
+      await closeClient(client);
+    }
   }
+
+  const data = encodeTransactionMemo(payload.memo);
+  const tx = data.byteLength > 0
+    ? Nimiq.TransactionBuilder.newBasicWithData(
+        keyPair.toAddress(), recipient, data, amount, fee, height, networkId,
+      )
+    : Nimiq.TransactionBuilder.newBasic(
+        keyPair.toAddress(), recipient, amount, fee, height, networkId,
+      );
+  tx.sign(keyPair);
+  tx.verify(networkId);
+
+  if (rpcUrl) {
+    const rawTx = Buffer.from(tx.serialize()).toString('hex');
+    sendResult = await rpcCall(rpcUrl, 'sendRawTransaction', [rawTx]);
+  } else {
+    const client = await createClient({ ...payload, network });
+    try {
+      sendResult = await client.sendTransaction(tx);
+    } finally {
+      await closeClient(client);
+    }
+  }
+
+  const hash = transactionHash(tx, typeof sendResult === 'object' ? sendResult : { hash: sendResult });
+  if (!hash) throw new Error('Transaction was sent but no transaction hash could be determined.');
+
+  ok({
+    action: 'send_luna_from_spot_deposit',
+    network,
+    tx_hash: hash,
+    from_address: derivedAddress,
+    to_address: userFriendlyAddress(recipient),
+    amount: Number(amount),
+    fee: Number(fee),
+    memo: String(payload.memo || '').trim() || null,
+    deposit_key_path: keyPath,
+    validity_start_height: Number(height),
+    network_id: networkId,
+    broadcast_transport: rpcUrl ? 'json-rpc' : 'web-client',
+    raw: sendResult ?? null,
+  });
 }
 
 async function main() {

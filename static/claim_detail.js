@@ -577,8 +577,11 @@ async function initClaimDetail() {
         params.delete('claimed');
         const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
         window.history.replaceState({}, '', next);
-        state.celebrationShown = true;
-        burstConfetti();
+        const claim = state.currentClaim;
+        if (claim && (!claim.is_prizedraw || isWinningClaim(claim))) {
+            state.celebrationShown = true;
+            burstConfetti();
+        }
     }
 }
 

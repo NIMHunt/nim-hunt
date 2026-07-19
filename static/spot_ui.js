@@ -5,11 +5,13 @@ const SPOT_TEXT = getSpotText();
 
 const STATUS_CLASS_NAMES = new Set([
     'draft',
+    'deposited',
     'active',
     'upcoming',
     'ended',
     'completed',
     'cancelled',
+    'cancelling',
     'banned',
     'unknown',
 ]);
@@ -126,11 +128,12 @@ export function spotTypeText(spot) {
 }
 
 export function spotStatusText(spot) {
-    return SPOT_TEXT.status[spot.status_label] || SPOT_TEXT.status.unknown;
+    const label = spot.badge_status_label || spot.status_label;
+    return SPOT_TEXT.status[label] || SPOT_TEXT.status.unknown;
 }
 
 export function spotStatusClass(spot) {
-    const label = String(spot.status_label || 'unknown').toLowerCase();
+    const label = String(spot.badge_status_label || spot.status_label || 'unknown').toLowerCase();
     return `is-${STATUS_CLASS_NAMES.has(label) ? label : 'unknown'}`;
 }
 

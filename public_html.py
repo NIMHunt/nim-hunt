@@ -318,6 +318,30 @@ def _spot_has_prizedraw(item: dict[str, Any]) -> bool:
     return spot.get(schema.PRIZEDRAW_PRIZE_COUNT) is not None
 
 
+def _spot_has_public_claim_capacity(item: dict[str, Any]) -> bool:
+    """Return False once a public Spot has no remaining claim/entry capacity."""
+    spot = _normalise_cached_spot_item(item)
+    counts = item.get("counts") if isinstance(item.get("counts"), dict) else {}
+    is_prizedraw = _spot_has_prizedraw(item)
+    max_total = int(
+        spot.get(schema.SPOT_MAX_TOTAL_CLAIMS)
+        if spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) is not None
+        else 1
+    )
+    if max_total > 0:
+        successful = int(counts.get("success_claim_count", spot.get("success_claim_count") or 0) or 0)
+        pending = int(counts.get("pending_claim_count", spot.get("pending_claim_count") or 0) or 0)
+        used = successful + (pending if is_prizedraw else 0)
+        if used >= max_total:
+            return False
+
+    claim_code_count = int(counts.get("claim_code_count", spot.get("claim_code_count") or 0) or 0)
+    unused_code_count = int(counts.get("unused_code_count", spot.get("unused_code_count") or 0) or 0)
+    if claim_code_count > 0 and unused_code_count <= 0:
+        return False
+    return True
+
+
 def _spot_matches_filters(
     item: dict[str, Any],
     *,
@@ -328,8 +352,12 @@ def _spot_matches_filters(
 ) -> bool:
     if _spot_has_prizedraw(item) and not include_prizedraws:
         return False
+    if not _spot_has_public_claim_capacity(item):
+        return False
 
     spot = _normalise_cached_spot_item(item)
+    if spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None:
+        return False
     return (
         (_is_spot_active(spot, now=now) and include_active)
         or (_is_spot_upcoming(spot, now=now) and include_upcoming)
@@ -878,6 +906,19 @@ def _serialise_owner_spot(
         "updated_at": spot.get(schema.SPOT_UPDATED_AT),
         "status_code": int(spot[schema.SPOT_STATUS]),
         "status_label": status_label,
+        "badge_status_label": (
+            "cancelling"
+            if cancellation_started
+            else (
+                "deposited"
+                if status_label == "draft"
+                and (
+                    int(deposit.get("pending_amount") or 0) > 0
+                    or bool(deposit.get("funding_complete"))
+                )
+                else status_label
+            )
+        ),
         "bucket": bucket,
         "is_prizedraw": is_prizedraw,
         "prize_count": spot.get(schema.PRIZEDRAW_PRIZE_COUNT),
@@ -918,20 +959,16 @@ def _serialise_owner_spot(
         "publish_block_reason": publish_block_reason,
         "publish_block_message": publish_block_message,
         "can_cancel": (
-            (
-                int(spot[schema.SPOT_STATUS]) == const.SPOT_STATUS_PUBLISHED
-                and not is_prizedraw
-            )
-            or (
-                status_label == "draft"
-                and bool(deposit.get("has_any"))
-                and int(deposit.get("pending_amount") or 0) <= 0
-                and int(deposit.get("pending_fee_amount") or 0) <= 0
-                and (
-                    not bool(deposit.get("funding_complete"))
-                    or bool(deposit.get("fee_paid"))
+            not cancellation_started
+            and (
+                (
+                    int(spot[schema.SPOT_STATUS]) == const.SPOT_STATUS_PUBLISHED
+                    and not is_prizedraw
                 )
-                and spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is None
+                or (
+                    status_label == "draft"
+                    and bool(deposit.get("has_any"))
+                )
             )
         ),
         "cancellation": cancellation,
@@ -1603,6 +1640,21 @@ async def spots_claim_status_api(payload: ClaimStatusRequest) -> JSONResponse:
                 counted_claims += int(spot.get("pending_claim_count") or 0)
             max_total = int(spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) if spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) is not None else 1)
             reward_amount = _claim_reward_amount(spot, is_prizedraw=is_prizedraw)
+            own_spot = bool(rule.get("own_spot"))
+            cancellation_started = spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None
+            can_cancel = (
+                own_spot
+                and not cancellation_started
+                and int(spot.get(schema.SPOT_STATUS) or -1) == const.SPOT_STATUS_PUBLISHED
+                and not is_prizedraw
+            )
+            cancellation = None
+            if own_spot:
+                transactions = await db_access.get_transactions_by_spot(
+                    db, spot_id=spot_id, limit=50
+                )
+                cancellation = _cancellation_summary(transactions)
+
             statuses[str(spot_id)] = {
                 "allowed": allowed,
                 "reason": rule.get("reason"),
@@ -1620,7 +1672,10 @@ async def spots_claim_status_api(payload: ClaimStatusRequest) -> JSONResponse:
                 "prize_count": spot.get(schema.PRIZEDRAW_PRIZE_COUNT),
                 "distance": rule.get("distance"),
                 "user_ok": bool(rule.get("user_ok")),
-                "own_spot": bool(rule.get("own_spot")),
+                "own_spot": own_spot,
+                "can_cancel": can_cancel,
+                "cancellation_pending": cancellation_started,
+                "cancellation": cancellation,
                 "spot_current": bool(rule.get("spot_current")),
                 "capacity_ok": bool(rule.get("capacity_ok")),
                 "user_limit_ok": bool(rule.get("user_limit_ok")),

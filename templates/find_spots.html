@@ -67,6 +67,17 @@
         </section>
     </div>
 
+    <div id="cancel-spot-backdrop" class="notice-backdrop" hidden>
+        <section class="notice-card nh-confirm-card cancel-spot-card" role="dialog" aria-modal="true" aria-labelledby="cancel-spot-title" aria-describedby="cancel-spot-body">
+            <h2 id="cancel-spot-title">Cancel Spot</h2>
+            <p id="cancel-spot-body">Are you sure?</p>
+            <div class="nh-modal-actions cancel-spot-actions">
+                <button id="cancel-spot-confirm" class="nq-button red" type="button">Confirm</button>
+                <button id="cancel-spot-cancel" class="nq-button nh-grey-cancel-button" type="button">Cancel</button>
+            </div>
+        </section>
+    </div>
+
     <div id="claim-backdrop" class="notice-backdrop" hidden>
         <section class="notice-card nh-confirm-card claim-spot-card" role="dialog" aria-modal="true" aria-labelledby="claim-title">
             <h2 id="claim-title" data-i18n="findSpots.claimTitle">Claim Spot</h2>
@@ -136,6 +147,6 @@
 
     <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
     <script src="{{ leaflet_js_url }}"></script>
-    <script type="module" src="/static/find_spots.js?v={{ asset_version | default('claim-ui-polish-v1-20260704') }}-claim-live-v1-20260719"></script>
+    <script type="module" src="/static/find_spots.js?v={{ asset_version | default('claim-ui-polish-v1-20260704') }}-claim-live-v2-20260720"></script>
 </body>
 </html>

@@ -830,6 +830,12 @@ h2 {
     background: var(--nh-success);
 }
 
+.spot-badge.is-deposited,
+.spot-badge.is-cancelling {
+    background: var(--nimiq-gold, #ffc435);
+    color: var(--nimiq-blue, #1f2348);
+}
+
 .spot-badge.is-upcoming {
     background: var(--nh-success);
     filter: grayscale(1);
@@ -3420,3 +3426,16 @@ h2 {
     cursor: default;
 }
 
+
+/* Find Spots expanded location and owner actions */
+.spot-detail-place {
+    margin: 0 0 0.55rem;
+    text-align: center;
+    font-weight: 800;
+    color: var(--nh-muted);
+}
+
+.spot-owner-actions {
+    margin: 1rem 0 0;
+    text-align: center;
+}

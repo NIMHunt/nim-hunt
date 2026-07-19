@@ -551,9 +551,11 @@ function prizeDrawValueLine(spot) {
 
 function buildMySpotMeta(spot) {
     const fragment = document.createDocumentFragment();
-    fragment.append(document.createTextNode(`${spotPlaceText(spot)} - `));
+    fragment.append(document.createTextNode(spotPlaceText(spot)));
 
     if (spot.status_label === 'draft') {
+        if (spot.badge_status_label === 'deposited') return fragment;
+        fragment.append(document.createTextNode(' - '));
         const notice = document.createElement('span');
         notice.className = `spot-list-meta-notice ${draftDepositClass(spot)}`;
         notice.textContent = draftDepositText(spot);
@@ -561,7 +563,7 @@ function buildMySpotMeta(spot) {
         return fragment;
     }
 
-    fragment.append(scheduleNode(spot));
+    fragment.append(document.createTextNode(' - '), scheduleNode(spot));
     return fragment;
 }
 
@@ -1211,9 +1213,11 @@ async function confirmCancelSpot() {
     } catch (err) {
         console.error(err);
         state.cancelInProgress = false;
+        els.cancelBackdrop.hidden = true;
         els.cancelConfirm.disabled = false;
         els.cancelCancel.disabled = false;
         els.cancelConfirm.textContent = TEXT.cancelSpot.confirm;
+        state.cancelSpot = null;
         showNotice({
             ...TEXT.cancelSpot.failed,
             body: err?.message || TEXT.cancelSpot.failed.body,

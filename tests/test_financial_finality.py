@@ -294,13 +294,13 @@ class CancellationLiabilityTest(unittest.IsolatedAsyncioTestCase):
                  "mark_spot_cancellation_started",
                  mock.AsyncMock(),
              ) as mark_started:
-            with self.assertRaisesRegex(ValueError, "successful claims"):
-                await trans_updater.submit_spot_cancellation_transactions(
-                    FakeDb(),
-                    spot_id=7,
-                )
+            result = await trans_updater.submit_spot_cancellation_transactions(
+                FakeDb(), spot_id=7
+            )
 
-        mark_started.assert_not_awaited()
+        self.assertTrue(result["cancellation_pending"])
+        self.assertEqual(result["reason"], "claim_payouts_pending")
+        mark_started.assert_awaited_once()
 
 
 if __name__ == "__main__":

@@ -53,6 +53,8 @@ const state = {
     claimCaptcha: null,
     liveRefreshTimerId: null,
     liveRefreshInFlight: false,
+    cancelSpot: null,
+    cancelInProgress: false,
 };
 
 const APP_NAME = document.body.dataset.appName || 'NimHunt';
@@ -121,6 +123,12 @@ const els = {
     claimConfirm: document.getElementById('claim-confirm'),
     claimCancel: document.getElementById('claim-cancel'),
     claimError: document.getElementById('claim-error'),
+
+    cancelBackdrop: document.getElementById('cancel-spot-backdrop'),
+    cancelTitle: document.getElementById('cancel-spot-title'),
+    cancelBody: document.getElementById('cancel-spot-body'),
+    cancelConfirm: document.getElementById('cancel-spot-confirm'),
+    cancelCancel: document.getElementById('cancel-spot-cancel'),
 };
 
 
@@ -395,9 +403,8 @@ function spotPlaceText(spot) {
 }
 
 function spotListMetaText(spot) {
-    const place = spotPlaceText(spot);
-    if (spot.distance_m === null || spot.distance_m === undefined) return place;
-    return `${place} - ${metresToText(spot.distance_m)}`;
+    if (spot.distance_m === null || spot.distance_m === undefined) return spotPlaceText(spot);
+    return metresToText(spot.distance_m);
 }
 
 function nimFromLunaText(value) {
@@ -1051,7 +1058,7 @@ async function postClaimForSpot(spot, { claimCode = null, captchaPayload = {} } 
 function redirectToClaim(data) {
     const url = new URL(data.claim_url || `/claim/${data.claim?.id || ''}`, window.location.origin);
     url.searchParams.set('from', 'find-spots');
-    if (data.success_now) url.searchParams.set('claimed', '1');
+    if (data.success_now && !data.claim?.is_prizedraw) url.searchParams.set('claimed', '1');
     window.location.href = `${url.pathname}${url.search}`;
 }
 
@@ -1163,6 +1170,69 @@ function buildClaimAction(spot) {
     return action;
 }
 
+function closeCancelModal() {
+    if (els.cancelBackdrop) els.cancelBackdrop.hidden = true;
+    state.cancelSpot = null;
+    state.cancelInProgress = false;
+}
+
+function openCancelModal(spot) {
+    if (!spot?.id || !els.cancelBackdrop || state.cancelInProgress) return;
+    state.cancelSpot = spot;
+    const cancellation = claimStatusForSpot(spot).cancellation || {};
+    const refund = nimFromLunaText(cancellation.refund_amount || 0);
+    const fee = nimFromLunaText(cancellation.fee_amount || cancellation.configured_fee || 0);
+    els.cancelTitle.textContent = UI_COPY.cancelSpot.title;
+    els.cancelBody.textContent = UI_COPY.cancelSpot.body({
+        title: spot.title,
+        refund,
+        fee,
+    });
+    els.cancelConfirm.disabled = false;
+    els.cancelCancel.disabled = false;
+    els.cancelConfirm.textContent = UI_COPY.cancelSpot.confirm;
+    els.cancelCancel.textContent = UI_COPY.cancelSpot.cancel;
+    els.cancelBackdrop.hidden = false;
+}
+
+async function confirmCancelSpot() {
+    if (!state.cancelSpot?.id || state.cancelInProgress) return;
+    state.cancelInProgress = true;
+    els.cancelConfirm.disabled = true;
+    els.cancelCancel.disabled = true;
+    els.cancelConfirm.textContent = UI_COPY.cancelSpot.confirming;
+    try {
+        await fetchJsonWithBody(`/api/my-spots/${state.cancelSpot.id}/cancel`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reportAuthPayload()),
+        });
+        closeCancelModal();
+        await refreshVisibleSpots();
+    } catch (err) {
+        console.error(err);
+        closeCancelModal();
+        showNotice({
+            ...UI_COPY.cancelSpot.failed,
+            body: err?.message || UI_COPY.cancelSpot.failed.body,
+        });
+    }
+}
+
+function buildOwnerCancelControl(spot) {
+    const status = claimStatusForSpot(spot);
+    if (!status.own_spot || !status.can_cancel) return null;
+    const line = document.createElement('p');
+    line.className = 'spot-owner-actions';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'nq-button red spot-owner-action-button';
+    button.textContent = 'Cancel Spot';
+    button.addEventListener('click', () => openCancelModal(spot));
+    line.append(button);
+    return line;
+}
+
 function buildReportControl(spot) {
     const line = document.createElement('p');
     line.className = 'spot-report-line';
@@ -1191,6 +1261,12 @@ function buildSpotDetail(spot) {
     const duration = durationText(spot.claim_duration);
     const creator = spot.creator_display_name || 'unknown creator';
 
+    if (spot.distance_m !== null && spot.distance_m !== undefined) {
+        const place = document.createElement('p');
+        place.className = 'spot-detail-place';
+        place.textContent = spotPlaceText(spot);
+        detail.append(place);
+    }
     appendDetailDescription(detail, spot.description);
 
     const lines = document.createElement('ul');
@@ -1216,6 +1292,8 @@ function buildSpotDetail(spot) {
         lines.append(buildOwnerClaimCodesLineForSpot(spot));
     }
     detail.append(lines);
+    const cancelControl = buildOwnerCancelControl(spot);
+    if (cancelControl) detail.append(cancelControl);
     detail.append(buildReportControl(spot));
 
     return detail;
@@ -1613,6 +1691,8 @@ async function initFindSpots() {
 els.noticeOk.addEventListener('click', () => {
     els.noticeBackdrop.hidden = true;
 });
+els.cancelConfirm?.addEventListener('click', confirmCancelSpot);
+els.cancelCancel?.addEventListener('click', closeCancelModal);
 
 if (els.reportCancel) {
     els.reportCancel.addEventListener('click', hideReportModal);

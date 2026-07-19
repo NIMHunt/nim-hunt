@@ -458,6 +458,16 @@ async def healthz() -> JSONResponse:
             "ok": True,
             "deployment_mode": getattr(const, "DEPLOYMENT_MODE", "development"),
             "network": getattr(const, "NIMIQ_NETWORK", ""),
+        }
+    )
+
+
+@app.get("/transaction-healthz", include_in_schema=False)
+async def transaction_healthz() -> JSONResponse:
+    """Return secret-free transaction-refresher diagnostics."""
+    return JSONResponse(
+        {
+            "ok": True,
             "transactions": await funding_flow_diagnostics(),
         }
     )

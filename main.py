@@ -20,8 +20,12 @@ import database
 import settlement_updater
 import trans_updater
 import wallet
+from funding_flow import funding_flow_diagnostics
+from funding_flow import install as install_funding_flow
 from public_html import render_not_found_page
 from public_html import router as public_router
+
+install_funding_flow()
 
 logger = logging.getLogger(__name__)
 
@@ -454,6 +458,17 @@ async def healthz() -> JSONResponse:
             "ok": True,
             "deployment_mode": getattr(const, "DEPLOYMENT_MODE", "development"),
             "network": getattr(const, "NIMIQ_NETWORK", ""),
+        }
+    )
+
+
+@app.get("/transaction-healthz", include_in_schema=False)
+async def transaction_healthz() -> JSONResponse:
+    """Return secret-free transaction-refresher diagnostics."""
+    return JSONResponse(
+        {
+            "ok": True,
+            "transactions": await funding_flow_diagnostics(),
         }
     )
 

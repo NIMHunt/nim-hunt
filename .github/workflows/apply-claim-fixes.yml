@@ -1,9 +1,7 @@
 name: Apply Claim Fixes
 
 on:
-  push:
-    branches:
-      - agent/fix-claim-responsiveness-and-spot-rules
+  pull_request:
 
 permissions:
   contents: write
@@ -16,6 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: agent/fix-claim-responsiveness-and-spot-rules
           fetch-depth: 0
       - name: Decode and apply prepared patch
         shell: bash

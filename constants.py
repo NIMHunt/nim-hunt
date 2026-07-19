@@ -361,7 +361,7 @@ CLAIM_PAYOUT_ADDRESS_MAX_CHARS = 160
 
 # Settlement loop. This only decides app-level outcomes such as completed
 # Prizedraws. Chain-facing sends remain routed through trans_updater.py.
-SETTLEMENT_INTERVAL_SECONDS = 60
+SETTLEMENT_INTERVAL_SECONDS = 15
 MAX_SETTLEMENTS_PER_RUN = 50
 MAX_DURATION_CLAIMS_PER_RUN = 200
 

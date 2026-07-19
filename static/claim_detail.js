@@ -31,6 +31,9 @@ const state = {
     heartbeatTimerId: null,
     heartbeatInFlight: false,
     heartbeatNoticeShown: false,
+    statusPollTimerId: null,
+    statusPollInFlight: false,
+    celebrationShown: false,
     timerIds: [],
 };
 
@@ -126,6 +129,12 @@ function stopHeartbeat() {
     state.heartbeatInFlight = false;
 }
 
+function stopStatusPolling() {
+    if (state.statusPollTimerId) window.clearTimeout(state.statusPollTimerId);
+    state.statusPollTimerId = null;
+    state.statusPollInFlight = false;
+}
+
 function formatSeconds(seconds) {
     const value = Math.max(0, Number(seconds || 0));
     const minutes = Math.floor(value / 60);
@@ -147,6 +156,7 @@ function createDurationTimerText(claim) {
         if (required > 0 && cappedElapsed >= required && span._nhTimerId) {
             window.clearInterval(span._nhTimerId);
             span._nhTimerId = null;
+            handleDurationGoalReached();
         }
     };
 
@@ -337,6 +347,7 @@ function buildClaimDetail(claim) {
 }
 
 function renderClaim(claim) {
+    const previousClaim = state.currentClaim;
     state.currentClaim = claim;
     clearStatusTimers();
 
@@ -385,6 +396,8 @@ function renderClaim(claim) {
     requestAnimationFrame(() => renderLockedClaimMap(map, claim));
 
     syncHeartbeat(claim);
+    syncStatusPolling(claim);
+    maybeCelebrateClaimTransition(previousClaim, claim);
 }
 
 async function fetchClaimDetail() {
@@ -409,6 +422,75 @@ function isExpectedClaimDetailError(err) {
         || (status === 403 && code === 'not_allowed')
         || code === 'wallet_unavailable'
     );
+}
+
+function claimNeedsLiveRefresh(claim) {
+    if (!claim) return false;
+    if (String(claim.status_label || '').toLowerCase() === 'pending') return true;
+    if (!claim.is_prizedraw) return false;
+    return ['waiting', 'pending', 'won_pending', 'won_retrying'].includes(
+        String(claim.display_status_label || '').toLowerCase()
+    );
+}
+
+function scheduleStatusPoll(delayMs = 5000) {
+    if (state.statusPollTimerId) window.clearTimeout(state.statusPollTimerId);
+    state.statusPollTimerId = null;
+    if (!claimNeedsLiveRefresh(state.currentClaim) || document.visibilityState !== 'visible') return;
+    state.statusPollTimerId = window.setTimeout(refreshClaimStatus, delayMs);
+}
+
+function syncStatusPolling(claim) {
+    if (!claimNeedsLiveRefresh(claim)) {
+        stopStatusPolling();
+        return;
+    }
+    scheduleStatusPoll();
+}
+
+async function refreshClaimStatus() {
+    if (state.statusPollInFlight || document.visibilityState !== 'visible') {
+        scheduleStatusPoll();
+        return;
+    }
+    state.statusPollInFlight = true;
+    try {
+        await fetchClaimDetail();
+    } catch (err) {
+        console.warn('NimHunt could not refresh this claim yet.', err);
+    } finally {
+        state.statusPollInFlight = false;
+        scheduleStatusPoll();
+    }
+}
+
+function handleDurationGoalReached() {
+    const claim = state.currentClaim;
+    if (!claim || String(claim.status_label || '').toLowerCase() !== 'pending') return;
+    if (claim.location_monitoring_required && claim.viewer_is_recipient) {
+        void sendLocationHeartbeat();
+        return;
+    }
+    void refreshClaimStatus();
+}
+
+function isWinningClaim(claim) {
+    return String(claim?.display_status_label || '').toLowerCase().startsWith('won');
+}
+
+function isSuccessfulClaim(claim) {
+    return String(claim?.status_label || '').toLowerCase() === 'success';
+}
+
+function maybeCelebrateClaimTransition(previousClaim, claim) {
+    if (!previousClaim || state.celebrationShown) return;
+    const becameWinner = isWinningClaim(claim) && !isWinningClaim(previousClaim);
+    const becameSuccessful = !claim.is_prizedraw
+        && isSuccessfulClaim(claim)
+        && !isSuccessfulClaim(previousClaim);
+    if (!becameWinner && !becameSuccessful) return;
+    state.celebrationShown = true;
+    window.requestAnimationFrame(() => window.setTimeout(burstConfetti, 120));
 }
 
 async function sendLocationHeartbeat() {
@@ -495,6 +577,7 @@ async function initClaimDetail() {
         params.delete('claimed');
         const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
         window.history.replaceState({}, '', next);
+        state.celebrationShown = true;
         burstConfetti();
     }
 }
@@ -503,8 +586,21 @@ els.noticeOk?.addEventListener('click', () => {
     els.noticeBackdrop.hidden = true;
 });
 
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        void refreshClaimStatus();
+    } else {
+        stopStatusPolling();
+    }
+});
+
+window.addEventListener('pageshow', () => {
+    if (state.currentClaim) void refreshClaimStatus();
+});
+
 window.addEventListener('beforeunload', () => {
     stopHeartbeat();
+    stopStatusPolling();
     clearStatusTimers();
 });
 

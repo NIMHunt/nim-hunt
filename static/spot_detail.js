@@ -72,6 +72,7 @@ const state = {
     claimCodesPanel: null,
     claimCodesLoaded: false,
     claimCodesLoading: false,
+    statusTimerId: null,
 };
 
 const showNotice = createNoticePresenter(els, {
@@ -574,13 +575,61 @@ function spotTypeText(spot) {
 }
 
 function spotStatusText(spot) {
-    if (spot.status_label === 'cancelled') return 'Cancelled';
-    return spot.status_label === 'upcoming' ? 'Upcoming' : 'Active';
+    const status = String(spot?.status_label || '').toLowerCase();
+    if (status === 'cancelled') return 'Cancelled';
+    if (['ended', 'finished', 'completed'].includes(status)) return 'Finished';
+    return status === 'upcoming' ? 'Upcoming' : 'Active';
 }
 
 function spotStatusClass(spot) {
-    if (spot.status_label === 'cancelled') return 'is-cancelled';
-    return spot.status_label === 'upcoming' ? 'is-upcoming' : 'is-active';
+    const status = String(spot?.status_label || '').toLowerCase();
+    if (status === 'cancelled') return 'is-cancelled';
+    if (['ended', 'finished', 'completed'].includes(status)) return 'is-finished';
+    return status === 'upcoming' ? 'is-upcoming' : 'is-active';
+}
+
+function liveSpotStatus(spot) {
+    const existing = String(spot?.status_label || '').toLowerCase();
+    if (['cancelled', 'ended', 'finished', 'completed'].includes(existing)) return existing;
+    const now = Math.floor(Date.now() / 1000);
+    const startsAt = Number(spot?.starts_at || 0);
+    const endsAt = Number(spot?.ends_at || 0);
+    if (endsAt > 0 && now >= endsAt) return 'finished';
+    if (startsAt > 0 && now < startsAt) return 'upcoming';
+    return 'active';
+}
+
+function stopSpotStatusTimer() {
+    if (state.statusTimerId) window.clearTimeout(state.statusTimerId);
+    state.statusTimerId = null;
+}
+
+function updateLiveSpotStatus() {
+    const spot = state.spot;
+    if (!spot) return;
+    spot.status_label = liveSpotStatus(spot);
+    document.querySelectorAll('.spot-badge').forEach((badge) => {
+        badge.className = `spot-badge ${spotStatusClass(spot)}`;
+        badge.textContent = spotStatusText(spot);
+    });
+    document.querySelectorAll('.spot-time-summary').forEach((span) => {
+        span.textContent = spotScheduleSummary(spot);
+        span.title = spotScheduleTooltip(spot);
+        span.setAttribute('aria-label', `${span.textContent}. ${span.title}`);
+    });
+    scheduleSpotStatusTransition();
+}
+
+function scheduleSpotStatusTransition() {
+    stopSpotStatusTimer();
+    const spot = state.spot;
+    if (!spot) return;
+    const now = Math.floor(Date.now() / 1000);
+    const candidates = [Number(spot.starts_at || 0), Number(spot.ends_at || 0)]
+        .filter((timestamp) => timestamp > now);
+    if (!candidates.length) return;
+    const delay = Math.min(2147483000, Math.max(250, (Math.min(...candidates) - now) * 1000 + 150));
+    state.statusTimerId = window.setTimeout(updateLiveSpotStatus, delay);
 }
 
 function spotPlaceText(spot) {
@@ -880,6 +929,7 @@ function buildSpotDetail(spot) {
 }
 
 function renderSpot(spot) {
+    spot.status_label = liveSpotStatus(spot);
     state.spot = spot;
     state.reportControls = [];
     state.claimCodesLine = null;
@@ -929,6 +979,7 @@ function renderSpot(spot) {
     els.fallback.hidden = true;
 
     requestAnimationFrame(() => renderLockedSpotMap(map, spot));
+    scheduleSpotStatusTransition();
 }
 
 if (els.noticeOk) {
@@ -976,6 +1027,13 @@ for (const input of [els.reportReason, els.reportCaptchaInput]) {
         updateReportConfirmState();
     });
 }
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') updateLiveSpotStatus();
+    else stopSpotStatusTimer();
+});
+window.addEventListener('pageshow', updateLiveSpotStatus);
+window.addEventListener('beforeunload', stopSpotStatusTimer);
 
 state.language = getLanguage();
 

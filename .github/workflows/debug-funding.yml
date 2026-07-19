@@ -29,12 +29,14 @@ jobs:
         run: |
           set -o pipefail
           python -m pytest -q 2>&1 | tee pytest.log
-      - name: Upload pytest output
+      - name: Upload pytest output and affected tests
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: funding-pytest-log
-          path: pytest.log
+          path: |
+            pytest.log
+            tests/test_spot_creation_fees.py
           if-no-files-found: error
       - name: Preserve failure result
         if: steps.pytest.outcome == 'failure'

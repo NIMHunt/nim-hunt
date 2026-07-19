@@ -1,9 +1,7 @@
 name: Follow-up Source Snapshot
 
 on:
-  push:
-    branches:
-      - agent/fix-cancellation-and-spot-list
+  pull_request:
 
 permissions:
   contents: read

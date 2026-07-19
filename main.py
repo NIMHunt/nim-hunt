@@ -22,6 +22,10 @@ import trans_updater
 import wallet
 from public_html import render_not_found_page
 from public_html import router as public_router
+from funding_flow import funding_flow_diagnostics
+from funding_flow import install as install_funding_flow
+
+install_funding_flow()
 
 logger = logging.getLogger(__name__)
 
@@ -454,6 +458,7 @@ async def healthz() -> JSONResponse:
             "ok": True,
             "deployment_mode": getattr(const, "DEPLOYMENT_MODE", "development"),
             "network": getattr(const, "NIMIQ_NETWORK", ""),
+            "transactions": await funding_flow_diagnostics(),
         }
     )
 

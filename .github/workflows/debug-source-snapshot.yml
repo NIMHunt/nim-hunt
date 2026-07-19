@@ -1,9 +1,7 @@
 name: Source Snapshot
 
 on:
-  push:
-    branches:
-      - agent/fix-claim-responsiveness-and-spot-rules
+  pull_request:
 
 permissions:
   contents: read

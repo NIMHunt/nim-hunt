@@ -18,6 +18,7 @@ def test_generated_claim_codes_are_easy_to_type():
 
 def test_claim_code_input_is_uppercased_and_rejects_punctuation():
     assert db_access._normalise_claim_code(" ab12 ", required=True) == "AB12"
+    assert db_access._normalise_claim_code("abc123", required=True) == "ABC123"
     with pytest.raises(ValueError, match="letters and numbers only"):
         db_access._normalise_claim_code("AB-12", required=True)
 

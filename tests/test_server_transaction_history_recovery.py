@@ -56,6 +56,7 @@ class ServerTransactionHistoryRecoveryTest(IsolatedAsyncioTestCase):
 
         self.assertEqual(result.status, "confirmed")
         self.assertEqual(result.tx_hash, HASH)
+        self.assertEqual(result.block_number, 456)
         self.assertIn("expected-address", result.reason)
         history.assert_awaited_once()
         verified = trans_updater._verify_chain_details_for_record(self.transaction(), result)

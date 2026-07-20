@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import secrets
 import shlex
 import sqlite3
@@ -75,6 +76,8 @@ DEFAULT_TRANSACTION_CHECK_INTERVAL_SECONDS = int(os.getenv(
 # If the helper broadcasts but the later DB update fails, this local intent row
 # prevents automatic retries and therefore avoids accidental double payment.
 LOCAL_TRANSACTION_INTENT_PREFIX = "NIMHUNT_INTENT:"
+_NIMIQ_TRANSACTION_HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+DEFAULT_USER_DEPOSIT_STALE_AFTER_SECONDS = int(getattr(const, "USER_DEPOSIT_STALE_AFTER_SECONDS", 30 * 60))
 
 
 def _env_enabled(name: str) -> bool:
@@ -266,8 +269,8 @@ def _validate_submitted_chain_send(
     helper is allowed to return canonical formatting, but it must not be able to
     replace the recipient or amount before later blockchain verification.
     """
-    tx_hash = str(result.tx_hash or "").strip()
-    if not tx_hash or _is_local_intent_hash(tx_hash):
+    tx_hash = str(result.tx_hash or "").strip().lower()
+    if not _NIMIQ_TRANSACTION_HASH_RE.fullmatch(tx_hash):
         raise RuntimeError("Nimiq helper returned an invalid transaction hash")
 
     expected_from = _validate_nimiq_address(expected_from_address, field_name="expected from_address")
@@ -781,6 +784,33 @@ async def verify_configured_rpc_network(
     return actual
 
 
+async def get_chain_head_height(
+    *,
+    rpc_url: str = DEFAULT_NIMIQ_RPC_URL,
+    timeout_seconds: int = DEFAULT_RPC_TIMEOUT_SECONDS,
+) -> int:
+    """Return the configured RPC's latest block height."""
+    result = await asyncio.to_thread(
+        _json_rpc_post_sync,
+        rpc_url=str(rpc_url),
+        method="getLatestBlock",
+        params=[False],
+        timeout_seconds=int(timeout_seconds),
+    )
+    if isinstance(result, dict) and "data" in result:
+        result = result.get("data")
+    if isinstance(result, (int, str)):
+        try:
+            height = int(result)
+        except ValueError as exc:
+            raise RuntimeError("Nimiq RPC returned an invalid block height") from exc
+    else:
+        height = _extract_block_number(result)
+    if height is None or int(height) < 0:
+        raise RuntimeError("Nimiq RPC getLatestBlock did not expose a block height")
+    return int(height)
+
+
 def _normalise_chain_hash(value: Any) -> str:
     return str(value or "").strip().lower()
 
@@ -998,6 +1028,7 @@ async def check_pending_transaction(
     rpc_url: str = DEFAULT_NIMIQ_RPC_URL,
     timeout_seconds: int = DEFAULT_RPC_TIMEOUT_SECONDS,
     fail_after_seconds: int = DEFAULT_FAIL_AFTER_SECONDS,
+    user_deposit_stale_after_seconds: int = DEFAULT_USER_DEPOSIT_STALE_AFTER_SECONDS,
 ) -> ChainTransactionStatus:
     """Check one cached pending transaction and return its current outcome."""
     tx_hash = str(trans.get(schema.TRANS_TX_HASH) or "").strip()
@@ -1018,7 +1049,50 @@ async def check_pending_transaction(
     if chain_status.status != "pending":
         return chain_status
 
-    if _transaction_age_seconds(trans) >= int(fail_after_seconds):
+    age_seconds = _transaction_age_seconds(trans)
+    if (
+        int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_FILL_SPOT
+        and age_seconds >= int(user_deposit_stale_after_seconds)
+    ):
+        address = _verification_address_for_record(trans)
+        if address is None:
+            return ChainTransactionStatus(
+                status="unknown",
+                tx_hash=tx_hash,
+                reason="stale deposit cannot be checked because its recipient address is invalid",
+            )
+        try:
+            history = await get_chain_transactions_by_address(
+                address,
+                rpc_url=rpc_url,
+                timeout_seconds=int(timeout_seconds),
+                max_transactions=int(getattr(const, "NIMIQ_ADDRESS_TX_LOOKUP_LIMIT", 500)),
+            )
+        except (TimeoutError, urllib.error.URLError, OSError, RuntimeError) as exc:
+            return ChainTransactionStatus(
+                status="unknown",
+                tx_hash=tx_hash,
+                reason=f"stale deposit address-history check failed: {exc!r}",
+            )
+        matched = _find_transaction_by_hash(history, tx_hash)
+        if matched is not None:
+            return ChainTransactionStatus(
+                status="confirmed",
+                tx_hash=tx_hash,
+                block_number=_extract_block_number(matched),
+                raw=matched,
+                reason="found through deposit-address history",
+            )
+        return ChainTransactionStatus(
+            status="failed",
+            tx_hash=tx_hash,
+            reason=(
+                f"deposit hash was not found by hash or recipient history after {age_seconds} seconds; "
+                "the Nimiq transaction validity window has elapsed"
+            ),
+        )
+
+    if age_seconds >= int(fail_after_seconds):
         # A missing RPC result is not proof that a broadcast transaction failed.
         # Marking the database row FAILED would release the uniqueness guard and
         # could permit a second payment/deposit while the first later confirms.
@@ -1452,6 +1526,23 @@ def transaction_refresher_status() -> RowDict:
     }
 
 
+async def _transaction_by_hash(db, *, tx_hash: str) -> RowDict | None:
+    cur = await db.execute(
+        f"SELECT * FROM {schema.TRANS_TABLE_NAME} WHERE {schema.TRANS_TX_HASH} = ? LIMIT 1;",
+        (str(tx_hash).strip().lower(),),
+    )
+    row = await cur.fetchone()
+    return dict(row) if row is not None else None
+
+
+def _same_recorded_deposit(existing: RowDict, *, user_id: int, spot_id: int) -> bool:
+    return (
+        int(existing.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_FILL_SPOT
+        and int(existing.get(schema.TRANS_USER_ID) or -1) == int(user_id)
+        and int(existing.get(schema.TRANS_SPOT_ID) or -1) == int(spot_id)
+    )
+
+
 async def record_spot_deposit_transaction(
     db,
     *,
@@ -1462,11 +1553,23 @@ async def record_spot_deposit_transaction(
     tx_hash: str,
     to_address: str | None = None,
 ) -> RowDict:
-    """Record a user-initiated SPOT deposit returned by Nimiq Pay.
+    """Record one strictly shaped, idempotent Nimiq Pay deposit response."""
+    clean_hash = str(tx_hash or "").strip().lower()
+    if not _NIMIQ_TRANSACTION_HASH_RE.fullmatch(clean_hash):
+        raise ValueError("tx_hash must be a 64-character hexadecimal Nimiq transaction hash")
 
-    The user signs/sends this transaction in the Pay webview. NimHunt only
-    records the returned hash and later confirms it through check_pending_*().
-    """
+    existing = await _transaction_by_hash(db, tx_hash=clean_hash)
+    if existing is not None:
+        if not _same_recorded_deposit(existing, user_id=user_id, spot_id=spot_id):
+            raise ValueError("this transaction hash is already attached to a different record")
+        return {
+            "ok": True,
+            "already_recorded": True,
+            "trans_id": int(existing[schema.TRANS_ID]),
+            "spot_id": int(spot_id),
+            "amount": int(existing.get(schema.TRANS_AMOUNT) or 0),
+        }
+
     amount = int(amount)
     if amount <= 0:
         raise ValueError("amount must be positive")
@@ -1484,17 +1587,20 @@ async def record_spot_deposit_transaction(
         field_name="deposit to_address",
         allow_dev_placeholder=bool(getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)),
     )
+    clean_from_address = wallet.normalise_nimiq_address(
+        str(from_address or ""),
+        field_name="deposit from_address",
+        allow_dev_placeholder=bool(getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)),
+    )
 
-    try:
-        clean_from_address = wallet.normalise_nimiq_address(
-            str(from_address or ""),
-            field_name="deposit from_address",
-            allow_dev_placeholder=bool(getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)),
-        )
-    except ValueError:
-        if not getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False):
-            raise
-        clean_from_address = str(from_address or "Nimiq Pay").strip() or "Nimiq Pay"
+    totals = await db_access.get_spot_deposit_totals(db, spot_id=int(spot_id))
+    if int(totals.get("pending_amount") or 0) > 0:
+        raise ValueError("this draft already has a pending deposit")
+    required = int(db_access.spot_required_deposit_amount(spot))
+    amount_due = max(0, required - int(totals.get("confirmed_amount") or 0))
+    if amount_due <= 0:
+        raise ValueError("this draft is already fully funded")
+    amount = min(amount, amount_due)
 
     funding_address = await db_access.get_confirmed_spot_funding_address(
         db,
@@ -1508,17 +1614,35 @@ async def record_spot_deposit_transaction(
                 "Additional deposits for this Spot must come from its original funding wallet."
             )
 
-    trans_id = await db_access.create_spot_deposit_transaction(
-        db,
-        user_id=int(user_id),
-        spot_id=int(spot_id),
-        amount=amount,
-        from_address=clean_from_address,
-        to_address=clean_to_address,
-        tx_hash=str(tx_hash).strip(),
-    )
+    try:
+        trans_id = await db_access.create_spot_deposit_transaction(
+            db,
+            user_id=int(user_id),
+            spot_id=int(spot_id),
+            amount=amount,
+            from_address=clean_from_address,
+            to_address=clean_to_address,
+            tx_hash=clean_hash,
+        )
+    except sqlite3.IntegrityError:
+        existing = await _transaction_by_hash(db, tx_hash=clean_hash)
+        if existing is None or not _same_recorded_deposit(existing, user_id=user_id, spot_id=spot_id):
+            raise
+        return {
+            "ok": True,
+            "already_recorded": True,
+            "trans_id": int(existing[schema.TRANS_ID]),
+            "spot_id": int(spot_id),
+            "amount": int(existing.get(schema.TRANS_AMOUNT) or 0),
+        }
 
-    return {"ok": True, "trans_id": int(trans_id), "spot_id": int(spot_id), "amount": amount}
+    return {
+        "ok": True,
+        "already_recorded": False,
+        "trans_id": int(trans_id),
+        "spot_id": int(spot_id),
+        "amount": amount,
+    }
 
 
 async def submit_platform_fee_transaction(

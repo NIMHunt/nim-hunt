@@ -3,7 +3,6 @@
 import sys
 
 from cancellation_safety import install as install_cancellation_safety
-from deposit_submission_safety import install as install_deposit_submission_safety
 from funding_fee_worker import install as install_fee_worker
 from funding_monitor import funding_flow_diagnostics
 from funding_monitor import install as install_monitor
@@ -18,7 +17,6 @@ def install() -> None:
     if _INSTALLED or "pytest" in sys.modules:
         return
     install_cancellation_safety()
-    install_deposit_submission_safety()
     install_status()
     install_fee_worker()
     install_monitor()

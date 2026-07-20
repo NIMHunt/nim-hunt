@@ -3,7 +3,6 @@ import {
     getReportReasonOptions,
 } from './interface_text.js?v=qol-v1-20260717';
 import { installCreateSpotDeleteNavigationGuard } from './create_spot_delete_guard.js?v=ios-delete-guard-v1-20260718';
-import { installDepositFlowRepair } from './deposit_flow_repair.js?v=deposit-recording-v1-20260720';
 import { installNetworkModeBanner } from './network_mode_banner.js?v=network-mode-banner-v1-20260718';
 import { installOwnerUiPolish } from './owner_ui_polish.js?v=cancellation-safety-v1-20260720';
 
@@ -60,11 +59,6 @@ globalThis.REPORT_REASON_OPTIONS = getReportReasonOptions();
 // This allows My Spots responses and funded-draft deletion requests to be
 // normalised without duplicating cancellation logic across several large files.
 installOwnerUiPolish();
-
-// Wrap only the HTTP recording half of the deposit flow. The blockchain payment
-// remains under Nimiq Pay's control; retries reuse its returned transaction hash
-// and can never reopen the wallet transaction prompt.
-installDepositFlowRepair();
 
 // The Create Spot page loads this shared module before create_spot.js. Installing
 // the guard here means its fetch observer is in place before a draft can be

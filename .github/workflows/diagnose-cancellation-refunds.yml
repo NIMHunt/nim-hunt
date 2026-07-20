@@ -21,26 +21,40 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import time
+          import urllib.error
           import urllib.request
 
           RPC_URL = "https://rpc.testnet.nimiqwatch.com/"
           FEE_ADDRESS = "NQ38 2YYK 977P FX4B 2D89 LLL7 YYNQ NPL5 VP1T"
 
           def rpc(method, params):
-              request = urllib.request.Request(
-                  RPC_URL,
-                  data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
-                  headers={"content-type": "application/json"},
-                  method="POST",
-              )
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  payload = json.load(response)
-              if payload.get("error"):
-                  raise RuntimeError(f"{method} failed: {payload['error']}")
-              result = payload.get("result")
-              if isinstance(result, dict) and "data" in result:
-                  return result["data"]
-              return result
+              last_error = None
+              for attempt in range(1, 6):
+                  try:
+                      request = urllib.request.Request(
+                          RPC_URL,
+                          data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
+                          headers={
+                              "content-type": "application/json",
+                              "user-agent": "NimHunt-read-only-diagnostic/1.0",
+                          },
+                          method="POST",
+                      )
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          payload = json.load(response)
+                      if payload.get("error"):
+                          raise RuntimeError(f"{method} failed: {payload['error']}")
+                      result = payload.get("result")
+                      if isinstance(result, dict) and "data" in result:
+                          return result["data"]
+                      return result
+                  except Exception as exc:
+                      last_error = exc
+                      print(f"RPC_RETRY method={method} attempt={attempt} error={type(exc).__name__}: {exc}")
+                      if attempt < 5:
+                          time.sleep(attempt * 2)
+              raise RuntimeError(f"{method} failed after retries: {last_error}")
 
           def address_key(value):
               return "".join(str(value or "").upper().split())
@@ -81,7 +95,7 @@ jobs:
                   "data": first(tx, "data"),
               }
 
-          fee_history = transactions(rpc("getTransactionsByAddress", [FEE_ADDRESS, 500]))
+          fee_history = transactions(rpc("getTransactionsByAddress", [FEE_ADDRESS, 100]))
           incoming_fees = [
               tx for tx in fee_history
               if address_key(first(tx, "recipient", "recipientAddress", "to", "toAddress")) == address_key(FEE_ADDRESS)
@@ -99,7 +113,7 @@ jobs:
                   senders.append(str(sender))
 
           for sender in senders:
-              history = transactions(rpc("getTransactionsByAddress", [sender, 100]))
+              history = transactions(rpc("getTransactionsByAddress", [sender, 50]))
               outgoing = [
                   tx for tx in history
                   if address_key(first(tx, "sender", "senderAddress", "from", "fromAddress")) == address_key(sender)

@@ -41,15 +41,10 @@ jobs:
         run: python -m pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run Python tests
-        id: python_tests
         shell: bash
         run: |
-          set +e
-          python -m pytest -q > python-tests.log 2>&1
-          code=$?
-          cat python-tests.log
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          exit 0
+          set -o pipefail
+          python -m pytest -q 2>&1 | tee python-tests.log
 
       - name: Upload Python test output
         if: always()
@@ -65,16 +60,11 @@ jobs:
         run: npm ci
 
       - name: Run Node tests
-        id: node_tests
         shell: bash
         working-directory: helpers
         run: |
-          set +e
-          npm test > ../node-tests.log 2>&1
-          code=$?
-          cat ../node-tests.log
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          exit 0
+          set -o pipefail
+          npm test 2>&1 | tee ../node-tests.log
 
       - name: Upload Node test output
         if: always()
@@ -84,12 +74,6 @@ jobs:
           path: node-tests.log
           if-no-files-found: error
           retention-days: 1
-
-      - name: Stop on test failure
-        shell: bash
-        run: |
-          test "${{ steps.python_tests.outputs.exit_code }}" = "0"
-          test "${{ steps.node_tests.outputs.exit_code }}" = "0"
 
       - name: Remove temporary patch machinery
         run: rm -f .github/scripts/apply_htlc_payout_fix.py .github/scripts/adjust_htlc_payout_fix.py .github/workflows/apply-htlc-payout-fix.yml .github/htlc-fix-trigger.txt

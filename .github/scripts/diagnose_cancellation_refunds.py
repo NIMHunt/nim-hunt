@@ -116,8 +116,9 @@ def main() -> None:
             sender_keys.add(key)
 
     for sender in senders:
+        account = rpc("getAccountByAddress", [sender])
         history = transactions(
-            rpc("getTransactionsByAddress", [sender, 50, None])
+            rpc("getTransactionsByAddress", [sender, 100, None])
         )
         outgoing = [
             tx
@@ -125,12 +126,26 @@ def main() -> None:
             if address_key(first(tx, "sender", "senderAddress", "from", "fromAddress"))
             == address_key(sender)
         ]
+        incoming = [
+            tx
+            for tx in history
+            if address_key(first(tx, "recipient", "recipientAddress", "to", "toAddress"))
+            == address_key(sender)
+        ]
         outgoing.sort(
             key=lambda tx: int(first(tx, "blockNumber", "blockHeight", "block") or 0),
             reverse=True,
         )
+        incoming.sort(
+            key=lambda tx: int(first(tx, "blockNumber", "blockHeight", "block") or 0),
+            reverse=True,
+        )
+        print(f"ACCOUNT {sender}")
+        print(json.dumps(account, indent=2, sort_keys=True))
         print(f"OUTGOING_FROM {sender}")
-        print(json.dumps([summary(tx) for tx in outgoing[:12]], indent=2, sort_keys=True))
+        print(json.dumps([summary(tx) for tx in outgoing[:20]], indent=2, sort_keys=True))
+        print(f"INCOMING_TO {sender}")
+        print(json.dumps([summary(tx) for tx in incoming[:20]], indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

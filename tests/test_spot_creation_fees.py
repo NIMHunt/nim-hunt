@@ -350,7 +350,7 @@ class CreationFeeFundingTests(SpotCreationFeeFixture):
         await self.create_deposit(spot_id, db_access.spot_required_deposit_amount(spot))
 
         submitted = trans_updater.SubmittedChainTransaction(
-            tx_hash="creation-fee-chain-hash",
+            tx_hash="44" * 32,
             from_address=str(spot[schema.SPOT_DEPOSIT_ADDRESS]),
             to_address=str(spot[schema.SPOT_CREATION_FEE_ADDRESS]),
             amount=fee,
@@ -641,8 +641,8 @@ class CreationFeeDepositApiTests(SpotCreationFeeFixture):
                 spot_id,
                 public_html.DepositSubmittedRequest(
                     wallet_available=False,
-                    tx_hash="partial-api-deposit",
-                    from_address="NQ00 NIMHUNT DEV FUNDING WALLET",
+                    tx_hash="55" * 32,
+                    from_address=const.DEV_PLATFORM_FEE_ADDRESS,
                     amount=partial_amount,
                 ),
             )

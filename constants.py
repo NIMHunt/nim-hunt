@@ -368,6 +368,13 @@ MAX_DURATION_CLAIMS_PER_RUN = 200
 # Transaction loop. This checks pending Nimiq transaction hashes and moves them
 # from pending to confirmed/failed when the chain/RPC result is known.
 TRANSACTION_CHECK_INTERVAL_SECONDS = 60
+# Nimiq transactions expire after a 120-block validity window. We use a much
+# longer wall-clock grace period before treating a user-submitted hash as absent,
+# and require a successful recipient-history check before releasing the draft.
+USER_DEPOSIT_STALE_AFTER_SECONDS = _env_int("NIMHUNT_USER_DEPOSIT_STALE_AFTER_SECONDS", 30 * 60)
+# A large block-height gap is a practical indication that Nimiq Pay and the
+# server RPC are connected to different networks or one side is badly stale.
+NIMIQ_PROVIDER_MAX_HEAD_DIFFERENCE = _env_int("NIMHUNT_NIMIQ_PROVIDER_MAX_HEAD_DIFFERENCE", 120)
 
 # Duration-claim location verification. The browser must keep sending location
 # heartbeats while a duration-based CLAIM is pending. GPS accuracy is used as

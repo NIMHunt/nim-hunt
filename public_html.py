@@ -39,7 +39,7 @@ from transaction_descriptions import build_transaction_description
 router = APIRouter()
 templates = Jinja2Templates(directory=str(const.TEMPLATES_DIR))
 
-_ASSET_VERSION = "polish-live-status-v1-20260720"
+_ASSET_VERSION = "blockchain-flow-v1-20260720"
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ALLOWED_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$")
@@ -2750,6 +2750,21 @@ async def my_spots_deposit_intent_api(spot_id: int, payload: HomeSessionRequest)
         if amount_due <= 0:
             return JSONResponse({**meta, "ok": False, "code": "deposit_covered", "message": "This draft already has submitted deposits covering its Spot value and creation fee."}, status_code=status.HTTP_409_CONFLICT)
 
+    try:
+        chain_height = await trans_updater.get_chain_head_height()
+    except Exception:
+        if bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
+            return JSONResponse(
+                {
+                    **meta,
+                    "ok": False,
+                    "code": "nimiq_rpc_unavailable",
+                    "message": "NimHunt cannot verify the configured Nimiq network right now. No deposit was requested.",
+                },
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        chain_height = None
+
     return JSONResponse(
         {
             **meta,
@@ -2763,6 +2778,10 @@ async def my_spots_deposit_intent_api(spot_id: int, payload: HomeSessionRequest)
             "creation_fee": int(deposit.get("creation_fee") or 0),
             "required_total": int(deposit.get("required_total") or 0),
             "recipient": spot.get(schema.SPOT_DEPOSIT_ADDRESS),
+            "network": getattr(const, "NIMIQ_NETWORK", None),
+            "network_id": int(getattr(const, "NIMIQ_NETWORK_ID", 0)),
+            "chain_height": chain_height,
+            "max_chain_height_difference": int(getattr(const, "NIMIQ_PROVIDER_MAX_HEAD_DIFFERENCE", 120)),
             "transaction_description": build_transaction_description(
                 "Funding",
                 spot.get(schema.SPOT_TITLE),
@@ -2805,31 +2824,35 @@ async def my_spots_deposit_submitted_api(spot_id: int, payload: DepositSubmitted
                 deposit_address=str(spot.get(schema.SPOT_DEPOSIT_ADDRESS) or ""),
                 creation_fee_address=str(spot.get(schema.SPOT_CREATION_FEE_ADDRESS) or ""),
             )
-            if int(deposit.get("pending_amount") or 0) > 0:
-                return JSONResponse({**meta, "ok": False, "code": "deposit_pending", "message": "This draft already has a pending deposit. Wait for it to confirm or fail before making another deposit."}, status_code=status.HTTP_409_CONFLICT)
-
             amount_due = int(deposit.get("amount_due") or 0)
-            if amount_due <= 0:
-                return JSONResponse({**meta, "ok": False, "code": "deposit_covered", "message": "This draft already has submitted deposits covering its Spot value and creation fee."}, status_code=status.HTTP_409_CONFLICT)
-
-            # The normal Nimiq Pay flow submits the full requested amount, but
-            # recording a smaller positive amount allows deliberate/manual
-            # part-funding without weakening safety. Chain verification later
-            # replaces this expectation with the actual confirmed amount. Never
-            # record more than the current server-calculated amount due.
-            submitted_amount = min(
-                amount_due,
-                max(1, int(payload.amount if payload.amount is not None else amount_due)),
+            requested_amount = max(
+                1,
+                int(payload.amount if payload.amount is not None else amount_due or 1),
             )
-            deposit_record = await trans_updater.record_spot_deposit_transaction(
-                db,
-                user_id=user_id,
-                spot_id=spot_id,
-                amount=submitted_amount,
-                from_address=payload.from_address,
-                tx_hash=payload.tx_hash,
-                to_address=spot.get(schema.SPOT_DEPOSIT_ADDRESS),
-            )
+            # record_spot_deposit_transaction() checks the hash first, so a lost
+            # HTTP response can be retried idempotently even while the original
+            # row is already pending. New deposits are still clamped to amount due.
+            submitted_amount = min(amount_due, requested_amount) if amount_due > 0 else requested_amount
+            try:
+                deposit_record = await trans_updater.record_spot_deposit_transaction(
+                    db,
+                    user_id=user_id,
+                    spot_id=spot_id,
+                    amount=submitted_amount,
+                    from_address=payload.from_address,
+                    tx_hash=payload.tx_hash,
+                    to_address=spot.get(schema.SPOT_DEPOSIT_ADDRESS),
+                )
+            except ValueError as exc:
+                return JSONResponse(
+                    {
+                        **meta,
+                        "ok": False,
+                        "code": "deposit_rejected",
+                        "message": str(exc),
+                    },
+                    status_code=status.HTTP_409_CONFLICT,
+                )
 
         await cache.notify_transaction_changed(
             db,

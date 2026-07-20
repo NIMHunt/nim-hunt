@@ -1,4 +1,6 @@
 import { init, requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
+import { reconcileKeyedItems } from './keyed_reconcile.js?v=blockchain-flow-v1-20260720';
+import { requestNimiqPayment } from './nimiq_payment.js?v=blockchain-flow-v1-20260720';
 import {
     appendBulletLine,
     appendDetailDescription,
@@ -891,21 +893,17 @@ function reconcileSection(bucket, spots) {
     }
 
     title.textContent = `${copy.title} (${spots.length})`;
-    const existing = new Map(
-        [...list.children].map((item) => [Number(item.dataset.spotId), item]),
-    );
-    const desired = [];
-    for (const spot of spots) {
-        const spotId = Number(spot.id);
-        const signature = mySpotRenderSignature(spot);
-        const current = existing.get(spotId);
-        if (current?.dataset.renderSignature === signature) desired.push(current);
-        else desired.push(buildMySpotListItem(spot));
-        existing.delete(spotId);
-    }
-
-    for (const item of desired) list.append(item);
-    for (const stale of existing.values()) stale.remove();
+    reconcileKeyedItems({
+        existingItems: [...list.children],
+        desiredRecords: spots,
+        existingKey: (item) => Number(item.dataset.spotId),
+        desiredKey: (spot) => Number(spot.id),
+        existingSignature: (item) => item.dataset.renderSignature,
+        desiredSignature: mySpotRenderSignature,
+        createItem: buildMySpotListItem,
+        appendItem: (item) => list.append(item),
+        removeItem: (item) => item.remove(),
+    });
     list.hidden = !state.sectionExpanded[bucket];
     empty.hidden = !state.sectionExpanded[bucket] || spots.length > 0;
 }
@@ -1033,36 +1031,88 @@ async function openDepositModal(spot) {
     }
 }
 
-async function requestDepositPayment(intent) {
-    const nimiq = await init();
-    let fromAddress = null;
+const PENDING_DEPOSIT_STORAGE_KEY = 'nimhunt.pendingDepositSubmission.v2';
+const OBSOLETE_PENDING_DEPOSIT_STORAGE_KEY = 'nimhunt.pendingDepositSubmission.v1';
+const RETRYABLE_DEPOSIT_RECORDING_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
+function savePendingDepositSubmission(record) {
     try {
-        const accounts = await nimiq.listAccounts();
-        if (Array.isArray(accounts) && accounts.length > 0) {
-            fromAddress = accounts[0];
-        }
-    } catch (err) {
-        console.warn('Could not read Nimiq account list before deposit.', err);
+        sessionStorage.setItem(PENDING_DEPOSIT_STORAGE_KEY, JSON.stringify(record));
+    } catch (_err) {
+        // Some private WebViews disable storage. The immediate retry still works.
     }
+}
 
-    const payment = await nimiq.sendBasicTransactionWithData({
-        recipient: intent.recipient,
-        value: Number(intent.amount),
-        data: intent.transaction_description,
+function clearPendingDepositSubmission() {
+    try {
+        sessionStorage.removeItem(PENDING_DEPOSIT_STORAGE_KEY);
+    } catch (_err) {
+        // Nothing else is required.
+    }
+}
+
+function readPendingDepositSubmission() {
+    try {
+        // PR #29 used a broad provider-response parser. Never replay hashes stored
+        // by that implementation because they might not identify a transaction.
+        sessionStorage.removeItem(OBSOLETE_PENDING_DEPOSIT_STORAGE_KEY);
+        const raw = sessionStorage.getItem(PENDING_DEPOSIT_STORAGE_KEY);
+        if (!raw) return null;
+        const value = JSON.parse(raw);
+        if (!value?.spotId || !value?.txHash || !value?.amount) return null;
+        return value;
+    } catch (_err) {
+        clearPendingDepositSubmission();
+        return null;
+    }
+}
+
+function depositRecordingIsRetryable(err) {
+    return !Number.isFinite(Number(err?.status))
+        || RETRYABLE_DEPOSIT_RECORDING_STATUSES.has(Number(err.status));
+}
+
+function depositSubmissionBody(record) {
+    return {
+        ...authPayload(),
+        tx_hash: record.txHash,
+        from_address: record.fromAddress,
+        amount: record.amount,
+    };
+}
+
+async function submitDepositRecording(record, { retry = true } = {}) {
+    const submit = () => fetchJson(`/api/my-spots/${record.spotId}/deposit-submitted`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(depositSubmissionBody(record)),
     });
 
-    const txHash = (
-        typeof payment === 'string'
-            ? payment
-            : payment?.txHash || payment?.hash || payment?.transactionHash || payment?.transaction?.hash
-    );
-
-    if (!txHash) {
-        throw new Error('Nimiq Pay did not return a transaction hash for this deposit.');
+    try {
+        return await submit();
+    } catch (err) {
+        if (!retry || !depositRecordingIsRetryable(err)) throw err;
+        await new Promise((resolve) => window.setTimeout(resolve, 650));
+        return submit();
     }
+}
 
-    return { txHash, fromAddress };
+async function recoverPendingDepositSubmission() {
+    const record = readPendingDepositSubmission();
+    if (!record) return false;
+    try {
+        await submitDepositRecording(record, { retry: true });
+        clearPendingDepositSubmission();
+        return true;
+    } catch (err) {
+        console.warn('NimHunt could not recover the submitted deposit record yet.', err);
+        return false;
+    }
+}
+
+async function requestDepositPayment(intent) {
+    const nimiq = await init();
+    return requestNimiqPayment(nimiq, intent);
 }
 
 async function confirmDeposit() {
@@ -1073,31 +1123,37 @@ async function confirmDeposit() {
     els.depositCancel.disabled = true;
     els.depositConfirm.textContent = TEXT.deposit.confirming;
 
+    let submittedRecord = null;
     try {
         const payment = await requestDepositPayment(state.depositIntent);
-        await fetchJson(`/api/my-spots/${state.depositSpot.id}/deposit-submitted`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                ...authPayload(),
-                tx_hash: payment.txHash,
-                from_address: payment.fromAddress,
-                amount: state.depositIntent.amount,
-            }),
-        });
+        submittedRecord = {
+            spotId: Number(state.depositSpot.id),
+            txHash: payment.txHash,
+            fromAddress: payment.fromAddress,
+            amount: Number(state.depositIntent.amount),
+            createdAt: Date.now(),
+        };
+        savePendingDepositSubmission(submittedRecord);
+        await submitDepositRecording(submittedRecord, { retry: true });
+        clearPendingDepositSubmission();
 
         state.depositInProgress = false;
         els.depositBackdrop.hidden = true;
+        state.depositSpot = null;
+        state.depositIntent = null;
         await refreshMySpots();
     } catch (err) {
         console.error(err);
         state.depositInProgress = false;
+        els.depositBackdrop.hidden = true;
         els.depositConfirm.disabled = false;
         els.depositCancel.disabled = false;
         els.depositConfirm.textContent = TEXT.deposit.confirm;
         showNotice({
             ...TEXT.deposit.failed,
-            body: err?.message || TEXT.deposit.failed.body,
+            body: submittedRecord
+                ? `${err?.message || TEXT.deposit.failed.body} The wallet returned a transaction hash; NimHunt will retry recording that same hash without requesting another payment.`
+                : (err?.message || TEXT.deposit.failed.body),
         });
     }
 }
@@ -1370,6 +1426,9 @@ async function initMySpots() {
     }
 
     renderLoadedMySpots(data);
+    if (await recoverPendingDepositSubmission()) {
+        renderLoadedMySpots(await loadMySpots());
+    }
     scheduleMySpotsRefresh();
 
     if (new URLSearchParams(window.location.search).get('create') === '1') {

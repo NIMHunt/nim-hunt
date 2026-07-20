@@ -1,5 +1,4 @@
 Traceback (most recent call last):
-  File "/home/runner/work/nim-hunt/nim-hunt/tools/apply_polish_patch.py", line 14, in <module>
-    exec(compile(source, str(root / "tools/apply_polish_patch.py"), "exec"))
-  File "/home/runner/work/nim-hunt/nim-hunt/tools/apply_polish_patch.py", line 638, in <module>
-RuntimeError: Expected two cancellation guards, found 1
+  File "/home/runner/work/nim-hunt/nim-hunt/tools/apply_polish_patch.py", line 16, in <module>
+    raise RuntimeError(f"Expected one regression-test marker, found {source.count(marker)}")
+RuntimeError: Expected one regression-test marker, found 0

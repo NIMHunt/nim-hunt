@@ -80,6 +80,7 @@ jobs:
         if: steps.validation.outcome == 'success'
         run: |
           rm -f tools/apply_final_blockchain_cleanup.py
+          rm -f tools/final_cleanup_trigger.txt
           rm -f .github/workflows/apply-final-blockchain-cleanup.yml
           rm -f final-cleanup-validation.log
 

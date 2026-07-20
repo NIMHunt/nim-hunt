@@ -1,4 +1,6 @@
+Applied NimHunt live-status and claim-flow polish patch.
 Traceback (most recent call last):
   File "/home/runner/work/nim-hunt/nim-hunt/tools/apply_polish_patch.py", line 16, in <module>
-    raise RuntimeError(f"Expected one regression-test marker, found {source.count(marker)}")
-RuntimeError: Expected one regression-test marker, found 0
+    exec(compile(source, str(root / "tools/apply_polish_patch.py"), "exec"))
+  File "/home/runner/work/nim-hunt/nim-hunt/tools/apply_polish_patch.py", line 1383, in <module>
+RuntimeError: Expected one completion call at 4 spaces, found 0

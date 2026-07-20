@@ -29,6 +29,7 @@ jobs:
           python tools/apply_server_transaction_history_recovery.py
           rm -f tools/apply_server_transaction_history_recovery.py
           rm -f tools/server_transaction_history_recovery_trigger.txt
+          rm -f tools/server_transaction_history_recovery_pr_trigger.txt
           rm -f .github/workflows/apply-server-transaction-history-recovery.yml
 
       - name: Set up Python 3.11

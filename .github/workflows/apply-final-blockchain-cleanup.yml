@@ -45,6 +45,9 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-dev.txt
           npm ci --prefix helpers
 
+      - name: Apply deterministic formatting
+        run: ruff check --fix tests/test_blockchain_flow_integration.py
+
       - name: Run full validation
         id: validation
         continue-on-error: true

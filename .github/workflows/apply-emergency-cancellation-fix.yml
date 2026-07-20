@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/stop-repeated-cancellation-refunds
+  pull_request:
+    branches:
+      - agent/emergency-cancellation-repair-base
 
 permissions:
   contents: write
@@ -56,6 +59,7 @@ jobs:
             tools/patch_cancellation_backend.py \
             tools/patch_cancellation_ui.py \
             tools/patch_cancellation_tests.py \
+            tools/emergency-repair-trigger.txt \
             .github/workflows/apply-emergency-cancellation-fix.yml
 
       - name: Install dependencies

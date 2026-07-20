@@ -2,11 +2,12 @@
 
 import sys
 
-from cancellation_safety import install as install_cancellation_safety
 from funding_fee_worker import install as install_fee_worker
 from funding_monitor import funding_flow_diagnostics
 from funding_monitor import install as install_monitor
 from funding_status import install as install_status
+
+from cancellation_safety import install as install_cancellation_safety
 
 _INSTALLED = False
 

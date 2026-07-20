@@ -43,23 +43,26 @@ replace_once(
 
 path = ROOT / "trans_updater.py"
 text = path.read_text(encoding="utf-8")
-old_call = dedent("""\
-await _published_standard_spot_is_complete(
-    db, spot_id=int(spot_id)
-)
-""")
-new_call = dedent("""\
-await _published_standard_spot_is_complete(
-    db, spot_id=int(spot_id), spot=spot
-)
-""")
-for spaces in (4, 8):
-    old = _indent_block(old_call, spaces)
-    new = _indent_block(new_call, spaces)
+for continuation_spaces in (8, 12):
+    closing_spaces = continuation_spaces - 4
+    old = (
+        "_published_standard_spot_is_complete(\n"
+        + (" " * continuation_spaces)
+        + "db, spot_id=int(spot_id)\n"
+        + (" " * closing_spaces)
+        + ")"
+    )
+    new = (
+        "_published_standard_spot_is_complete(\n"
+        + (" " * continuation_spaces)
+        + "db, spot_id=int(spot_id), spot=spot\n"
+        + (" " * closing_spaces)
+        + ")"
+    )
     count = text.count(old)
     if count != 1:
         raise RuntimeError(
-            f"Expected one completion call at {spaces} spaces, found {count}"
+            f"Expected one completion call with {continuation_spaces}-space continuation, found {count}"
         )
     text = text.replace(old, new, 1)
 path.write_text(text, encoding="utf-8")

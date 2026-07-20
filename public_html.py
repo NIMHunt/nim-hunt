@@ -856,6 +856,14 @@ def _serialise_owner_spot(
         status_label = "completed"
     cancellation = _cancellation_summary(transactions)
     cancellation_started = spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None
+    # cancellation_started_at is a durable audit and claim-blocking marker. It is
+    # deliberately retained after completion, so it must not override a terminal
+    # database status in the visible badge.
+    cancellation_in_progress = (
+        cancellation_started
+        and int(spot[schema.SPOT_STATUS])
+        in {const.SPOT_STATUS_DRAFT, const.SPOT_STATUS_PUBLISHED}
+    )
     bucket = _owner_spot_bucket(spot, now=now, status_label=status_label)
 
     lat_value = spot.get(schema.SPOT_LAT)
@@ -924,7 +932,7 @@ def _serialise_owner_spot(
         "status_label": status_label,
         "badge_status_label": (
             "cancelling"
-            if cancellation_started
+            if cancellation_in_progress
             else (
                 "depositing"
                 if status_label == "draft"
@@ -953,6 +961,7 @@ def _serialise_owner_spot(
         "trans_total_amount": int(spot.get("trans_total_amount") or 0),
         "deposit": deposit,
         "cancellation_started": cancellation_started,
+        "cancellation_in_progress": cancellation_in_progress,
         "total_value_locked": bool(deposit.get("has_submitted")),
         "can_edit": status_label == "draft" and not cancellation_started,
         "can_delete": (

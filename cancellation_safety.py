@@ -23,6 +23,7 @@ RowDict = dict[str, Any]
 CancellationSubmitter = Callable[..., Awaitable[RowDict]]
 
 _GUARD_TABLE = "CANCELLATION_SEND_GUARD"
+_RETRYABLE_FAILED_REFUND_GUARD_REASON = "existing failed or ambiguous cancellation transaction"
 _INSTALLED = False
 _ORIGINAL_SUBMIT: CancellationSubmitter | None = None
 _SPOT_LOCKS: dict[int, asyncio.Lock] = {}
@@ -117,6 +118,43 @@ def _failed_cancellation_legs(transactions: list[RowDict]) -> list[RowDict]:
     ]
 
 
+def _single_retryable_failed_refund(transactions: list[RowDict]) -> RowDict | None:
+    """Return the sole failed refund eligible for one proven-safe retry."""
+    failed_refunds = [
+        row for row in transactions
+        if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CANCEL_SPOT
+        and int(row.get(schema.TRANS_STATUS) if row.get(schema.TRANS_STATUS) is not None else -1)
+        == const.TRANS_STATUS_FAILED
+    ]
+    active_refunds = [
+        row for row in transactions
+        if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CANCEL_SPOT
+        and int(row.get(schema.TRANS_STATUS) if row.get(schema.TRANS_STATUS) is not None else -1)
+        != const.TRANS_STATUS_FAILED
+    ]
+    failed_fees = [
+        row for row in transactions
+        if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_PLAT_FEE
+        and int(row.get(schema.TRANS_STATUS) if row.get(schema.TRANS_STATUS) is not None else -1)
+        == const.TRANS_STATUS_FAILED
+    ]
+    if len(failed_refunds) != 1 or active_refunds or failed_fees:
+        return None
+    return failed_refunds[0]
+
+
+async def _failed_refund_is_definitively_failed(row: RowDict) -> bool:
+    """Re-check that a stored failed refund really executed unsuccessfully."""
+    tx_hash = str(row.get(schema.TRANS_TX_HASH) or "").strip()
+    if not trans_updater._NIMIQ_TRANSACTION_HASH_RE.fullmatch(tx_hash):
+        return False
+    status = await trans_updater.get_chain_transaction_status(tx_hash)
+    return (
+        status.status == "failed"
+        and trans_updater._execution_result_is_failure(status.raw)
+    )
+
+
 def _blocked_result(*, spot_id: int, reason: str) -> RowDict:
     return {
         "ok": True,
@@ -150,28 +188,44 @@ async def guarded_submit_spot_cancellation_transactions(
     async with _spot_lock(spot_id):
         await _ensure_guard_table(db)
 
-        existing_guard = await _guard_row(db, spot_id=spot_id)
-        if existing_guard is not None:
-            return _blocked_result(
-                spot_id=spot_id,
-                reason=str(existing_guard.get("reason") or existing_guard.get("state")),
-            )
-
         transactions = await db_access.get_transactions_by_spot(
             db,
             spot_id=spot_id,
             limit=db_access.MAX_LIMIT,
         )
+        retryable_refund = _single_retryable_failed_refund(transactions)
+        refund_failure_proven = False
+        if retryable_refund is not None:
+            try:
+                refund_failure_proven = await _failed_refund_is_definitively_failed(
+                    retryable_refund
+                )
+            except Exception:
+                refund_failure_proven = False
+
+        existing_guard = await _guard_row(db, spot_id=spot_id)
+        if existing_guard is not None:
+            guard_reason = str(existing_guard.get("reason") or existing_guard.get("state"))
+            recoverable_failed_refund_guard = (
+                str(existing_guard.get("state") or "") == "blocked"
+                and guard_reason == _RETRYABLE_FAILED_REFUND_GUARD_REASON
+                and refund_failure_proven
+            )
+            if recoverable_failed_refund_guard:
+                await _release_guard(db, spot_id=spot_id)
+            else:
+                return _blocked_result(spot_id=spot_id, reason=guard_reason)
+
         failed_legs = _failed_cancellation_legs(transactions)
-        if failed_legs:
+        if failed_legs and not refund_failure_proven:
             await _block_guard(
                 db,
                 spot_id=spot_id,
-                reason="existing failed or ambiguous cancellation transaction",
+                reason=_RETRYABLE_FAILED_REFUND_GUARD_REASON,
             )
             return _blocked_result(
                 spot_id=spot_id,
-                reason="existing failed or ambiguous cancellation transaction",
+                reason=_RETRYABLE_FAILED_REFUND_GUARD_REASON,
             )
 
         if not await _acquire_guard(db, spot_id=spot_id):

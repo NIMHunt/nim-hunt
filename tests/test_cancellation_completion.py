@@ -1,65 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def replace_once(path: str, old: str, new: str) -> None:
-    target = ROOT / path
-    content = target.read_text(encoding="utf-8")
-    count = content.count(old)
-    if count != 1:
-        raise RuntimeError(f"Expected one match in {path}, found {count}: {old[:120]!r}")
-    target.write_text(content.replace(old, new, 1), encoding="utf-8")
-
-
-replace_once(
-    "public_html.py",
-    '''    cancellation = _cancellation_summary(transactions)
-    cancellation_started = spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None
-    bucket = _owner_spot_bucket(spot, now=now, status_label=status_label)
-''',
-    '''    cancellation = _cancellation_summary(transactions)
-    cancellation_started = spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None
-    # cancellation_started_at is a durable audit and claim-blocking marker. It is
-    # deliberately retained after completion, so it must not override a terminal
-    # database status in the visible badge.
-    cancellation_in_progress = (
-        cancellation_started
-        and int(spot[schema.SPOT_STATUS])
-        in {const.SPOT_STATUS_DRAFT, const.SPOT_STATUS_PUBLISHED}
-    )
-    bucket = _owner_spot_bucket(spot, now=now, status_label=status_label)
-''',
-)
-
-replace_once(
-    "public_html.py",
-    '''        "badge_status_label": (
-            "cancelling"
-            if cancellation_started
-''',
-    '''        "badge_status_label": (
-            "cancelling"
-            if cancellation_in_progress
-''',
-)
-
-replace_once(
-    "public_html.py",
-    '''        "cancellation_started": cancellation_started,
-        "total_value_locked": bool(deposit.get("has_submitted")),
-''',
-    '''        "cancellation_started": cancellation_started,
-        "cancellation_in_progress": cancellation_in_progress,
-        "total_value_locked": bool(deposit.get("has_submitted")),
-''',
-)
-
-(ROOT / "tests/test_cancellation_completion.py").write_text(
-    '''from __future__ import annotations
-
 import unittest
 from unittest import mock
 
@@ -170,8 +110,3 @@ class CancellationCompletionTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
-''',
-    encoding="utf-8",
-)
-
-print("Cancellation terminal badge fix applied.")

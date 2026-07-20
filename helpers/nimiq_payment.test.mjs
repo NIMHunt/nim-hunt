@@ -46,6 +46,14 @@ test('provider error objects are surfaced and never recorded', async () => {
   await assert.rejects(() => requestNimiqPayment(nimiq, INTENT), /Broadcast rejected/);
 });
 
+test('non-string account responses stop before requesting a payment', async () => {
+  const nimiq = provider({
+    async listAccounts() { this.calls.push('accounts'); return [{ address: 'NQ FUNDING' }]; },
+  });
+  await assert.rejects(() => requestNimiqPayment(nimiq, INTENT), /invalid funding account/);
+  assert.deepEqual(nimiq.calls, ['consensus', 'height', 'accounts']);
+});
+
 test('network/head mismatch stops before account sharing and payment', async () => {
   const nimiq = provider({
     async getBlockNumber() { this.calls.push('height'); return 900000; },

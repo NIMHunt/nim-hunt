@@ -45,11 +45,12 @@ const SPOT_TEXT_EN = {
     },
     status: {
         draft: 'Draft',
+        depositing: 'Depositing',
         deposited: 'Deposited',
         active: 'Active',
         upcoming: 'Upcoming',
         ended: 'Ended',
-        completed: 'Completed',
+        completed: 'Complete',
         cancelled: 'Cancelled',
         cancelling: 'Cancelling',
         banned: 'Banned',

@@ -1,10 +1,11 @@
-import { getSpotText } from './interface_text.js?v=qol-v1-20260717';
+import { getSpotText } from './interface_text.js?v=polish-live-v1-20260720';
 import { formatNimFromLuna } from './nim_format.js';
 
 const SPOT_TEXT = getSpotText();
 
 const STATUS_CLASS_NAMES = new Set([
     'draft',
+    'depositing',
     'deposited',
     'active',
     'upcoming',
@@ -418,7 +419,10 @@ export function buildClaimCodeCopyButton(code, textOverrides = {}) {
     return button;
 }
 
-export function createOwnerClaimCodesControl(textOverrides = {}) {
+export function createOwnerClaimCodesControl(
+    textOverrides = {},
+    { expanded = false, onToggle = null } = {},
+) {
     const text = claimCodeText(textOverrides);
     const line = document.createElement('li');
     line.className = 'spot-detail-line spot-passwords-line';
@@ -428,19 +432,25 @@ export function createOwnerClaimCodesControl(textOverrides = {}) {
     toggle.type = 'button';
     toggle.className = 'spot-passwords-toggle disclosure-toggle';
     toggle.textContent = typeof text.title === 'function' ? text.title(0) : 'Claim Codes (0)';
-    toggle.setAttribute('aria-expanded', 'false');
 
     const panel = document.createElement('div');
     panel.className = 'spot-passwords-panel';
-    panel.hidden = true;
 
-    toggle.addEventListener('click', () => {
-        const expanded = toggle.getAttribute('aria-expanded') === 'true';
-        toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
-        panel.hidden = expanded;
-    });
+    let isExpanded = Boolean(expanded);
+    function syncExpanded() {
+        toggle.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+        panel.hidden = !isExpanded;
+    }
 
+    function setExpanded(nextExpanded, { notify = true } = {}) {
+        isExpanded = Boolean(nextExpanded);
+        syncExpanded();
+        if (notify && typeof onToggle === 'function') onToggle(isExpanded);
+    }
+
+    toggle.addEventListener('click', () => setExpanded(!isExpanded));
     line.append(toggle, panel);
+    syncExpanded();
 
     function hide() {
         line.hidden = true;
@@ -450,8 +460,7 @@ export function createOwnerClaimCodesControl(textOverrides = {}) {
         line.hidden = false;
         toggle.textContent = text.loading || 'Loading claim codes…';
         panel.replaceChildren();
-        toggle.setAttribute('aria-expanded', 'false');
-        panel.hidden = true;
+        syncExpanded();
     }
 
     function render(codes) {
@@ -485,6 +494,7 @@ export function createOwnerClaimCodesControl(textOverrides = {}) {
             right.textContent = item.used
                 ? (item.recipient_display_name || `User ${item.recipient_id || ''}`.trim())
                 : (text.unused || 'Unused');
+            right.title = right.textContent;
 
             row.append(left, right);
             rows.append(row);
@@ -493,17 +503,27 @@ export function createOwnerClaimCodesControl(textOverrides = {}) {
         toggle.textContent = typeof text.title === 'function' ? text.title(codes.length) : `Claim Codes (${codes.length})`;
         panel.replaceChildren(rows);
         line.hidden = false;
+        syncExpanded();
     }
 
     function setFailed() {
         line.hidden = false;
         toggle.textContent = text.loadFailed || 'Claim codes could not be loaded.';
         panel.replaceChildren();
-        toggle.setAttribute('aria-expanded', 'false');
-        panel.hidden = true;
+        syncExpanded();
     }
 
-    return { line, toggle, panel, render, hide, setLoading, setFailed };
+    return {
+        line,
+        toggle,
+        panel,
+        render,
+        hide,
+        setLoading,
+        setFailed,
+        setExpanded,
+        isExpanded: () => isExpanded,
+    };
 }
 
 export function createSpotListItem({ spot, detailBuilder, expanded = false, onToggle = null, metaBuilder = null }) {

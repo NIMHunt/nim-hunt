@@ -830,6 +830,7 @@ h2 {
     background: var(--nh-success);
 }
 
+.spot-badge.is-depositing,
 .spot-badge.is-deposited,
 .spot-badge.is-cancelling {
     background: var(--nimiq-gold, #ffc435);
@@ -1064,11 +1065,15 @@ h2 {
 
 .spot-badge.is-draft,
 .spot-badge.is-ended,
-.spot-badge.is-completed,
 .spot-badge.is-unknown {
     background: var(--nh-muted);
     filter: grayscale(1);
     opacity: 0.62;
+}
+
+.spot-badge.is-completed {
+    background: #0582ca;
+    color: #ffffff;
 }
 
 .spot-badge.is-banned {
@@ -2736,7 +2741,9 @@ h2 {
 }
 
 .spot-password-row {
+    min-width: 0;
     display: flex;
+    flex-wrap: nowrap;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
@@ -2749,7 +2756,8 @@ h2 {
 }
 
 .spot-password-left {
-    min-width: 0;
+    min-width: max-content;
+    flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -2759,15 +2767,18 @@ h2 {
     min-width: 0;
     color: var(--nh-text);
     font-weight: 900;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
 }
 
 .spot-password-status {
-    flex: 0 1 auto;
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
     color: var(--nh-muted);
     font-weight: 850;
     text-align: right;
-    overflow-wrap: anywhere;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .spot-password-row.is-used .spot-password-code {

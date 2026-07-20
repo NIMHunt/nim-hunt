@@ -1,10 +1,10 @@
 import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { makeClaimDetailText } from './interface_text.js?v=qol-v1-20260717';
+import { makeClaimDetailText } from './interface_text.js?v=polish-live-v1-20260720';
 import {
     createNoticePresenter,
     getLanguage,
     requestDeviceIdentifierHash,
-} from './browser_utils.js?v=qol-v1-20260717';
+} from './browser_utils.js?v=polish-live-v1-20260720';
 import {
     appendBulletLine,
     appendDetailDescription,
@@ -12,7 +12,7 @@ import {
     buildSpotLinkControl,
     nimFromLunaText,
     unixToText,
-} from './spot_ui.js?v=qol-v1-20260717';
+} from './spot_ui.js?v=polish-live-v1-20260720';
 
 const APP_NAME = document.body.dataset.appName || 'NimHunt';
 const NIMIQ_PAY_URL = document.body.dataset.nimiqPayUrl || 'https://nimpay.app';
@@ -142,6 +142,42 @@ function formatSeconds(seconds) {
     return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
+function durationGoalReached(claim, now = Math.floor(Date.now() / 1000)) {
+    const required = Math.max(0, Number(claim?.duration_required || 0));
+    const claimedAt = Math.max(0, Number(claim?.claimed_at || 0));
+    return required > 0 && claimedAt > 0 && now >= claimedAt + required;
+}
+
+function claimPresentationSignature(claim) {
+    const spot = claim?.spot || {};
+    return JSON.stringify([
+        claim?.status_label,
+        claim?.display_status_label,
+        claim?.display_status_text,
+        claim?.display_status_class,
+        Boolean(claim?.location_monitoring_required),
+        Boolean(claim?.viewer_is_recipient),
+        Number(spot.success_claim_count || 0),
+        Number(spot.pending_claim_count || 0),
+    ]);
+}
+
+function applyClaimUpdate(claim, { forceRender = false } = {}) {
+    if (
+        forceRender
+        || !state.currentClaim
+        || claimPresentationSignature(state.currentClaim) !== claimPresentationSignature(claim)
+    ) {
+        renderClaim(claim);
+        return;
+    }
+
+    state.currentClaim = claim;
+    syncHeartbeat(claim);
+    syncStatusPolling(claim);
+}
+
+
 function createDurationTimerText(claim) {
     const span = document.createElement('span');
     const required = Math.max(0, Number(claim.duration_required || 0));
@@ -151,9 +187,12 @@ function createDurationTimerText(claim) {
         const now = Math.floor(Date.now() / 1000);
         const elapsed = claimedAt > 0 ? Math.max(0, now - claimedAt) : Number(claim.duration_elapsed || 0);
         const cappedElapsed = Math.min(elapsed, required);
-        span.textContent = ` (${formatSeconds(cappedElapsed)}/${formatSeconds(required)})`;
+        const reachedGoal = required > 0 && cappedElapsed >= required;
+        span.textContent = reachedGoal
+            ? ' (Verifying)'
+            : ` (${formatSeconds(cappedElapsed)}/${formatSeconds(required)})`;
 
-        if (required > 0 && cappedElapsed >= required && span._nhTimerId) {
+        if (reachedGoal && span._nhTimerId) {
             window.clearInterval(span._nhTimerId);
             span._nhTimerId = null;
             handleDurationGoalReached();
@@ -400,14 +439,14 @@ function renderClaim(claim) {
     maybeCelebrateClaimTransition(previousClaim, claim);
 }
 
-async function fetchClaimDetail() {
+async function fetchClaimDetail({ forceRender = false } = {}) {
     const data = await fetchJson(`/api/claim/${CLAIM_ID}/detail`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(authPayload()),
     });
     state.user = data.user || null;
-    renderClaim(data.claim);
+    applyClaimUpdate(data.claim, { forceRender });
     return data.claim;
 }
 
@@ -426,7 +465,10 @@ function isExpectedClaimDetailError(err) {
 
 function claimNeedsLiveRefresh(claim) {
     if (!claim) return false;
-    if (String(claim.status_label || '').toLowerCase() === 'pending') return true;
+    if (String(claim.status_label || '').toLowerCase() === 'pending') {
+        if (Number(claim.duration_required || 0) > 0 && !durationGoalReached(claim)) return false;
+        return true;
+    }
     if (!claim.is_prizedraw) return false;
     return ['waiting', 'pending', 'won_pending', 'won_retrying'].includes(
         String(claim.display_status_label || '').toLowerCase()
@@ -469,9 +511,10 @@ function handleDurationGoalReached() {
     if (!claim || String(claim.status_label || '').toLowerCase() !== 'pending') return;
     if (claim.location_monitoring_required && claim.viewer_is_recipient) {
         void sendLocationHeartbeat();
-        return;
+    } else {
+        void refreshClaimStatus();
     }
-    void refreshClaimStatus();
+    scheduleStatusPoll(1800);
 }
 
 function isWinningClaim(claim) {
@@ -510,7 +553,7 @@ async function sendLocationHeartbeat() {
             body: JSON.stringify(authPayload(location)),
         });
         state.user = data.user || null;
-        renderClaim(data.claim);
+        applyClaimUpdate(data.claim);
     } catch (err) {
         console.error(err);
         if (!state.heartbeatNoticeShown) {
@@ -570,7 +613,7 @@ function burstConfetti() {
 async function initClaimDetail() {
     state.language = getLanguage();
     await identify();
-    await fetchClaimDetail();
+    await fetchClaimDetail({ forceRender: true });
 
     const params = new URLSearchParams(window.location.search);
     if (params.get('claimed') === '1') {
@@ -591,14 +634,14 @@ els.noticeOk?.addEventListener('click', () => {
 
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-        void refreshClaimStatus();
+        if (claimNeedsLiveRefresh(state.currentClaim)) void refreshClaimStatus();
     } else {
         stopStatusPolling();
     }
 });
 
 window.addEventListener('pageshow', () => {
-    if (state.currentClaim) void refreshClaimStatus();
+    if (claimNeedsLiveRefresh(state.currentClaim)) void refreshClaimStatus();
 });
 
 window.addEventListener('beforeunload', () => {

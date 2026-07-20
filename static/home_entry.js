@@ -1,5 +1,5 @@
-import './home.js?v=home-onboarding-v1-20260718';
-import { makeHomeText } from './interface_text.js?v=qol-v1-20260717';
+import './home.js?v=home-ready-v1-20260720';
+import { makeHomeText } from './interface_text.js?v=polish-live-v1-20260720';
 
 const STYLE_ID = 'home-display-name-edit-styles';
 

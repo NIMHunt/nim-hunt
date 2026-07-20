@@ -1,11 +1,11 @@
-import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { makeHomeText } from './interface_text.js?v=qol-v1-20260717';
+import { makeHomeText } from './interface_text.js?v=polish-live-v1-20260720';
 import {
     createNoticePresenter,
     getLanguage,
+    loadNimiqMiniAppSdk,
     requestDeviceIdentifierHash,
     responseErrorText as sharedResponseErrorText,
-} from './browser_utils.js?v=qol-v1-20260717';
+} from './browser_utils.js?v=home-ready-v1-20260720';
 
 const state = {
     deviceIdHash: null,
@@ -465,9 +465,15 @@ function setDebugPanelOpen(open) {
 
 async function requestWalletDeviceId() {
     try {
+        const { requestDeviceIdentifier } = await loadNimiqMiniAppSdk({
+            timeoutMs: 6000,
+            retries: 1,
+            retryDelayMs: 350,
+        });
         state.deviceIdHash = await requestDeviceIdentifierHash(
             requestDeviceIdentifier,
             UI_COPY.nimiqPay.deviceIdReason,
+            { timeoutMs: 5000, retries: 1, retryDelayMs: 350 },
         );
         state.walletAvailable = true;
         els.connectionLine.textContent = UI_COPY.status.connectedPay;

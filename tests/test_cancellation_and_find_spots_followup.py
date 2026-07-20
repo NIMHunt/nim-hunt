@@ -83,7 +83,7 @@ def test_pending_deposit_replaces_draft_badge_with_deposited():
         transactions=transactions,
     )
     assert serialised["status_label"] == "draft"
-    assert serialised["badge_status_label"] == "deposited"
+    assert serialised["badge_status_label"] == "depositing"
 
 
 def test_upcoming_standard_spot_can_be_cancelled():

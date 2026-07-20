@@ -1,1 +1,1 @@
-Trigger isolated cancellation repair validation after trusted CI setup.
+Trigger isolated cancellation repair validation from the fresh execution PR.

@@ -1,19 +1,20 @@
 """Safe, idempotent recording for user-submitted Spot deposits.
 
-Nimiq Pay is the authority that signs and broadcasts a creator deposit.  The
+Nimiq Pay is the authority that signs and broadcasts a creator deposit. The
 browser then tells NimHunt the returned transaction hash so the backend can
-track it.  Losing that HTTP response must never encourage the user to send the
+track it. Losing that HTTP response must never encourage the user to send the
 same funding payment again.
 
 The authoritative sender is read from the blockchain when the transaction is
-confirmed.  For the first deposit, a missing client-reported sender is therefore
-stored as an empty placeholder and replaced during chain verification.  Later
+confirmed. For the first deposit, a missing client-reported sender is therefore
+stored as an empty placeholder and replaced during chain verification. Later
 top-ups still require the established funding wallet to be identified before
 the transaction is recorded.
 """
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from typing import Any
 
@@ -25,6 +26,7 @@ import wallet
 
 RowDict = dict[str, Any]
 
+_NIMIQ_TRANSACTION_HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _INSTALLED = False
 _ORIGINAL_RECORD = None
 
@@ -40,10 +42,17 @@ def _normalise_optional_sender(value: Any) -> str:
             allow_dev_placeholder=bool(getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)),
         )
     except ValueError:
-        # The browser-supplied sender is not trusted for deposits.  A wrapper or
+        # The browser-supplied sender is not trusted for deposits. A wrapper or
         # stale SDK may return an account object rather than a plain address;
         # chain verification replaces this placeholder with the real sender.
         return ""
+
+
+def _normalise_transaction_hash(value: Any) -> str:
+    clean = str(value or "").strip()
+    if not _NIMIQ_TRANSACTION_HASH_RE.fullmatch(clean):
+        raise ValueError("tx_hash must be a 64-character hexadecimal Nimiq transaction hash")
+    return clean.lower()
 
 
 async def _existing_transaction_by_hash(db, *, tx_hash: str) -> RowDict | None:
@@ -94,9 +103,7 @@ async def record_spot_deposit_transaction_safely(
     if amount <= 0:
         raise ValueError("amount must be positive")
 
-    clean_hash = str(tx_hash or "").strip()
-    if not clean_hash:
-        raise ValueError("tx_hash must not be empty")
+    clean_hash = _normalise_transaction_hash(tx_hash)
 
     existing = await _existing_transaction_by_hash(db, tx_hash=clean_hash)
     if existing is not None:
@@ -150,7 +157,7 @@ async def record_spot_deposit_transaction_safely(
             tx_hash=clean_hash,
         )
     except sqlite3.IntegrityError:
-        # A response retry can race with the original request.  The hash's UNIQUE
+        # A response retry can race with the original request. The hash's UNIQUE
         # constraint decides the winner; returning the existing row makes the
         # HTTP operation idempotent without touching the blockchain again.
         existing = await _existing_transaction_by_hash(db, tx_hash=clean_hash)

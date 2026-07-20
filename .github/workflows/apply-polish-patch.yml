@@ -1,108 +1,11 @@
-name: Apply polish patch
+name: Legacy polish patch (disabled)
 
 on:
-  push:
-    branches:
-      - agent/polish-live-status-and-claim-flow
-  pull_request:
-    branches:
-      - main
-
-permissions:
-  contents: write
+  workflow_dispatch:
 
 jobs:
-  apply:
-    if: github.actor != 'github-actions[bot]'
+  disabled:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
     steps:
-      - name: Check out branch
-        uses: actions/checkout@v6
-        with:
-          ref: agent/polish-live-status-and-claim-flow
-          fetch-depth: 0
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
-
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v6
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: helpers/package-lock.json
-
-      - name: Decode and apply patch
-        run: |
-          cat tools/.polish_patch.part00 tools/.polish_patch.part01 tools/.polish_patch.part02 tools/.polish_patch.part03 | base64 --decode > tools/apply_polish_patch.py
-          set +e
-          python tools/apply_polish_patch.py > tools/polish-patch-run.log 2>&1
-          patch_status=$?
-          set -e
-          cat tools/polish-patch-run.log
-          if [ "$patch_status" -ne 0 ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -f tools/polish-patch-run.log
-            git commit -m "Capture polish patch failure"
-            git push origin HEAD:agent/polish-live-status-and-claim-flow
-            exit "$patch_status"
-          fi
-          rm -f tools/.polish_patch.part00 tools/.polish_patch.part01 tools/.polish_patch.part02 tools/.polish_patch.part03 tools/apply_polish_patch.py tools/polish-patch-run.log
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt -r requirements-dev.txt
-          npm ci --prefix helpers
-
-      - name: Run Python tests
-        run: python -m pytest -q
-
-      - name: Run Node tests
-        run: npm test --prefix helpers
-
-      - name: Run lint and compilation checks
-        run: |
-          ruff check .
-          python -m compileall -q *.py tests
-          for file in static/*.js; do node --check --input-type=module < "$file"; done
-          for file in helpers/*.mjs; do node --check "$file"; done
-          for file in *.sh; do bash -n "$file"; done
-
-      - name: Compile Jinja templates
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          from jinja2 import Environment, FileSystemLoader
-
-          templates = Path("templates")
-          environment = Environment(loader=FileSystemLoader(templates))
-          for path in sorted(templates.glob("*.html")):
-              environment.get_template(path.name)
-          PY
-
-      - name: Seed a fresh development database
-        env:
-          NIMHUNT_DB_PATH: ${{ runner.temp }}/nimhunt-polish-ci.db
-          NIMHUNT_DEPLOYMENT_MODE: development
-          NIMHUNT_NIMIQ_NETWORK: TestAlbatross
-          NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: "1"
-        run: python spoof.py
-
-      - name: Commit applied changes
-        run: |
-          rm -f .github/workflows/apply-polish-patch.yml tools/polish-patch-run.log
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Polish live Spot and claim updates"
-          git push origin HEAD:agent/polish-live-status-and-claim-flow
+      - name: Explain status
+        run: echo "This legacy patch workflow is intentionally disabled."

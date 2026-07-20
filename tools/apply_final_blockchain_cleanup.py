@@ -197,5 +197,10 @@ replace_once(
     'tx_hash="partial-api-deposit",',
     'tx_hash="55" * 32,',
 )
+replace_once(
+    "tests/test_spot_creation_fees.py",
+    'from_address="NQ00 NIMHUNT DEV FUNDING WALLET",',
+    'from_address=const.DEV_PLATFORM_FEE_ADDRESS,',
+)
 
 print("Final blockchain cleanup applied.")

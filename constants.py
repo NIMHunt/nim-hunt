@@ -375,6 +375,14 @@ USER_DEPOSIT_STALE_AFTER_SECONDS = _env_int("NIMHUNT_USER_DEPOSIT_STALE_AFTER_SE
 # A large block-height gap is a practical indication that Nimiq Pay and the
 # server RPC are connected to different networks or one side is badly stale.
 NIMIQ_PROVIDER_MAX_HEAD_DIFFERENCE = _env_int("NIMHUNT_NIMIQ_PROVIDER_MAX_HEAD_DIFFERENCE", 120)
+# The transaction refresher keeps a recent RPC height in memory. Deposit dialogs
+# use this validated value instead of making a rate-limited public RPC request on
+# every click. A five-minute age still distinguishes TestAlbatross from mainnet
+# while tolerating a brief public-node outage.
+NIMIQ_CHAIN_HEAD_CACHE_MAX_AGE_SECONDS = _env_int(
+    "NIMHUNT_NIMIQ_CHAIN_HEAD_CACHE_MAX_AGE_SECONDS",
+    5 * 60,
+)
 
 # Duration-claim location verification. The browser must keep sending location
 # heartbeats while a duration-based CLAIM is pending. GPS accuracy is used as

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import urllib.error
 import urllib.parse
@@ -38,6 +39,7 @@ from transaction_descriptions import build_transaction_description
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(const.TEMPLATES_DIR))
+logger = logging.getLogger(__name__)
 
 _ASSET_VERSION = "blockchain-flow-v1-20260720"
 
@@ -2751,15 +2753,24 @@ async def my_spots_deposit_intent_api(spot_id: int, payload: HomeSessionRequest)
             return JSONResponse({**meta, "ok": False, "code": "deposit_covered", "message": "This draft already has submitted deposits covering its Spot value and creation fee."}, status_code=status.HTTP_409_CONFLICT)
 
     try:
-        chain_height = await trans_updater.get_chain_head_height()
-    except Exception:
+        chain_height = await trans_updater.get_chain_head_height_for_deposit()
+    except Exception as exc:
+        logger.warning(
+            "Deposit intent could not obtain a recent Nimiq chain height: spot_id=%s error=%s cache=%s",
+            int(spot_id),
+            trans_updater.wallet.redact_secret_values(exc),
+            trans_updater.chain_head_cache_status(),
+        )
         if bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
             return JSONResponse(
                 {
                     **meta,
                     "ok": False,
                     "code": "nimiq_rpc_unavailable",
-                    "message": "NimHunt cannot verify the configured Nimiq network right now. No deposit was requested.",
+                    "message": (
+                        "NimHunt cannot verify the TestAlbatross chain height right now. "
+                        "No deposit was requested; please try again shortly."
+                    ),
                 },
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             )

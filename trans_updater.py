@@ -88,6 +88,9 @@ _TRANS_CHECK_TASK: asyncio.Task | None = None
 _TRANS_CHECK_STOP_EVENT: asyncio.Event | None = None
 _TRANS_CHECK_LAST_RESULT: RowDict | None = None
 _TRANS_CHECK_LAST_ERROR: str | None = None
+_CHAIN_HEAD_HEIGHT: int | None = None
+_CHAIN_HEAD_UPDATED_AT: float | None = None
+_CHAIN_HEAD_LAST_ERROR: str | None = None
 
 
 @dataclass(slots=True)
@@ -789,26 +792,106 @@ async def get_chain_head_height(
     rpc_url: str = DEFAULT_NIMIQ_RPC_URL,
     timeout_seconds: int = DEFAULT_RPC_TIMEOUT_SECONDS,
 ) -> int:
-    """Return the configured RPC's latest block height."""
+    """Return the configured RPC's current block height.
+
+    getBlockNumber is the smallest standard request for this purpose. It avoids
+    downloading a full block for every refresh and consumes less of a public
+    RPC provider's rate-limit budget.
+    """
     result = await asyncio.to_thread(
         _json_rpc_post_sync,
         rpc_url=str(rpc_url),
-        method="getLatestBlock",
-        params=[False],
+        method="getBlockNumber",
+        params=[],
         timeout_seconds=int(timeout_seconds),
     )
-    if isinstance(result, dict) and "data" in result:
-        result = result.get("data")
-    if isinstance(result, (int, str)):
+    data, _metadata = _unwrap_rpc_result(result)
+    if isinstance(data, bool):
+        raise RuntimeError("Nimiq RPC getBlockNumber returned a boolean")
+    if isinstance(data, (int, str)):
         try:
-            height = int(result)
-        except ValueError as exc:
+            height = int(data)
+        except (TypeError, ValueError) as exc:
             raise RuntimeError("Nimiq RPC returned an invalid block height") from exc
     else:
-        height = _extract_block_number(result)
+        height = _extract_block_number(data)
     if height is None or int(height) < 0:
-        raise RuntimeError("Nimiq RPC getLatestBlock did not expose a block height")
+        raise RuntimeError("Nimiq RPC getBlockNumber did not expose a block height")
     return int(height)
+
+
+def remember_chain_head_height(height: int) -> int:
+    """Store one successfully read chain height for deposit preflight checks."""
+    global _CHAIN_HEAD_HEIGHT, _CHAIN_HEAD_UPDATED_AT, _CHAIN_HEAD_LAST_ERROR
+    height = int(height)
+    if height < 0:
+        raise ValueError("chain height must be non-negative")
+    _CHAIN_HEAD_HEIGHT = height
+    _CHAIN_HEAD_UPDATED_AT = time.monotonic()
+    _CHAIN_HEAD_LAST_ERROR = None
+    return height
+
+
+def get_cached_chain_head_height(*, max_age_seconds: int | None = None) -> int | None:
+    """Return the recent validated height, or None when missing/stale."""
+    if _CHAIN_HEAD_HEIGHT is None or _CHAIN_HEAD_UPDATED_AT is None:
+        return None
+    max_age = int(
+        max_age_seconds
+        if max_age_seconds is not None
+        else getattr(const, "NIMIQ_CHAIN_HEAD_CACHE_MAX_AGE_SECONDS", 5 * 60)
+    )
+    if max_age < 0:
+        return None
+    if time.monotonic() - _CHAIN_HEAD_UPDATED_AT > max_age:
+        return None
+    return int(_CHAIN_HEAD_HEIGHT)
+
+
+async def refresh_chain_head_height(
+    *,
+    rpc_url: str = DEFAULT_NIMIQ_RPC_URL,
+    timeout_seconds: int = DEFAULT_RPC_TIMEOUT_SECONDS,
+) -> int:
+    """Refresh the shared height cache from the configured RPC."""
+    global _CHAIN_HEAD_LAST_ERROR
+    try:
+        height = await get_chain_head_height(
+            rpc_url=rpc_url,
+            timeout_seconds=int(timeout_seconds),
+        )
+    except Exception as exc:
+        _CHAIN_HEAD_LAST_ERROR = wallet.redact_secret_values(exc)
+        raise
+    return remember_chain_head_height(height)
+
+
+async def get_chain_head_height_for_deposit(
+    *,
+    rpc_url: str = DEFAULT_NIMIQ_RPC_URL,
+    timeout_seconds: int = DEFAULT_RPC_TIMEOUT_SECONDS,
+    max_age_seconds: int | None = None,
+) -> int:
+    """Return a recent validated height without an RPC request on every click."""
+    cached = get_cached_chain_head_height(max_age_seconds=max_age_seconds)
+    if cached is not None:
+        return cached
+    return await refresh_chain_head_height(
+        rpc_url=rpc_url,
+        timeout_seconds=int(timeout_seconds),
+    )
+
+
+def chain_head_cache_status() -> RowDict:
+    """Return non-sensitive diagnostics for logs and future status pages."""
+    age_seconds = None
+    if _CHAIN_HEAD_UPDATED_AT is not None:
+        age_seconds = max(0.0, time.monotonic() - _CHAIN_HEAD_UPDATED_AT)
+    return {
+        "height": _CHAIN_HEAD_HEIGHT,
+        "age_seconds": age_seconds,
+        "last_error": _CHAIN_HEAD_LAST_ERROR,
+    }
 
 
 def _normalise_chain_hash(value: Any) -> str:
@@ -1354,6 +1437,17 @@ async def check_pending_transactions(
     finalised: list[RowDict] = []
     still_pending: list[RowDict] = []
     unknown: list[RowDict] = []
+    chain_head_height: int | None = None
+    chain_head_error: str | None = None
+
+    try:
+        chain_head_height = await refresh_chain_head_height(
+            rpc_url=rpc_url,
+            timeout_seconds=int(timeout_seconds),
+        )
+    except Exception as exc:
+        chain_head_error = wallet.redact_secret_values(exc)
+        logger.warning("Nimiq chain-head refresh failed: %s", chain_head_error)
 
     async with get_db() as db:
         pending = await cache.get_pending_transactions(db, limit=int(max_checks))
@@ -1430,6 +1524,8 @@ async def check_pending_transactions(
         "still_pending": still_pending,
         "unknown": unknown,
         "creation_fees": creation_fees,
+        "chain_head_height": chain_head_height,
+        "chain_head_error": chain_head_error,
     }
 
 

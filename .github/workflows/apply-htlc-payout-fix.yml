@@ -33,17 +33,19 @@ jobs:
           cache-dependency-path: helpers/package-lock.json
 
       - name: Apply repair
-        run: python .github/scripts/apply_htlc_payout_fix.py
+        run: |
+          python .github/scripts/apply_htlc_payout_fix.py
+          python .github/scripts/adjust_htlc_payout_fix.py
 
       - name: Install Python dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run Python tests
         id: python_tests
         shell: bash
         run: |
           set +e
-          python -m unittest discover -s tests > python-tests.log 2>&1
+          python -m pytest -q > python-tests.log 2>&1
           code=$?
           cat python-tests.log
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
@@ -84,11 +86,13 @@ jobs:
           retention-days: 1
 
       - name: Stop on test failure
-        if: steps.python_tests.outputs.exit_code != '0' || steps.node_tests.outputs.exit_code != '0'
-        run: exit 1
+        shell: bash
+        run: |
+          test "${{ steps.python_tests.outputs.exit_code }}" = "0"
+          test "${{ steps.node_tests.outputs.exit_code }}" = "0"
 
       - name: Remove temporary patch machinery
-        run: rm -f .github/scripts/apply_htlc_payout_fix.py .github/workflows/apply-htlc-payout-fix.yml .github/htlc-fix-trigger.txt
+        run: rm -f .github/scripts/apply_htlc_payout_fix.py .github/scripts/adjust_htlc_payout_fix.py .github/workflows/apply-htlc-payout-fix.yml .github/htlc-fix-trigger.txt
 
       - name: Commit repair
         shell: bash

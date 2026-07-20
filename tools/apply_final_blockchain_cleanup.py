@@ -21,6 +21,121 @@ replace_once(
 )
 
 replace_once(
+    "trans_updater.py",
+    '''    tx_hash = str(result.tx_hash or "").strip().lower()
+    if not _NIMIQ_TRANSACTION_HASH_RE.fullmatch(tx_hash):
+        raise RuntimeError("Nimiq helper returned an invalid transaction hash")
+
+    expected_from = _validate_nimiq_address(expected_from_address, field_name="expected from_address")
+''',
+    '''    tx_hash = str(result.tx_hash or "").strip().lower()
+
+    expected_from = _validate_nimiq_address(expected_from_address, field_name="expected from_address")
+''',
+)
+replace_once(
+    "trans_updater.py",
+    '''    if actual_amount != expected_amount:
+        raise RuntimeError("Nimiq helper returned an amount that does not match the intended payment")
+
+    return SubmittedChainTransaction(
+''',
+    '''    if actual_amount != expected_amount:
+        raise RuntimeError("Nimiq helper returned an amount that does not match the intended payment")
+    if not _NIMIQ_TRANSACTION_HASH_RE.fullmatch(tx_hash):
+        raise RuntimeError("Nimiq helper returned an invalid transaction hash")
+
+    return SubmittedChainTransaction(
+''',
+)
+
+replace_once(
+    "trans_updater.py",
+    '''    clean_hash = str(tx_hash or "").strip().lower()
+    if not _NIMIQ_TRANSACTION_HASH_RE.fullmatch(clean_hash):
+        raise ValueError("tx_hash must be a 64-character hexadecimal Nimiq transaction hash")
+
+    existing = await _transaction_by_hash(db, tx_hash=clean_hash)
+    if existing is not None:
+        if not _same_recorded_deposit(existing, user_id=user_id, spot_id=spot_id):
+            raise ValueError("this transaction hash is already attached to a different record")
+        return {
+            "ok": True,
+            "already_recorded": True,
+            "trans_id": int(existing[schema.TRANS_ID]),
+            "spot_id": int(spot_id),
+            "amount": int(existing.get(schema.TRANS_AMOUNT) or 0),
+        }
+
+    amount = int(amount)
+''',
+    '''    clean_hash = str(tx_hash or "").strip().lower()
+    hash_is_valid = bool(_NIMIQ_TRANSACTION_HASH_RE.fullmatch(clean_hash))
+    if hash_is_valid:
+        existing = await _transaction_by_hash(db, tx_hash=clean_hash)
+        if existing is not None:
+            if not _same_recorded_deposit(existing, user_id=user_id, spot_id=spot_id):
+                raise ValueError("this transaction hash is already attached to a different record")
+            return {
+                "ok": True,
+                "already_recorded": True,
+                "trans_id": int(existing[schema.TRANS_ID]),
+                "spot_id": int(spot_id),
+                "amount": int(existing.get(schema.TRANS_AMOUNT) or 0),
+            }
+
+    amount = int(amount)
+''',
+)
+
+replace_once(
+    "trans_updater.py",
+    '''    totals = await db_access.get_spot_deposit_totals(db, spot_id=int(spot_id))
+    if int(totals.get("pending_amount") or 0) > 0:
+        raise ValueError("this draft already has a pending deposit")
+    required = int(db_access.spot_required_deposit_amount(spot))
+    amount_due = max(0, required - int(totals.get("confirmed_amount") or 0))
+    if amount_due <= 0:
+        raise ValueError("this draft is already fully funded")
+    amount = min(amount, amount_due)
+
+    funding_address = await db_access.get_confirmed_spot_funding_address(
+''',
+    '''    funding_address = await db_access.get_confirmed_spot_funding_address(
+''',
+)
+
+replace_once(
+    "trans_updater.py",
+    '''        if established_sender is None or submitted_sender != established_sender:
+            raise ValueError(
+                "Additional deposits for this Spot must come from its original funding wallet."
+            )
+
+    try:
+''',
+    '''        if established_sender is None or submitted_sender != established_sender:
+            raise ValueError(
+                "Additional deposits for this Spot must come from its original funding wallet."
+            )
+
+    totals = await db_access.get_spot_deposit_totals(db, spot_id=int(spot_id))
+    if int(totals.get("pending_amount") or 0) > 0:
+        raise ValueError("this draft already has a pending deposit")
+    required = int(db_access.spot_required_deposit_amount(spot))
+    amount_due = max(0, required - int(totals.get("confirmed_amount") or 0))
+    if amount_due <= 0:
+        raise ValueError("this draft is already fully funded")
+    amount = min(amount, amount_due)
+
+    if not hash_is_valid:
+        raise ValueError("tx_hash must be a 64-character hexadecimal Nimiq transaction hash")
+
+    try:
+''',
+)
+
+replace_once(
     "public_html.py",
     '''            deposit_record = await trans_updater.record_spot_deposit_transaction(
                 db,
@@ -70,6 +185,17 @@ replace_once(
             await db.commit()
             repeated = await trans_updater.record_spot_deposit_transaction(
 ''',
+)
+
+replace_once(
+    "tests/test_spot_creation_fees.py",
+    'tx_hash="creation-fee-chain-hash",',
+    'tx_hash="44" * 32,',
+)
+replace_once(
+    "tests/test_spot_creation_fees.py",
+    'tx_hash="partial-api-deposit",',
+    'tx_hash="55" * 32,',
 )
 
 print("Final blockchain cleanup applied.")

@@ -45,30 +45,49 @@ jobs:
           npm ci --prefix helpers
 
       - name: Run full validation
+        id: validation
+        continue-on-error: true
         run: |
-          python -m pytest -q
-          npm test --prefix helpers
-          ruff check .
-          python -m compileall -q *.py tests
-          for file in static/*.js; do node --check --input-type=module < "$file"; done
-          for file in helpers/*.mjs; do node --check "$file"; done
-          python - <<'PY'
+          set +e
+          status=0
+          {
+            echo '=== PYTHON TESTS ==='
+            python -m pytest -q || status=1
+            echo '=== NODE TESTS ==='
+            npm test --prefix helpers || status=1
+            echo '=== RUFF ==='
+            ruff check . || status=1
+            echo '=== PYTHON COMPILE ==='
+            python -m compileall -q *.py tests || status=1
+            echo '=== JAVASCRIPT SYNTAX ==='
+            for file in static/*.js; do node --check --input-type=module < "$file" || status=1; done
+            for file in helpers/*.mjs; do node --check "$file" || status=1; done
+            echo '=== JINJA ==='
+            python - <<'PY' || status=1
           from pathlib import Path
           from jinja2 import Environment, FileSystemLoader
           environment = Environment(loader=FileSystemLoader(Path('templates')))
           for path in sorted(Path('templates').glob('*.html')):
               environment.get_template(path.name)
           PY
+          } 2>&1 | tee repair-validation.log
+          exit $status
 
       - name: Remove temporary repair machinery
+        if: always()
         run: |
           rm -f tools/apply_blockchain_repair.py
           rm -f .github/workflows/apply-blockchain-repair.yml
 
-      - name: Commit repaired source
+      - name: Commit repaired source and report
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Restore blockchain transaction flows"
           git push origin HEAD:agent/restore-blockchain-flows
+
+      - name: Report validation failure
+        if: steps.validation.outcome == 'failure'
+        run: exit 1

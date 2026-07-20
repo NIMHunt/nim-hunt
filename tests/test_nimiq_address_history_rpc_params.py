@@ -55,19 +55,6 @@ class AddressHistoryRpcParameterTests(IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError, "64-character hexadecimal"):
                 await trans_updater.get_chain_transactions_by_address(
                     ADDRESS,
-                    start_at="",
-                )
-
-        # An empty cursor means no cursor and is valid; use a malformed non-empty
-        # cursor to prove validation happens before network I/O.
-        with mock.patch.object(
-            trans_updater.asyncio,
-            "to_thread",
-            mock.AsyncMock(),
-        ) as to_thread:
-            with self.assertRaisesRegex(ValueError, "64-character hexadecimal"):
-                await trans_updater.get_chain_transactions_by_address(
-                    ADDRESS,
                     start_at="not-a-hash",
                 )
             to_thread.assert_not_awaited()

@@ -16,14 +16,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      NIMHUNT_DB_PATH: ${{ runner.temp }}/nimhunt-ci.db
-      NIMHUNT_DEPLOYMENT_MODE: development
-      NIMHUNT_NIMIQ_NETWORK: TestAlbatross
-      NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: "1"
-      NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS: NQ71 3SFL BTU7 A3FV T0EM 9H60 KN6E 0UE3 VHYN
-      NIMHUNT_MIN_SPOT_CREATION_FEE_NIM: "10"
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -45,68 +38,30 @@ jobs:
           cache: npm
           cache-dependency-path: helpers/package-lock.json
 
-      - name: Assemble and apply repair patch
-        id: apply
-        continue-on-error: true
-        run: |
-          cat \
-            tools/polish_plain/part00.py \
-            tools/polish_plain/part01.py \
-            tools/polish_plain/part02a.py \
-            tools/polish_plain/part02b.py \
-            tools/polish_plain/part03.py \
-            tools/polish_plain/part04.py \
-            tools/polish_plain/part05.py \
-            > tools/apply_polish_patch.py
-          python -m py_compile tools/apply_polish_patch.py
-          python tools/apply_polish_patch.py 2>&1 | tee tools/polish-repair.log
-
-      - name: Remove temporary patch machinery
-        if: steps.apply.outcome == 'success'
-        run: |
-          rm -rf \
-            .github/workflows/apply-polish-patch.yml \
-            .github/workflows/apply-polish-patch-final.yml \
-            tools/.polish_patch.part00 \
-            tools/.polish_patch.part01 \
-            tools/.polish_patch.part02 \
-            tools/.polish_patch.part03 \
-            tools/polish-patch-run.log \
-            tools/polish_parts \
-            tools/polish_payload \
-            tools/polish_plain \
-            tools/apply_polish_patch.py
-
       - name: Install dependencies
-        if: steps.apply.outcome == 'success'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-dev.txt
           npm ci --prefix helpers
 
       - name: Run Python tests
-        if: steps.apply.outcome == 'success'
         run: python -m pytest -q
 
       - name: Run Node tests
-        if: steps.apply.outcome == 'success'
         run: npm test --prefix helpers
 
       - name: Run Python lint and compilation checks
-        if: steps.apply.outcome == 'success'
         run: |
           ruff check .
           python -m compileall -q *.py tests
 
       - name: Run JavaScript and shell syntax checks
-        if: steps.apply.outcome == 'success'
         run: |
           for file in static/*.js; do node --check --input-type=module < "$file"; done
           for file in helpers/*.mjs; do node --check "$file"; done
           for file in *.sh; do bash -n "$file"; done
 
       - name: Compile Jinja templates
-        if: steps.apply.outcome == 'success'
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -119,49 +74,17 @@ jobs:
           PY
 
       - name: Seed a fresh development database
-        if: steps.apply.outcome == 'success'
-        run: |
-          rm -f "$NIMHUNT_DB_PATH"
-          python spoof.py
-          rm -f "$NIMHUNT_DB_PATH"
+        env:
+          NIMHUNT_DB_PATH: ${{ runner.temp }}/nimhunt-ci.db
+          NIMHUNT_DEPLOYMENT_MODE: development
+          NIMHUNT_NIMIQ_NETWORK: TestAlbatross
+          NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: "1"
+        run: python spoof.py
 
       - name: Check installed dependencies
-        if: steps.apply.outcome == 'success'
         run: python -m pip check
 
       - name: Audit dependencies
-        if: steps.apply.outcome == 'success'
         run: |
           python -m pip_audit --progress-spinner off
           npm audit --omit=dev --prefix helpers
-
-      - name: Package repaired files
-        if: always()
-        run: |
-          tar -czf repaired-pr25.tar.gz \
-            public_html.py \
-            trans_updater.py \
-            static/browser_utils.js \
-            static/home.js \
-            static/home_entry.js \
-            static/interface_text.js \
-            static/spot_ui.js \
-            static/home.css \
-            static/my_spots.js \
-            static/find_spots.js \
-            static/claim_detail.js \
-            tests/test_ui_polish_regressions.py \
-            tools/polish-repair.log 2>/dev/null || true
-
-      - name: Upload repaired files
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: repaired-pr25
-          path: repaired-pr25.tar.gz
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Fail when patch application failed
-        if: steps.apply.outcome != 'success'
-        run: exit 1

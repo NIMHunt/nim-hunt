@@ -171,6 +171,50 @@ replace_once(
 )
 
 replace_once(
+    "helpers/nimiq_helper.mjs",
+    '''  let hash;
+  if (rpcUrl) {
+    const rawTx = Buffer.from(tx.serialize()).toString('hex');
+    const sendResult = await rpcCall(rpcUrl, 'sendRawTransaction', [rawTx]);
+''',
+    '''  let hash;
+  let rawSendResult = null;
+  if (rpcUrl) {
+    const rawTx = Buffer.from(tx.serialize()).toString('hex');
+    const sendResult = await rpcCall(rpcUrl, 'sendRawTransaction', [rawTx]);
+    rawSendResult = sendResult;
+''',
+)
+replace_once(
+    "helpers/nimiq_helper.mjs",
+    '''    const client = await createClient({ ...payload, network });
+    try {
+      await client.sendTransaction(tx);
+    } finally {
+''',
+    '''    const client = await createClient({ ...payload, network });
+    try {
+      rawSendResult = await client.sendTransaction(tx);
+    } finally {
+''',
+)
+replace_once(
+    "helpers/nimiq_helper.mjs",
+    '    raw: sendResult ?? null,',
+    '    raw: rawSendResult,',
+)
+replace_once(
+    "helpers/helper_rpc_send.test.mjs",
+    '''    assert.equal(response.broadcast_transport, 'json-rpc');
+    assert.deepEqual(calls.map(call => call.method), ['getLatestBlock', 'sendRawTransaction']);
+''',
+    '''    assert.equal(response.broadcast_transport, 'json-rpc');
+    assert.ok(response.raw);
+    assert.deepEqual(calls.map(call => call.method), ['getLatestBlock', 'sendRawTransaction']);
+''',
+)
+
+replace_once(
     "tests/test_blockchain_flow_integration.py",
     '''        async with schema.get_db() as db:
             repeated = await trans_updater.record_spot_deposit_transaction(

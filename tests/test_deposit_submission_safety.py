@@ -10,12 +10,25 @@ import deposit_submission_safety
 class DepositSubmissionSafetyTest(IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.db = mock.AsyncMock()
+        self.tx_hash = "a" * 64
         self.spot = {
             schema.SPOT_ID: 7,
             schema.SPOT_STATUS: const.SPOT_STATUS_DRAFT,
             schema.SPOT_CANCELLATION_STARTED_AT: None,
             schema.SPOT_DEPOSIT_ADDRESS: "NQ DEPOSIT",
         }
+
+    async def test_invalid_hash_is_rejected_before_database_work(self) -> None:
+        with self.assertRaisesRegex(ValueError, "64-character hexadecimal"):
+            await deposit_submission_safety.record_spot_deposit_transaction_safely(
+                self.db,
+                user_id=3,
+                spot_id=7,
+                amount=100_000,
+                from_address=None,
+                to_address="NQ DEPOSIT",
+                tx_hash="Funding message, not a hash",
+            )
 
     async def test_first_deposit_accepts_missing_client_sender(self) -> None:
         with (
@@ -52,7 +65,7 @@ class DepositSubmissionSafetyTest(IsolatedAsyncioTestCase):
                 amount=100_000,
                 from_address=None,
                 to_address="NQ DEPOSIT",
-                tx_hash="abc123",
+                tx_hash=self.tx_hash,
             )
 
         self.assertTrue(result["ok"])
@@ -64,7 +77,7 @@ class DepositSubmissionSafetyTest(IsolatedAsyncioTestCase):
             amount=100_000,
             from_address="",
             to_address="NQ DEPOSIT",
-            tx_hash="abc123",
+            tx_hash=self.tx_hash,
         )
 
     async def test_same_hash_is_an_idempotent_recording_retry(self) -> None:
@@ -75,7 +88,7 @@ class DepositSubmissionSafetyTest(IsolatedAsyncioTestCase):
             schema.TRANS_TYPE: const.TRANS_TYPE_FILL_SPOT,
             schema.TRANS_AMOUNT: 100_000,
             schema.TRANS_STATUS: const.TRANS_STATUS_PENDING,
-            schema.TRANS_TX_HASH: "abc123",
+            schema.TRANS_TX_HASH: self.tx_hash,
         }
         with (
             mock.patch.object(
@@ -96,7 +109,7 @@ class DepositSubmissionSafetyTest(IsolatedAsyncioTestCase):
                 amount=100_000,
                 from_address=None,
                 to_address="NQ DEPOSIT",
-                tx_hash="abc123",
+                tx_hash=self.tx_hash,
             )
 
         self.assertTrue(result["ok"])
@@ -112,7 +125,7 @@ class DepositSubmissionSafetyTest(IsolatedAsyncioTestCase):
             schema.TRANS_TYPE: const.TRANS_TYPE_FILL_SPOT,
             schema.TRANS_AMOUNT: 100_000,
             schema.TRANS_STATUS: const.TRANS_STATUS_PENDING,
-            schema.TRANS_TX_HASH: "abc123",
+            schema.TRANS_TX_HASH: self.tx_hash,
         }
         with mock.patch.object(
             deposit_submission_safety,
@@ -127,7 +140,7 @@ class DepositSubmissionSafetyTest(IsolatedAsyncioTestCase):
                     amount=100_000,
                     from_address=None,
                     to_address="NQ DEPOSIT",
-                    tx_hash="abc123",
+                    tx_hash=self.tx_hash,
                 )
 
     async def test_top_up_requires_identified_original_wallet(self) -> None:
@@ -161,7 +174,7 @@ class DepositSubmissionSafetyTest(IsolatedAsyncioTestCase):
                     amount=100_000,
                     from_address=None,
                     to_address="NQ DEPOSIT",
-                    tx_hash="abc123",
+                    tx_hash=self.tx_hash,
                 )
 
     async def test_top_up_from_different_wallet_is_rejected(self) -> None:
@@ -195,5 +208,5 @@ class DepositSubmissionSafetyTest(IsolatedAsyncioTestCase):
                     amount=100_000,
                     from_address="NQ DIFFERENT",
                     to_address="NQ DEPOSIT",
-                    tx_hash="abc123",
+                    tx_hash=self.tx_hash,
                 )

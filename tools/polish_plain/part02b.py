@@ -16,23 +16,29 @@
 
     """),
 )
-old_prizedraw_guard = _indent_block(dedent("""\
+prizedraw_guard_body = dedent("""\
 if spot_status == const.SPOT_STATUS_PUBLISHED and await db_access.is_prizedraw(
     db, spot_id=int(spot_id)
 ):
     raise ValueError("Prizedraw spots cannot be cancelled through this standard cancellation flow")
-"""), 4)
-new_prizedraw_guard = old_prizedraw_guard + _indent_block(dedent("""\
+""")
+complete_guard_body = dedent("""\
 if spot_status == const.SPOT_STATUS_PUBLISHED and await _published_standard_spot_is_complete(
     db, spot_id=int(spot_id)
 ):
     raise ValueError("completed spots cannot be cancelled")
-"""), 4)
+""")
 path = ROOT / "trans_updater.py"
 text = path.read_text(encoding="utf-8")
-if text.count(old_prizedraw_guard) != 2:
-    raise RuntimeError(f"Expected two cancellation guards, found {text.count(old_prizedraw_guard)}")
-path.write_text(text.replace(old_prizedraw_guard, new_prizedraw_guard), encoding="utf-8")
+for spaces in (4, 8):
+    old_guard = _indent_block(prizedraw_guard_body, spaces)
+    new_guard = old_guard + _indent_block(complete_guard_body, spaces)
+    if text.count(old_guard) != 1:
+        raise RuntimeError(
+            f"Expected one cancellation guard at {spaces} spaces, found {text.count(old_guard)}"
+        )
+    text = text.replace(old_guard, new_guard, 1)
+path.write_text(text, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

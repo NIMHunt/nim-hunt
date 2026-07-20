@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 from unittest import IsolatedAsyncioTestCase, mock
 
+import cache
 import constants as const
 import database as schema
 import db_access
@@ -11,6 +12,7 @@ import trans_updater
 HASH_1 = "11" * 32
 HASH_2 = "22" * 32
 HASH_3 = "33" * 32
+HASH_4 = "44" * 32
 FUNDING_ADDRESS = const.DEV_PLATFORM_FEE_ADDRESS
 
 
@@ -19,9 +21,11 @@ class BlockchainFlowIntegrationTest(IsolatedAsyncioTestCase):
         self._tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=True)
         self._old_path = schema.DB_PATH
         schema.DB_PATH = self._tmp.name
+        await cache.force_all_cache_clear()
         await schema.init_db()
 
     async def asyncTearDown(self):
+        await cache.force_all_cache_clear()
         schema.DB_PATH = self._old_path
         self._tmp.close()
 
@@ -242,3 +246,163 @@ class BlockchainFlowIntegrationTest(IsolatedAsyncioTestCase):
             if int(row[schema.TRANS_TYPE]) in {const.TRANS_TYPE_CANCEL_SPOT, const.TRANS_TYPE_PLAT_FEE}
         ]
         self.assertLessEqual(len(outgoing), 2)
+
+
+    async def test_confirmed_cancellation_hashes_missing_from_direct_lookup_recover_and_finalize(self):
+        owner_id, spot_id, spot = await self.create_owner_spot()
+        await self.record_confirmed_deposit(owner_id=owner_id, spot_id=spot_id, spot=spot)
+
+        creation_fee = db_access.spot_creation_fee_amount(spot)
+        self.assertGreater(creation_fee, 0)
+        creation_fee_send = trans_updater.SubmittedChainTransaction(
+            tx_hash=HASH_2,
+            from_address=spot[schema.SPOT_DEPOSIT_ADDRESS],
+            to_address=spot[schema.SPOT_CREATION_FEE_ADDRESS],
+            amount=creation_fee,
+        )
+
+        async with schema.get_db() as db:
+            with (
+                mock.patch.object(const, "ALLOW_DEV_WALLET_SENDS", True),
+                mock.patch.object(
+                    trans_updater,
+                    "submit_chain_send_from_spot_deposit",
+                    mock.AsyncMock(return_value=creation_fee_send),
+                ),
+            ):
+                fee_result = await trans_updater.submit_spot_creation_fee_transaction(
+                    db,
+                    spot_id=spot_id,
+                )
+
+            fee_row = await db_access.get_transaction(db, trans_id=fee_result["trans_id"])
+            await trans_updater.mark_trans_as_confirmed(
+                db,
+                fee_row,
+                block_number=200,
+                verified_details=trans_updater.VerifiedChainDetails(
+                    ok=True,
+                    from_address=spot[schema.SPOT_DEPOSIT_ADDRESS],
+                    to_address=spot[schema.SPOT_CREATION_FEE_ADDRESS],
+                    amount=creation_fee,
+                ),
+            )
+
+            await db.execute(
+                f"UPDATE {schema.SPOT_TABLE_NAME} "
+                f"SET {schema.SPOT_STATUS} = ? "
+                f"WHERE {schema.SPOT_ID} = ?;",
+                (const.SPOT_STATUS_PUBLISHED, spot_id),
+            )
+            await db.commit()
+
+            hashes = iter((HASH_3, HASH_4))
+
+            async def fake_cancellation_send(*, spot, to_address, amount, memo=None):
+                return trans_updater.SubmittedChainTransaction(
+                    tx_hash=next(hashes),
+                    from_address=spot[schema.SPOT_DEPOSIT_ADDRESS],
+                    to_address=to_address,
+                    amount=amount,
+                )
+
+            with (
+                mock.patch.object(const, "ALLOW_DEV_WALLET_SENDS", True),
+                mock.patch.object(
+                    trans_updater,
+                    "submit_chain_send_from_spot_deposit",
+                    side_effect=fake_cancellation_send,
+                ),
+            ):
+                cancellation = await trans_updater.submit_spot_cancellation_transactions(
+                    db,
+                    spot_id=spot_id,
+                    cancellation_fee=const.SPOT_CANCELLATION_FEE,
+                    fee_address=FUNDING_ADDRESS,
+                )
+
+            self.assertTrue(cancellation["cancellation_pending"])
+            transactions = await db_access.get_transactions_by_spot(
+                db,
+                spot_id=spot_id,
+                limit=50,
+            )
+            cancellation_rows = [
+                row
+                for row in transactions
+                if int(row[schema.TRANS_TYPE])
+                in {const.TRANS_TYPE_CANCEL_SPOT, const.TRANS_TYPE_PLAT_FEE}
+            ]
+            self.assertEqual(len(cancellation_rows), 2)
+            self.assertTrue(
+                all(int(row[schema.TRANS_STATUS]) == const.TRANS_STATUS_PENDING for row in cancellation_rows)
+            )
+            await cache.refresh_pending_transaction_cache(db)
+
+        history = {
+            "data": [
+                {
+                    "hash": row[schema.TRANS_TX_HASH],
+                    "from": row[schema.TRANS_FROM_ADDRESS],
+                    "to": row[schema.TRANS_TO_ADDRESS],
+                    "value": int(row[schema.TRANS_AMOUNT]),
+                    "blockNumber": 300 + index,
+                    "executionResult": True,
+                }
+                for index, row in enumerate(cancellation_rows)
+            ],
+            "metadata": None,
+        }
+
+        async def direct_hash_lookup_misses(tx_hash, **kwargs):
+            return trans_updater.ChainTransactionStatus(
+                status="pending",
+                tx_hash=tx_hash,
+                reason="hash not found yet",
+            )
+
+        with (
+            mock.patch.object(
+                trans_updater,
+                "get_chain_transaction_status",
+                side_effect=direct_hash_lookup_misses,
+            ),
+            mock.patch.object(
+                trans_updater,
+                "get_chain_transactions_by_address",
+                mock.AsyncMock(return_value=history),
+            ) as address_history,
+            mock.patch.object(
+                trans_updater,
+                "submit_chain_send_from_spot_deposit",
+                mock.AsyncMock(side_effect=AssertionError("reconciliation must not broadcast")),
+            ) as resend,
+            mock.patch.object(
+                trans_updater,
+                "refresh_chain_head_height",
+                mock.AsyncMock(return_value=999),
+            ),
+        ):
+            reconciled = await trans_updater.check_pending_transactions()
+
+        self.assertEqual(reconciled["finalised_count"], 2)
+        self.assertGreaterEqual(address_history.await_count, 2)
+        resend.assert_not_awaited()
+
+        async with schema.get_db() as db:
+            final_spot = await db_access.get_spot(db, spot_id=spot_id)
+            final_rows = await db_access.get_transactions_by_spot(db, spot_id=spot_id, limit=50)
+
+        self.assertEqual(int(final_spot[schema.SPOT_STATUS]), const.SPOT_STATUS_CANCELLED)
+        final_cancellation_rows = [
+            row
+            for row in final_rows
+            if int(row[schema.TRANS_TYPE])
+            in {const.TRANS_TYPE_CANCEL_SPOT, const.TRANS_TYPE_PLAT_FEE}
+        ]
+        self.assertTrue(
+            all(
+                int(row[schema.TRANS_STATUS]) == const.TRANS_STATUS_CONFIRMED
+                for row in final_cancellation_rows
+            )
+        )

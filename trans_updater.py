@@ -1105,6 +1105,68 @@ async def get_chain_transaction_status(
     )
 
 
+async def _recover_server_transaction_from_address_history(
+    trans: RowDict,
+    chain_status: ChainTransactionStatus,
+    *,
+    rpc_url: str,
+    timeout_seconds: int,
+) -> ChainTransactionStatus | None:
+    """Recover an existing outgoing hash when direct RPC lookup misses it.
+
+    Nimiq public RPCs can return no result for ``getTransactionByHash`` even
+    though the same confirmed transaction is present in the sender address's
+    history.  Server-initiated rows must never be resent merely because of that
+    indexing gap.  This fallback accepts only the exact hash already stored in
+    SQLite; the normal strict sender/recipient/amount verifier still runs before
+    the row is marked confirmed.
+    """
+    if not _is_server_initiated_transaction(trans):
+        return None
+
+    tx_hash = str(trans.get(schema.TRANS_TX_HASH) or chain_status.tx_hash or "").strip()
+    if not _NIMIQ_TRANSACTION_HASH_RE.fullmatch(tx_hash):
+        return None
+
+    address = _verification_address_for_record(trans)
+    if address is None:
+        return None
+
+    try:
+        history = await get_chain_transactions_by_address(
+            address,
+            rpc_url=rpc_url,
+            timeout_seconds=int(timeout_seconds),
+            max_transactions=int(getattr(const, "NIMIQ_ADDRESS_TX_LOOKUP_LIMIT", 500)),
+        )
+    except (TimeoutError, urllib.error.URLError, OSError, RuntimeError, json.JSONDecodeError):
+        # Address history is an additional proof source, not permission to turn
+        # an ambiguous outgoing payment into a failure or a retry.
+        return None
+
+    matched = _find_transaction_by_hash(history, tx_hash)
+    if matched is None:
+        return None
+
+    block_number = _extract_block_number(matched)
+    if _execution_result_is_failure(matched):
+        return ChainTransactionStatus(
+            status="failed",
+            tx_hash=tx_hash,
+            block_number=block_number,
+            raw=matched,
+            reason="exact hash was found in expected-address history with a failed execution result",
+        )
+
+    return ChainTransactionStatus(
+        status="confirmed",
+        tx_hash=tx_hash,
+        block_number=block_number,
+        raw=matched,
+        reason="exact hash recovered through expected-address transaction history",
+    )
+
+
 async def check_pending_transaction(
     trans: RowDict,
     *,
@@ -1128,6 +1190,16 @@ async def check_pending_transaction(
         rpc_url=rpc_url,
         timeout_seconds=timeout_seconds,
     )
+
+    if chain_status.status in {"pending", "unknown"}:
+        recovered = await _recover_server_transaction_from_address_history(
+            trans,
+            chain_status,
+            rpc_url=rpc_url,
+            timeout_seconds=int(timeout_seconds),
+        )
+        if recovered is not None:
+            return recovered
 
     if chain_status.status != "pending":
         return chain_status

@@ -88,7 +88,9 @@ def summary(tx: dict[str, object]) -> dict[str, object]:
 
 
 def main() -> None:
-    fee_history = transactions(rpc("getTransactionsByAddress", [FEE_ADDRESS, 100]))
+    fee_history = transactions(
+        rpc("getTransactionsByAddress", [FEE_ADDRESS, 100, None])
+    )
     incoming_fees = [
         tx
         for tx in fee_history
@@ -114,7 +116,9 @@ def main() -> None:
             sender_keys.add(key)
 
     for sender in senders:
-        history = transactions(rpc("getTransactionsByAddress", [sender, 50]))
+        history = transactions(
+            rpc("getTransactionsByAddress", [sender, 50, None])
+        )
         outgoing = [
             tx
             for tx in history

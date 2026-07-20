@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from unittest import IsolatedAsyncioTestCase, mock
 
-import constants as const
 import trans_updater
 
 SOURCE = "NQ35 6EUX JD08 6F88 KYA2 EDMC V3BC PXLB ELSB"
@@ -18,7 +17,10 @@ class NimiqPayoutAddressResolutionTests(IsolatedAsyncioTestCase):
             "get_chain_account_by_address",
             mock.AsyncMock(return_value={"type": "basic", "address": SOURCE}),
         ):
-            result = await trans_updater.resolve_nimiq_pay_payout_address(SOURCE, force_chain_resolution=True)
+            result = await trans_updater.resolve_nimiq_pay_payout_address(
+                SOURCE,
+                force_chain_resolution=True,
+            )
         self.assertEqual(result, SOURCE)
 
     async def test_htlc_reward_uses_contract_recipient(self):
@@ -37,7 +39,10 @@ class NimiqPayoutAddressResolutionTests(IsolatedAsyncioTestCase):
             "get_chain_account_by_address",
             mock.AsyncMock(side_effect=accounts),
         ):
-            result = await trans_updater.resolve_nimiq_pay_payout_address(SOURCE, force_chain_resolution=True)
+            result = await trans_updater.resolve_nimiq_pay_payout_address(
+                SOURCE,
+                force_chain_resolution=True,
+            )
         self.assertEqual(result, RECIPIENT)
 
     async def test_htlc_refund_before_timeout_uses_recipient(self):
@@ -140,4 +145,7 @@ class NimiqPayoutAddressResolutionTests(IsolatedAsyncioTestCase):
             mock.AsyncMock(return_value={"type": "vesting", "address": SOURCE}),
         ):
             with self.assertRaisesRegex(RuntimeError, "not supported"):
-                await trans_updater.resolve_nimiq_pay_payout_address(SOURCE, force_chain_resolution=True)
+                await trans_updater.resolve_nimiq_pay_payout_address(
+                    SOURCE,
+                    force_chain_resolution=True,
+                )

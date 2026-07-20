@@ -46,30 +46,49 @@ jobs:
           npm ci --prefix helpers
 
       - name: Run full validation
+        id: validation
+        continue-on-error: true
         run: |
-          python -m pytest -q
-          npm test --prefix helpers
-          ruff check .
-          python -m compileall -q *.py tests
-          for file in static/*.js; do node --check --input-type=module < "$file"; done
-          for file in helpers/*.mjs; do node --check "$file"; done
-          python - <<'PY'
+          set -o pipefail
+          {
+            python -m pytest -q
+            npm test --prefix helpers
+            ruff check .
+            python -m compileall -q *.py tests
+            for file in static/*.js; do node --check --input-type=module < "$file"; done
+            for file in helpers/*.mjs; do node --check "$file"; done
+            python - <<'PY'
           from pathlib import Path
           from jinja2 import Environment, FileSystemLoader
           environment = Environment(loader=FileSystemLoader(Path('templates')))
           for path in sorted(Path('templates').glob('*.html')):
               environment.get_template(path.name)
           PY
+          } 2>&1 | tee final-cleanup-validation.log
+
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-cleanup-validation
+          path: final-cleanup-validation.log
 
       - name: Remove temporary cleanup machinery
+        if: steps.validation.outcome == 'success'
         run: |
           rm -f tools/apply_final_blockchain_cleanup.py
           rm -f .github/workflows/apply-final-blockchain-cleanup.yml
+          rm -f final-cleanup-validation.log
 
       - name: Commit cleanup
+        if: steps.validation.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Finish blockchain flow hardening"
           git push origin HEAD:agent/restore-blockchain-flows
+
+      - name: Report validation failure
+        if: steps.validation.outcome == 'failure'
+        run: exit 1

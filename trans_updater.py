@@ -981,17 +981,17 @@ async def get_chain_transactions_by_address(
 ) -> Any:
     """Return recent transactions for one address via Nimiq RPC.
 
-    ``startAt`` is an optional transaction-hash cursor.  When no cursor is
-    requested, omit it entirely rather than sending an empty string: an empty
-    string is not a valid Nimiq transaction hash and some RPC servers reject
-    the whole request as invalid parameters.
+    ``startAt`` is a transaction-hash cursor.  The currently deployed
+    TestAlbatross RPC requires the third positional parameter even when no
+    cursor is used, but rejects an empty string.  JSON ``null`` represents the
+    unused cursor without pretending that an empty value is a transaction hash.
     """
-    params: list[Any] = [address, int(max_transactions)]
+    params: list[Any] = [address, int(max_transactions), None]
     clean_start_at = str(start_at or "").strip()
     if clean_start_at:
         if not _NIMIQ_TRANSACTION_HASH_RE.fullmatch(clean_start_at):
             raise ValueError("start_at must be a 64-character hexadecimal Nimiq transaction hash")
-        params.append(clean_start_at)
+        params[2] = clean_start_at
 
     return await asyncio.to_thread(
         _json_rpc_post_sync,
@@ -1000,6 +1000,185 @@ async def get_chain_transactions_by_address(
         params=params,
         timeout_seconds=int(timeout_seconds),
     )
+
+
+def _normalise_chain_account_type(value: Any) -> str | None:
+    """Return a stable name for account-type values exposed by Nimiq RPC."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return {0: "basic", 1: "vesting", 2: "htlc", 3: "staking"}.get(value)
+
+    text = re.sub(r"[^a-z0-9]", "", str(value).strip().lower())
+    aliases = {
+        "0": "basic",
+        "basic": "basic",
+        "basicaccount": "basic",
+        "1": "vesting",
+        "vesting": "vesting",
+        "vestingcontract": "vesting",
+        "2": "htlc",
+        "htlc": "htlc",
+        "hashedtimelockedcontract": "htlc",
+        "3": "staking",
+        "staking": "staking",
+        "stakingcontract": "staking",
+    }
+    return aliases.get(text)
+
+
+def _first_chain_scalar_for_keys(value: Any, keys: set[str]) -> Any | None:
+    keys_lc = {key.lower() for key in keys}
+    for path, item in _walk_json(value):
+        if not path or isinstance(item, (dict, list)):
+            continue
+        if path[-1].lower() in keys_lc:
+            return item
+    return None
+
+
+def _normalise_chain_timestamp_milliseconds(value: Any) -> int | None:
+    try:
+        timestamp = int(value)
+    except (TypeError, ValueError):
+        return None
+    if timestamp <= 0:
+        return None
+    # Nimiq RPC normally returns milliseconds.  Accept seconds defensively.
+    return timestamp * 1000 if timestamp < 10_000_000_000 else timestamp
+
+
+async def get_chain_account_by_address(
+    address: str,
+    *,
+    rpc_url: str = DEFAULT_NIMIQ_RPC_URL,
+    timeout_seconds: int = DEFAULT_RPC_TIMEOUT_SECONDS,
+) -> RowDict:
+    """Return one account object from the configured Nimiq RPC."""
+    clean_address = _validate_nimiq_address(address, field_name="account address")
+    result = await asyncio.to_thread(
+        _json_rpc_post_sync,
+        rpc_url=str(rpc_url),
+        method="getAccountByAddress",
+        params=[clean_address],
+        timeout_seconds=int(timeout_seconds),
+    )
+    data, _metadata = _unwrap_rpc_result(result)
+    if not isinstance(data, dict):
+        raise RuntimeError("Nimiq RPC getAccountByAddress returned no account object")
+    return dict(data)
+
+
+async def resolve_nimiq_pay_payout_address(
+    address: str,
+    *,
+    source_tx_hash: str | None = None,
+    rpc_url: str = DEFAULT_NIMIQ_RPC_URL,
+    timeout_seconds: int = DEFAULT_RPC_TIMEOUT_SECONDS,
+    force_chain_resolution: bool | None = None,
+) -> str:
+    """Resolve a Nimiq Pay account to a safe basic-account payout address.
+
+    Nimiq Pay may expose an HTLC contract through ``listAccounts()``.  Existing
+    HTLCs reject ordinary incoming transfers, so sending a refund or reward back
+    to the contract address creates an on-chain failed transaction.  For a
+    refund, the original deposit transaction tells us which HTLC party
+    authorised the payment: the recipient before/equal to timeout, otherwise
+    the sender.  For a reward with no source transaction, the contract recipient
+    is the beneficiary selected by Nimiq Pay.
+
+    Unsupported contract types and incomplete RPC data fail closed before a
+    durable outgoing intent is created or any transaction is broadcast.
+    """
+    raw_address = str(address or "").strip()
+    if not raw_address:
+        raise ValueError("payout address must be non-empty")
+
+    should_resolve = (
+        bool(getattr(const, "PUBLIC_DEPLOYMENT", False))
+        if force_chain_resolution is None
+        else bool(force_chain_resolution)
+    )
+    if not should_resolve:
+        # Local development intentionally uses placeholder addresses and must not
+        # contact a public chain merely to exercise fake wallet sends.
+        return raw_address
+
+    clean_address = _validate_nimiq_address(raw_address, field_name="payout address")
+
+    source_status: ChainTransactionStatus | None = None
+    source_type: str | None = None
+    if source_tx_hash:
+        clean_hash = str(source_tx_hash).strip()
+        if not _NIMIQ_TRANSACTION_HASH_RE.fullmatch(clean_hash):
+            raise RuntimeError("payout source transaction hash is invalid")
+        source_status = await get_chain_transaction_status(
+            clean_hash,
+            rpc_url=rpc_url,
+            timeout_seconds=int(timeout_seconds),
+        )
+        if source_status.status != "confirmed":
+            raise RuntimeError(
+                "payout source transaction could not be re-verified as confirmed"
+            )
+        source_type = _normalise_chain_account_type(
+            _first_chain_scalar_for_keys(
+                source_status.raw,
+                {"fromType", "senderType", "from_type", "sender_type"},
+            )
+        )
+        if source_type == "basic":
+            return clean_address
+        if source_type not in {None, "htlc"}:
+            raise RuntimeError(
+                f"payout source account type {source_type!r} is not supported"
+            )
+
+    account = await get_chain_account_by_address(
+        clean_address,
+        rpc_url=rpc_url,
+        timeout_seconds=int(timeout_seconds),
+    )
+    account_type = _normalise_chain_account_type(account.get("type"))
+    if account_type == "basic":
+        if source_type == "htlc":
+            # The contract has been pruned since the payment and its HTLC party
+            # metadata is no longer available.  Never pay the now-empty contract
+            # address as though it were a newly-created basic account.
+            raise RuntimeError("the source HTLC was pruned before its beneficiary could be resolved")
+        return clean_address
+    if account_type != "htlc":
+        raise RuntimeError(
+            f"payout address account type {account_type or account.get('type')!r} is not supported"
+        )
+
+    target_field = "recipient"
+    if source_status is not None:
+        transaction_time = _normalise_chain_timestamp_milliseconds(
+            _first_chain_scalar_for_keys(source_status.raw, {"timestamp", "time"})
+        )
+        timeout = _normalise_chain_timestamp_milliseconds(account.get("timeout"))
+        if transaction_time is None or timeout is None:
+            raise RuntimeError("HTLC payout party could not be resolved from transaction time and timeout")
+        # Regular HTLC transfers are authorised by the recipient through the
+        # timeout; after it, only the original sender can resolve the contract.
+        target_field = "recipient" if transaction_time <= timeout else "sender"
+
+    target = _validate_nimiq_address(
+        str(account.get(target_field) or ""),
+        field_name=f"HTLC {target_field} payout address",
+    )
+    target_account = await get_chain_account_by_address(
+        target,
+        rpc_url=rpc_url,
+        timeout_seconds=int(timeout_seconds),
+    )
+    target_type = _normalise_chain_account_type(target_account.get("type"))
+    if target_type != "basic":
+        raise RuntimeError(
+            f"resolved HTLC {target_field} is not a basic account"
+        )
+    return target
 
 
 async def verify_chain_details_for_record(
@@ -2287,11 +2466,21 @@ async def submit_spot_cancellation_transactions(
             + confirmed_fee_total + confirmed_refund_total
         )
 
-        refund_address = next((
-            str(row.get(schema.TRANS_FROM_ADDRESS) or "").strip()
+        refund_source = next((
+            row
             for row in confirmed_deposits
             if str(row.get(schema.TRANS_FROM_ADDRESS) or "").strip()
         ), None)
+        refund_address = (
+            str(refund_source.get(schema.TRANS_FROM_ADDRESS) or "").strip()
+            if refund_source is not None
+            else None
+        )
+        refund_source_tx_hash = (
+            str(refund_source.get(schema.TRANS_TX_HASH) or "").strip()
+            if refund_source is not None
+            else None
+        )
         if refund_amount > 0 and not refund_address:
             raise ValueError("cannot refund this spot because no original deposit sender address is recorded")
 
@@ -2332,6 +2521,30 @@ async def submit_spot_cancellation_transactions(
         finally:
             raise
 
+    resolved_refund_address = refund_address
+    if refund_amount > 0:
+        try:
+            resolved_refund_address = await resolve_nimiq_pay_payout_address(
+                str(refund_address),
+                source_tx_hash=refund_source_tx_hash,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Cancellation refund address resolution deferred: spot_id=%s error=%s",
+                int(spot_id),
+                wallet.redact_secret_values(exc),
+            )
+            await notify_cancellation_change()
+            return {
+                **result_base,
+                "cancelled": False,
+                "cancellation_pending": True,
+                "deferred": True,
+                "reason": "refund_address_resolution_pending",
+                "message": "Cancellation is queued while the original Nimiq Pay funding account is resolved safely.",
+            }
+        result_base["refund_address"] = resolved_refund_address
+
     try:
         fee_result = (
             await submit_platform_fee_transaction(
@@ -2342,7 +2555,7 @@ async def submit_spot_cancellation_transactions(
         )
         refund_result = (
             await submit_spot_refund_transaction(
-                db, spot_id=int(spot_id), to_address=str(refund_address), amount=refund_amount
+                db, spot_id=int(spot_id), to_address=str(resolved_refund_address), amount=refund_amount
             )
             if refund_amount > 0
             else {"ok": True, "skipped": True, "reason": "no_refund", "trans_id": None}
@@ -2426,6 +2639,8 @@ async def submit_claim_reward_transaction(
 
     if not clean_to_address:
         raise ValueError("claim has no payout_address; ask the user to enter through Nimiq Pay again")
+
+    clean_to_address = await resolve_nimiq_pay_payout_address(clean_to_address)
 
     transaction_kind = (
         "Prizedraw"

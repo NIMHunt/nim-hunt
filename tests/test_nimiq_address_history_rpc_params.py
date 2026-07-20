@@ -12,7 +12,7 @@ HASH = "ab" * 32
 
 
 class AddressHistoryRpcParameterTests(IsolatedAsyncioTestCase):
-    async def test_unused_start_cursor_is_omitted_from_rpc_params(self):
+    async def test_unused_start_cursor_is_sent_as_json_null(self):
         response = {"data": [], "metadata": None}
         with mock.patch.object(
             trans_updater.asyncio,
@@ -29,7 +29,7 @@ class AddressHistoryRpcParameterTests(IsolatedAsyncioTestCase):
         args, kwargs = to_thread.await_args
         self.assertIs(args[0], trans_updater._json_rpc_post_sync)
         self.assertEqual(kwargs["method"], "getTransactionsByAddress")
-        self.assertEqual(kwargs["params"], [ADDRESS, 123])
+        self.assertEqual(kwargs["params"], [ADDRESS, 123, None])
 
     async def test_valid_start_cursor_is_sent_as_third_parameter(self):
         with mock.patch.object(
@@ -59,7 +59,7 @@ class AddressHistoryRpcParameterTests(IsolatedAsyncioTestCase):
                 )
             to_thread.assert_not_awaited()
 
-    async def test_cancellation_recovery_succeeds_when_rpc_accepts_only_two_default_params(self):
+    async def test_cancellation_recovery_succeeds_with_null_default_cursor(self):
         transaction = {
             schema.TRANS_ID: 91,
             schema.TRANS_TYPE: const.TRANS_TYPE_CANCEL_SPOT,
@@ -86,7 +86,7 @@ class AddressHistoryRpcParameterTests(IsolatedAsyncioTestCase):
 
         def strict_rpc(**kwargs):
             self.assertEqual(kwargs["method"], "getTransactionsByAddress")
-            self.assertEqual(kwargs["params"], [ADDRESS, 500])
+            self.assertEqual(kwargs["params"], [ADDRESS, 500, None])
             return {"data": [chain_transaction], "metadata": None}
 
         with (

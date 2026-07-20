@@ -18,33 +18,41 @@ class CancellationSafetyTest(IsolatedAsyncioTestCase):
         cancellation_safety._ORIGINAL_SUBMIT = self.previous_original
         cancellation_safety._SPOT_LOCKS.clear()
 
-    async def test_failed_refund_attempt_blocks_all_automatic_resends(self) -> None:
+    async def test_one_proven_failed_refund_is_retried_once(self) -> None:
         failed_refund = {
             schema.TRANS_TYPE: const.TRANS_TYPE_CANCEL_SPOT,
             schema.TRANS_STATUS: const.TRANS_STATUS_FAILED,
+            schema.TRANS_TX_HASH: "ab" * 32,
         }
+        self.original.return_value = {
+            "ok": True,
+            "spot_id": 7,
+            "cancelled": False,
+            "cancellation_pending": True,
+            "refund": {"ok": True},
+        }
+        failed_status = cancellation_safety.trans_updater.ChainTransactionStatus(
+            status="failed",
+            tx_hash="ab" * 32,
+            raw={"executionResult": False},
+        )
 
         with (
-            mock.patch.object(
-                cancellation_safety,
-                "_ensure_guard_table",
-                mock.AsyncMock(),
-            ),
-            mock.patch.object(
-                cancellation_safety,
-                "_guard_row",
-                mock.AsyncMock(return_value=None),
-            ),
+            mock.patch.object(cancellation_safety, "_ensure_guard_table", mock.AsyncMock()),
+            mock.patch.object(cancellation_safety, "_guard_row", mock.AsyncMock(return_value=None)),
             mock.patch.object(
                 cancellation_safety.db_access,
                 "get_transactions_by_spot",
                 mock.AsyncMock(return_value=[failed_refund]),
             ),
             mock.patch.object(
-                cancellation_safety,
-                "_block_guard",
-                mock.AsyncMock(),
-            ) as block_guard,
+                cancellation_safety.trans_updater,
+                "get_chain_transaction_status",
+                mock.AsyncMock(return_value=failed_status),
+            ),
+            mock.patch.object(cancellation_safety, "_acquire_guard", mock.AsyncMock(return_value=True)),
+            mock.patch.object(cancellation_safety, "_release_guard", mock.AsyncMock()) as release_guard,
+            mock.patch.object(cancellation_safety, "_block_guard", mock.AsyncMock()) as block_guard,
         ):
             result = await cancellation_safety.guarded_submit_spot_cancellation_transactions(
                 object(),
@@ -53,8 +61,57 @@ class CancellationSafetyTest(IsolatedAsyncioTestCase):
                 fee_address="NQ34 fee",
             )
 
+        self.assertEqual(result["refund"], {"ok": True})
+        self.original.assert_awaited_once()
+        release_guard.assert_awaited_once()
+        block_guard.assert_not_awaited()
+
+    async def test_ambiguous_failed_refund_remains_blocked(self) -> None:
+        failed_refund = {
+            schema.TRANS_TYPE: const.TRANS_TYPE_CANCEL_SPOT,
+            schema.TRANS_STATUS: const.TRANS_STATUS_FAILED,
+            schema.TRANS_TX_HASH: "not-a-chain-hash",
+        }
+        with (
+            mock.patch.object(cancellation_safety, "_ensure_guard_table", mock.AsyncMock()),
+            mock.patch.object(cancellation_safety, "_guard_row", mock.AsyncMock(return_value=None)),
+            mock.patch.object(
+                cancellation_safety.db_access,
+                "get_transactions_by_spot",
+                mock.AsyncMock(return_value=[failed_refund]),
+            ),
+            mock.patch.object(cancellation_safety, "_block_guard", mock.AsyncMock()) as block_guard,
+        ):
+            result = await cancellation_safety.guarded_submit_spot_cancellation_transactions(
+                object(), spot_id=7
+            )
         self.assertEqual(result["reason"], "manual_reconciliation_required")
-        self.assertTrue(result["manual_review_required"])
+        self.original.assert_not_awaited()
+        block_guard.assert_awaited_once()
+
+    async def test_second_failed_refund_is_never_retried(self) -> None:
+        failed_refunds = [
+            {
+                schema.TRANS_TYPE: const.TRANS_TYPE_CANCEL_SPOT,
+                schema.TRANS_STATUS: const.TRANS_STATUS_FAILED,
+                schema.TRANS_TX_HASH: value * 32,
+            }
+            for value in ("ab", "cd")
+        ]
+        with (
+            mock.patch.object(cancellation_safety, "_ensure_guard_table", mock.AsyncMock()),
+            mock.patch.object(cancellation_safety, "_guard_row", mock.AsyncMock(return_value=None)),
+            mock.patch.object(
+                cancellation_safety.db_access,
+                "get_transactions_by_spot",
+                mock.AsyncMock(return_value=failed_refunds),
+            ),
+            mock.patch.object(cancellation_safety, "_block_guard", mock.AsyncMock()) as block_guard,
+        ):
+            result = await cancellation_safety.guarded_submit_spot_cancellation_transactions(
+                object(), spot_id=7
+            )
+        self.assertEqual(result["reason"], "manual_reconciliation_required")
         self.original.assert_not_awaited()
         block_guard.assert_awaited_once()
 

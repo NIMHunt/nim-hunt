@@ -15,6 +15,7 @@ const MAX_RECOVERY_ATTEMPTS = 3;
 
 let installed = false;
 let downstreamFetch = null;
+let providerPatchPromise = null;
 
 function requestUrl(input) {
     try {
@@ -47,6 +48,107 @@ function extractAddress(value, seen = new Set()) {
         if (address) return address;
     }
     return '';
+}
+
+function providerErrorMessage(value) {
+    const error = value?.error;
+    if (!error) return '';
+    if (typeof error === 'string') return error.trim();
+    if (typeof error !== 'object') return String(error);
+    return String(error.message || error.reason || error.code || 'Nimiq Pay rejected the request.');
+}
+
+function accountList(value) {
+    const source = Array.isArray(value)
+        ? value
+        : value?.accounts ?? value?.result ?? value?.data;
+    if (!Array.isArray(source)) return [];
+    return source.map((account) => extractAddress(account)).filter(Boolean);
+}
+
+function extractTransactionHash(value, seen = new Set()) {
+    if (typeof value === 'string') return value.trim();
+    if (!value || typeof value !== 'object' || seen.has(value)) return '';
+    seen.add(value);
+
+    for (const key of [
+        'txHash',
+        'tx_hash',
+        'hash',
+        'transactionHash',
+        'transaction_hash',
+        'result',
+        'transaction',
+        'data',
+    ]) {
+        if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+        const hash = extractTransactionHash(value[key], seen);
+        if (hash) return hash;
+    }
+    return '';
+}
+
+function replaceProviderMethod(provider, name, replacement) {
+    try {
+        provider[name] = replacement;
+        return provider[name] === replacement;
+    } catch (_err) {
+        return false;
+    }
+}
+
+async function patchNimiqProvider() {
+    if (providerPatchPromise) return providerPatchPromise;
+
+    providerPatchPromise = (async () => {
+        try {
+            // Use the same module specifier as my_spots.js so both imports share
+            // the SDK's provider singleton inside the Nimiq Pay WebView.
+            const { init } = await import('https://esm.sh/@nimiq/mini-app-sdk');
+            const provider = await init({ timeout: 10_000 });
+            if (!provider || provider.__nimhuntDepositResponsePatch) return;
+
+            const originalListAccounts = typeof provider.listAccounts === 'function'
+                ? provider.listAccounts.bind(provider)
+                : null;
+            if (originalListAccounts) {
+                replaceProviderMethod(provider, 'listAccounts', async (...args) => {
+                    const result = await originalListAccounts(...args);
+                    const error = providerErrorMessage(result);
+                    if (error) throw new Error(error);
+                    const accounts = accountList(result);
+                    return accounts.length > 0 ? accounts : result;
+                });
+            }
+
+            const originalSend = typeof provider.sendBasicTransactionWithData === 'function'
+                ? provider.sendBasicTransactionWithData.bind(provider)
+                : null;
+            if (originalSend) {
+                replaceProviderMethod(provider, 'sendBasicTransactionWithData', async (...args) => {
+                    const result = await originalSend(...args);
+                    const error = providerErrorMessage(result);
+                    if (error) throw new Error(error);
+                    const txHash = extractTransactionHash(result);
+                    return txHash || result;
+                });
+            }
+
+            try {
+                Object.defineProperty(provider, '__nimhuntDepositResponsePatch', {
+                    value: true,
+                    configurable: false,
+                });
+            } catch (_err) {
+                // A frozen provider can still have had writable methods replaced.
+            }
+        } catch (err) {
+            console.warn('Could not prepare the Nimiq Pay deposit provider.', err);
+            providerPatchPromise = null;
+        }
+    })();
+
+    return providerPatchPromise;
 }
 
 function parsedJsonBody(init = {}) {
@@ -237,6 +339,7 @@ export function installDepositFlowRepair() {
         return submitRecording(input, submission);
     };
 
+    patchNimiqProvider();
     observeNoticeLayering();
     window.setTimeout(recoverStoredSubmission, 0);
 }

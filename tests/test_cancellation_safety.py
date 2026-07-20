@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from unittest import IsolatedAsyncioTestCase, mock
 
+import cancellation_safety
 import constants as const
 import database as schema
-
-import cancellation_safety
 
 
 class CancellationSafetyTest(IsolatedAsyncioTestCase):

@@ -14,10 +14,10 @@ import {
     setCopyButtonIcon,
     spotScheduleSummary,
     unixToText,
-} from './spot_ui.js?v=qol-v1-20260717';
+} from './spot_ui.js?v=polish-live-v1-20260720';
 import { createReusableSpotMap } from './spot_map.js';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
-import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=spot-fee-copy-v1-20260718';
+import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=polish-live-v1-20260720';
 import {
     createNoticePresenter,
     getLanguage,
@@ -31,6 +31,7 @@ const state = {
     user: null,
     banned: false,
     expandedSpotIds: new Set(),
+    expandedClaimCodeSpotIds: new Set(),
     sectionExpanded: {
         active: true,
         upcoming: false,
@@ -554,7 +555,7 @@ function buildMySpotMeta(spot) {
     fragment.append(document.createTextNode(spotPlaceText(spot)));
 
     if (spot.status_label === 'draft') {
-        if (spot.badge_status_label === 'deposited') return fragment;
+        if (['depositing', 'deposited'].includes(spot.badge_status_label)) return fragment;
         fragment.append(document.createTextNode(' - '));
         const notice = document.createElement('span');
         notice.className = `spot-list-meta-notice ${draftDepositClass(spot)}`;
@@ -773,7 +774,14 @@ function buildMySpotDetail(spot) {
     appendBulletLine(lines, buildMySpotsSpotLinkControl(spot));
 
     if (codeCount > 0) {
-        const claimCodesControl = createOwnerClaimCodesControl();
+        const spotId = Number(spot.id);
+        const claimCodesControl = createOwnerClaimCodesControl({}, {
+            expanded: state.expandedClaimCodeSpotIds.has(spotId),
+            onToggle: (expanded) => {
+                if (expanded) state.expandedClaimCodeSpotIds.add(spotId);
+                else state.expandedClaimCodeSpotIds.delete(spotId);
+            },
+        });
         lines.append(claimCodesControl.line);
         loadOwnerClaimCodesForSpot(spot, claimCodesControl);
     }
@@ -806,10 +814,31 @@ function renderEmptyAll() {
     els.empty.hidden = false;
 }
 
+function mySpotRenderSignature(spot) {
+    return JSON.stringify(spot);
+}
+
+function buildMySpotListItem(spot) {
+    const item = createSpotListItem({
+        spot,
+        detailBuilder: buildMySpotDetail,
+        metaBuilder: buildMySpotMeta,
+        expanded: state.expandedSpotIds.has(Number(spot.id)),
+        onToggle: (spotId, expanded) => {
+            if (expanded) state.expandedSpotIds.add(spotId);
+            else state.expandedSpotIds.delete(spotId);
+        },
+    });
+    item.dataset.spotId = String(Number(spot.id));
+    item.dataset.renderSignature = mySpotRenderSignature(spot);
+    return item;
+}
+
 function renderSection(bucket, spots) {
     const copy = TEXT.sections[bucket];
     const section = document.createElement('section');
     section.className = `spot-list-card my-spots-section-card is-${bucket}`;
+    section.dataset.bucket = bucket;
     section.setAttribute('aria-label', copy.title);
 
     const toggle = document.createElement('button');
@@ -818,15 +847,18 @@ function renderSection(bucket, spots) {
     toggle.setAttribute('aria-expanded', state.sectionExpanded[bucket] ? 'true' : 'false');
 
     const title = document.createElement('span');
+    title.dataset.sectionTitle = 'true';
     title.textContent = `${copy.title} (${spots.length})`;
     toggle.append(title);
 
     const list = document.createElement('ol');
     list.className = 'spot-list';
+    list.dataset.sectionList = 'true';
     list.hidden = !state.sectionExpanded[bucket];
 
     const empty = document.createElement('p');
     empty.className = 'empty-spots';
+    empty.dataset.sectionEmpty = 'true';
     empty.textContent = copy.empty;
     empty.hidden = !state.sectionExpanded[bucket] || spots.length > 0;
 
@@ -837,42 +869,69 @@ function renderSection(bucket, spots) {
         empty.hidden = !state.sectionExpanded[bucket] || spots.length > 0;
     });
 
-    for (const spot of spots) {
-        list.append(createSpotListItem({
-            spot,
-            detailBuilder: buildMySpotDetail,
-            metaBuilder: buildMySpotMeta,
-            expanded: state.expandedSpotIds.has(Number(spot.id)),
-            onToggle: (spotId, expanded) => {
-                if (expanded) {
-                    state.expandedSpotIds.add(spotId);
-                } else {
-                    state.expandedSpotIds.delete(spotId);
-                }
-            },
-        }));
-    }
-
+    for (const spot of spots) list.append(buildMySpotListItem(spot));
     section.append(toggle, list, empty);
     return section;
 }
 
+function reconcileSection(bucket, spots) {
+    const section = els.sections.querySelector(`[data-bucket="${bucket}"]`);
+    if (!section) {
+        els.sections.append(renderSection(bucket, spots));
+        return;
+    }
+
+    const copy = TEXT.sections[bucket];
+    const title = section.querySelector('[data-section-title="true"]');
+    const list = section.querySelector('[data-section-list="true"]');
+    const empty = section.querySelector('[data-section-empty="true"]');
+    if (!title || !list || !empty) {
+        section.replaceWith(renderSection(bucket, spots));
+        return;
+    }
+
+    title.textContent = `${copy.title} (${spots.length})`;
+    const existing = new Map(
+        [...list.children].map((item) => [Number(item.dataset.spotId), item]),
+    );
+    const desired = [];
+    for (const spot of spots) {
+        const spotId = Number(spot.id);
+        const signature = mySpotRenderSignature(spot);
+        const current = existing.get(spotId);
+        if (current?.dataset.renderSignature === signature) desired.push(current);
+        else desired.push(buildMySpotListItem(spot));
+        existing.delete(spotId);
+    }
+
+    for (const item of desired) list.append(item);
+    for (const stale of existing.values()) stale.remove();
+    list.hidden = !state.sectionExpanded[bucket];
+    empty.hidden = !state.sectionExpanded[bucket] || spots.length > 0;
+}
+
 function renderSpots(spots) {
-    els.sections.replaceChildren();
     els.empty.hidden = true;
 
     if (spots.length === 0) {
+        els.sections.replaceChildren();
         renderEmptyAll();
         return;
     }
 
     const groups = groupSpots(spots);
-    els.sections.append(
-        renderSection('active', groups.active),
-        renderSection('upcoming', groups.upcoming),
-        renderSection('draft', groups.draft),
-        renderSection('previous', groups.previous)
+    const buckets = ['active', 'upcoming', 'draft', 'previous'];
+    const hasCompleteStructure = buckets.every(
+        (bucket) => els.sections.querySelector(`[data-bucket="${bucket}"]`),
     );
+    if (!hasCompleteStructure) {
+        els.sections.replaceChildren(
+            ...buckets.map((bucket) => renderSection(bucket, groups[bucket])),
+        );
+        return;
+    }
+
+    for (const bucket of buckets) reconcileSection(bucket, groups[bucket]);
 }
 
 function spotPopupContent(spot) {

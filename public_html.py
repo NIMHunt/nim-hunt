@@ -39,7 +39,7 @@ from transaction_descriptions import build_transaction_description
 router = APIRouter()
 templates = Jinja2Templates(directory=str(const.TEMPLATES_DIR))
 
-_ASSET_VERSION = "claim-live-status-v1-20260719"
+_ASSET_VERSION = "polish-live-status-v1-20260720"
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ALLOWED_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$")
@@ -599,6 +599,17 @@ def _spot_is_prizedraw_row(spot: dict[str, Any]) -> bool:
     return spot.get(schema.PRIZEDRAW_PRIZE_COUNT) is not None
 
 
+def _owner_spot_effectively_complete(spot: dict[str, Any]) -> bool:
+    # A published Standard Spot is complete once every finite claim slot is used.
+    if int(spot.get(schema.SPOT_STATUS) or -1) != const.SPOT_STATUS_PUBLISHED:
+        return False
+    if _spot_is_prizedraw_row(spot):
+        return False
+    max_total = int(spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) or 0)
+    successful = int(spot.get("success_claim_count") or 0)
+    return max_total > 0 and successful >= max_total
+
+
 def _transaction_status_label(status_code: int | None) -> str:
     if status_code == const.TRANS_STATUS_PENDING:
         return "pending"
@@ -838,6 +849,9 @@ def _serialise_owner_spot(
         creation_fee_address=creation_fee_address,
     )
     is_prizedraw = _spot_is_prizedraw_row(spot)
+    effectively_complete = _owner_spot_effectively_complete(spot)
+    if effectively_complete:
+        status_label = "completed"
     cancellation = _cancellation_summary(transactions)
     cancellation_started = spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None
     bucket = _owner_spot_bucket(spot, now=now, status_label=status_label)
@@ -910,13 +924,15 @@ def _serialise_owner_spot(
             "cancelling"
             if cancellation_started
             else (
-                "deposited"
+                "depositing"
                 if status_label == "draft"
-                and (
-                    int(deposit.get("pending_amount") or 0) > 0
-                    or bool(deposit.get("funding_complete"))
+                and int(deposit.get("pending_amount") or 0) > 0
+                else (
+                    "deposited"
+                    if status_label == "draft"
+                    and bool(deposit.get("funding_complete"))
+                    else status_label
                 )
-                else status_label
             )
         ),
         "bucket": bucket,
@@ -964,6 +980,7 @@ def _serialise_owner_spot(
                 (
                     int(spot[schema.SPOT_STATUS]) == const.SPOT_STATUS_PUBLISHED
                     and not is_prizedraw
+                    and not effectively_complete
                 )
                 or (
                     status_label == "draft"

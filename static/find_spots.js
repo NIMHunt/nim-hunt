@@ -1,5 +1,5 @@
 import { init, requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=qol-v1-20260717';
+import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=polish-live-v1-20260720';
 import {
     appendBulletLine,
     appendDetailDescription,
@@ -11,7 +11,7 @@ import {
     metresToText,
     spotScheduleTooltip,
     unixToText,
-} from './spot_ui.js?v=qol-v1-20260717';
+} from './spot_ui.js?v=polish-live-v1-20260720';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { formatNimFromLuna } from './nim_format.js';
 import {
@@ -34,6 +34,7 @@ const state = {
     testLocationMode: false,
     lastSpots: [],
     expandedSpotIds: new Set(),
+    expandedClaimCodeSpotIds: new Set(),
     fetchController: null,
     deviceIdHash: null,
     walletAvailable: false,
@@ -749,7 +750,14 @@ function updateOwnerClaimCodeControls() {
 }
 
 function buildOwnerClaimCodesLineForSpot(spot) {
-    const control = createOwnerClaimCodesControl();
+    const spotId = Number(spot.id);
+    const control = createOwnerClaimCodesControl({}, {
+        expanded: state.expandedClaimCodeSpotIds.has(spotId),
+        onToggle: (expanded) => {
+            if (expanded) state.expandedClaimCodeSpotIds.add(spotId);
+            else state.expandedClaimCodeSpotIds.delete(spotId);
+        },
+    });
     const entry = { spot, control, loaded: false, loading: false };
     state.ownerClaimCodeControls.push(entry);
     if (spotCanShowOwnerClaimCodes(spot)) loadOwnerClaimCodesForControl(entry);
@@ -1261,12 +1269,6 @@ function buildSpotDetail(spot) {
     const duration = durationText(spot.claim_duration);
     const creator = spot.creator_display_name || 'unknown creator';
 
-    if (spot.distance_m !== null && spot.distance_m !== undefined) {
-        const place = document.createElement('p');
-        place.className = 'spot-detail-place';
-        place.textContent = spotPlaceText(spot);
-        detail.append(place);
-    }
     appendDetailDescription(detail, spot.description);
 
     const lines = document.createElement('ul');

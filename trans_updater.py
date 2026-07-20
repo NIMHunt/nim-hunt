@@ -1752,6 +1752,31 @@ async def submit_spot_refund_transaction(
     return {**result, "spot_id": int(spot_id)}
 
 
+async def _published_standard_spot_is_complete(
+    db,
+    *,
+    spot_id: int,
+    spot: RowDict | None = None,
+) -> bool:
+    candidate = spot or {}
+    if int(candidate.get(schema.SPOT_STATUS) or -1) != const.SPOT_STATUS_PUBLISHED:
+        return False
+
+    # The normal SPOT row already tells us whether capacity is finite. Avoid
+    # an unnecessary summary query for unlimited or incomplete test rows.
+    max_total = int(candidate.get(schema.SPOT_MAX_TOTAL_CLAIMS) or 0)
+    if max_total <= 0:
+        return False
+
+    summary = await db_access.get_spot_owner_summary(db, spot_id=int(spot_id))
+    if summary is None:
+        return False
+    if summary.get(schema.PRIZEDRAW_PRIZE_COUNT) is not None:
+        return False
+    successful = int(summary.get("success_claim_count") or 0)
+    return successful >= max_total
+
+
 async def submit_spot_cancellation_transactions(
     db,
     *,
@@ -1776,6 +1801,10 @@ async def submit_spot_cancellation_transactions(
         db, spot_id=int(spot_id)
     ):
         raise ValueError("Prizedraw spots cannot be cancelled through this standard cancellation flow")
+    if spot_status == const.SPOT_STATUS_PUBLISHED and await _published_standard_spot_is_complete(
+        db, spot_id=int(spot_id), spot=spot
+    ):
+        raise ValueError("completed spots cannot be cancelled")
 
     async def notify_cancellation_change() -> None:
         try:
@@ -1820,6 +1849,10 @@ async def submit_spot_cancellation_transactions(
             db, spot_id=int(spot_id)
         ):
             raise ValueError("Prizedraw spots cannot be cancelled through this standard cancellation flow")
+        if spot_status == const.SPOT_STATUS_PUBLISHED and await _published_standard_spot_is_complete(
+            db, spot_id=int(spot_id), spot=spot
+        ):
+            raise ValueError("completed spots cannot be cancelled")
 
         # Once this marker commits, claim insertion is rejected and the Spot is
         # removed from public results even when its refund must wait.

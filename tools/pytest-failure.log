@@ -1,8 +1,0 @@
-tests/test_ui_polish_regressions.py::test_chain_cancellation_guard_rejects_complete_standard_spot
-async def functions are not natively supported.
-You need to install a suitable plugin for your async framework, for example:
-  - anyio
-  - pytest-asyncio
-  - pytest-tornasync
-  - pytest-trio
-  - pytest-twisted

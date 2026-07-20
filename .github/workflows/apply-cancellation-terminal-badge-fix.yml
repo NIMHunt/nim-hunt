@@ -64,6 +64,7 @@ jobs:
       - name: Remove temporary fix machinery
         run: |
           rm -f tools/apply_cancellation_terminal_badge_fix.py
+          rm -f tools/cancellation_badge_fix_trigger.txt
           rm -f .github/workflows/apply-cancellation-terminal-badge-fix.yml
 
       - name: Commit fix

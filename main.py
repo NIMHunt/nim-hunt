@@ -375,6 +375,11 @@ async def startup() -> None:
     validate_deployment_safety()
     verify_public_signing_access()
     await verify_public_rpc_network()
+    if bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
+        # Seed the height cache during the same strict startup phase that verifies
+        # the RPC network. Deposit dialogs can then use this recent value without
+        # making a new public-RPC request on every click.
+        await trans_updater.refresh_chain_head_height()
     await database.init_db()
 
     derive_env = getattr(

@@ -1,8 +1,5 @@
 Traceback (most recent call last):
-  File "/home/runner/work/nim-hunt/nim-hunt/tools/apply_polish_patch.py", line 529, in <module>
-    replace_once(
-  File "/home/runner/work/nim-hunt/nim-hunt/tools/apply_polish_patch.py", line 14, in replace_once
-    raise RuntimeError(f"Expected one match in {relative}, found {count}: {old[:120]!r}")
-RuntimeError: Expected one match in public_html.py, found 0: 'is_prizedraw = _spot_is_prizedraw_row(spot)\ncancellation = _cancellation_summary(transactions)\ncancellation_started = sp'
-
-Repair workflow trigger marker 2.
+  File "/home/runner/work/nim-hunt/nim-hunt/tools/apply_polish_patch.py", line 14, in <module>
+    exec(compile(source, str(root / "tools/apply_polish_patch.py"), "exec"))
+  File "/home/runner/work/nim-hunt/nim-hunt/tools/apply_polish_patch.py", line 638, in <module>
+RuntimeError: Expected two cancellation guards, found 1

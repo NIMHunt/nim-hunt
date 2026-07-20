@@ -1,1 +1,0 @@
-This temporary file triggers the final PR validation and is deleted by the cleanup workflow.

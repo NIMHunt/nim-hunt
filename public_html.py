@@ -2833,15 +2833,26 @@ async def my_spots_deposit_submitted_api(spot_id: int, payload: DepositSubmitted
             # HTTP response can be retried idempotently even while the original
             # row is already pending. New deposits are still clamped to amount due.
             submitted_amount = min(amount_due, requested_amount) if amount_due > 0 else requested_amount
-            deposit_record = await trans_updater.record_spot_deposit_transaction(
-                db,
-                user_id=user_id,
-                spot_id=spot_id,
-                amount=submitted_amount,
-                from_address=payload.from_address,
-                tx_hash=payload.tx_hash,
-                to_address=spot.get(schema.SPOT_DEPOSIT_ADDRESS),
-            )
+            try:
+                deposit_record = await trans_updater.record_spot_deposit_transaction(
+                    db,
+                    user_id=user_id,
+                    spot_id=spot_id,
+                    amount=submitted_amount,
+                    from_address=payload.from_address,
+                    tx_hash=payload.tx_hash,
+                    to_address=spot.get(schema.SPOT_DEPOSIT_ADDRESS),
+                )
+            except ValueError as exc:
+                return JSONResponse(
+                    {
+                        **meta,
+                        "ok": False,
+                        "code": "deposit_rejected",
+                        "message": str(exc),
+                    },
+                    status_code=status.HTTP_409_CONFLICT,
+                )
 
         await cache.notify_transaction_changed(
             db,

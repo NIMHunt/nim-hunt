@@ -91,6 +91,7 @@ test('send helper signs locally and broadcasts through configured JSON-RPC', asy
     assert.equal(response.ok, true);
     assert.equal(response.tx_hash, expectedHash);
     assert.equal(response.broadcast_transport, 'json-rpc');
+    assert.ok(response.raw);
     assert.deepEqual(calls.map(call => call.method), ['getLatestBlock', 'sendRawTransaction']);
   } finally {
     await new Promise(resolveClose => server.close(resolveClose));

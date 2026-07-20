@@ -319,9 +319,11 @@ async function sendLunaFromSpotDeposit(payload) {
   if (verified === false) throw new Error('The locally signed Nimiq transaction failed verification.');
 
   let hash;
+  let rawSendResult = null;
   if (rpcUrl) {
     const rawTx = Buffer.from(tx.serialize()).toString('hex');
     const sendResult = await rpcCall(rpcUrl, 'sendRawTransaction', [rawTx]);
+    rawSendResult = sendResult;
     // Do not fall back to tx.hash() here. A local hash proves construction, not
     // that the configured RPC accepted and broadcast the transaction.
     hash = requireTransactionHash(
@@ -331,7 +333,7 @@ async function sendLunaFromSpotDeposit(payload) {
   } else {
     const client = await createClient({ ...payload, network });
     try {
-      await client.sendTransaction(tx);
+      rawSendResult = await client.sendTransaction(tx);
     } finally {
       await closeClient(client);
     }
@@ -351,7 +353,7 @@ async function sendLunaFromSpotDeposit(payload) {
     validity_start_height: Number(height),
     network_id: networkId,
     broadcast_transport: rpcUrl ? 'json-rpc' : 'web-client',
-    raw: sendResult ?? null,
+    raw: rawSendResult,
   });
 }
 

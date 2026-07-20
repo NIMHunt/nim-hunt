@@ -8,7 +8,6 @@ import database as schema
 import db_access
 import trans_updater
 
-
 HASH_1 = "11" * 32
 HASH_2 = "22" * 32
 HASH_3 = "33" * 32
@@ -68,6 +67,13 @@ class BlockchainFlowIntegrationTest(IsolatedAsyncioTestCase):
             owner_id=owner_id, spot_id=spot_id, spot=spot
         )
         async with schema.get_db() as db:
+            # Older rows may preserve the provider's uppercase formatting. Hash
+            # identity is hexadecimal and therefore case-insensitive.
+            await db.execute(
+                f"UPDATE {schema.TRANS_TABLE_NAME} SET {schema.TRANS_TX_HASH} = UPPER({schema.TRANS_TX_HASH}) WHERE {schema.TRANS_ID} = ?;",
+                (first["trans_id"],),
+            )
+            await db.commit()
             repeated = await trans_updater.record_spot_deposit_transaction(
                 db,
                 user_id=owner_id,

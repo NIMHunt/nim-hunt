@@ -65,6 +65,13 @@ class PageLifecycleJavaScriptTest(unittest.TestCase):
             import assert from 'node:assert/strict';
             const lifecycle = await import({json.dumps(module_url)});
 
+            const markerName = 'data-nimhunt-card-navigation-pending';
+            const attributes = new Map();
+            const documentElement = {{
+                hasAttribute(name) {{ return attributes.has(name); }},
+                setAttribute(name, value) {{ attributes.set(name, String(value)); }},
+                removeAttribute(name) {{ attributes.delete(name); }},
+            }};
             const openBackdrop = {{ hidden: false }};
             let reloadCount = 0;
             const windowObj = {{
@@ -73,9 +80,11 @@ class PageLifecycleJavaScriptTest(unittest.TestCase):
                 removeEventListener() {{}},
             }};
             const documentObj = {{
+                documentElement,
                 querySelectorAll(selector) {{
+                    if (selector === '.notice-backdrop') return [openBackdrop];
                     assert.equal(selector, '.notice-backdrop:not([hidden])');
-                    return [openBackdrop];
+                    return openBackdrop.hidden ? [] : [openBackdrop];
                 }},
             }};
             const backForwardPerformance = {{
@@ -94,6 +103,18 @@ class PageLifecycleJavaScriptTest(unittest.TestCase):
             assert.equal(openBackdrop.hidden, true);
             assert.equal(reloadCount, 1);
 
+            // Publishing hides its card immediately before assigning the next
+            // location. The marker must still repair that restored history entry.
+            documentElement.setAttribute(markerName, '1');
+            assert.equal(lifecycle.repairOpenCardsAfterHistoryRestore({{
+                event: {{ persisted: true }},
+                windowObj,
+                documentObj,
+                performanceObj: backForwardPerformance,
+            }}), true);
+            assert.equal(documentElement.hasAttribute(markerName), false);
+            assert.equal(reloadCount, 2);
+
             openBackdrop.hidden = false;
             assert.equal(lifecycle.repairOpenCardsAfterHistoryRestore({{
                 event: {{ persisted: false }},
@@ -102,7 +123,7 @@ class PageLifecycleJavaScriptTest(unittest.TestCase):
                 performanceObj: backForwardPerformance,
             }}), false);
             assert.equal(openBackdrop.hidden, false);
-            assert.equal(reloadCount, 1);
+            assert.equal(reloadCount, 2);
 
             assert.equal(lifecycle.repairOpenCardsAfterHistoryRestore({{
                 event: {{ persisted: true }},
@@ -111,7 +132,85 @@ class PageLifecycleJavaScriptTest(unittest.TestCase):
                 performanceObj: {{ getEntriesByType: () => [{{ type: 'navigate' }}] }},
             }}), false);
             assert.equal(openBackdrop.hidden, false);
-            assert.equal(reloadCount, 1);
+            assert.equal(reloadCount, 2);
+
+            const trackedBackdrop = {{ hidden: true }};
+            const trackedAttributes = new Map();
+            const trackedDocumentElement = {{
+                hasAttribute(name) {{ return trackedAttributes.has(name); }},
+                setAttribute(name, value) {{ trackedAttributes.set(name, String(value)); }},
+                removeAttribute(name) {{ trackedAttributes.delete(name); }},
+            }};
+            let lifecycleObserverCallback = null;
+            let lifecycleObserverDisconnected = false;
+            class LifecycleMutationObserver {{
+                constructor(callback) {{ lifecycleObserverCallback = callback; }}
+                observe(target, options) {{
+                    assert.equal(target, trackedDocument.body);
+                    assert.deepEqual(options, {{
+                        subtree: true,
+                        attributes: true,
+                        attributeFilter: ['hidden'],
+                    }});
+                }}
+                disconnect() {{ lifecycleObserverDisconnected = true; }}
+            }}
+            let nextTimerId = 1;
+            const timers = new Map();
+            let trackedReloadCount = 0;
+            let pageshowHandler = null;
+            const trackedWindow = {{
+                location: {{ reload() {{ trackedReloadCount += 1; }} }},
+                addEventListener(name, handler) {{
+                    if (name === 'pageshow') pageshowHandler = handler;
+                }},
+                removeEventListener(name, handler) {{
+                    if (name === 'pageshow' && pageshowHandler === handler) pageshowHandler = null;
+                }},
+                setTimeout(callback) {{
+                    const id = nextTimerId++;
+                    timers.set(id, callback);
+                    return id;
+                }},
+                clearTimeout(id) {{ timers.delete(id); }},
+            }};
+            const trackedDocument = {{
+                body: {{}},
+                documentElement: trackedDocumentElement,
+                querySelectorAll(selector) {{
+                    if (selector === '.notice-backdrop') return [trackedBackdrop];
+                    if (selector === '.notice-backdrop:not([hidden])') {{
+                        return trackedBackdrop.hidden ? [] : [trackedBackdrop];
+                    }}
+                    return [];
+                }},
+            }};
+            const lifecycleCleanup = lifecycle.installHistoryCardRestoreGuard({{
+                windowObj: trackedWindow,
+                documentObj: trackedDocument,
+                performanceObj: backForwardPerformance,
+                MutationObserverClass: LifecycleMutationObserver,
+            }});
+            assert.equal(typeof pageshowHandler, 'function');
+            for (const callback of [...timers.values()]) callback();
+            timers.clear();
+            assert.equal(trackedDocumentElement.hasAttribute(markerName), false);
+
+            trackedBackdrop.hidden = false;
+            lifecycleObserverCallback();
+            assert.equal(trackedDocumentElement.hasAttribute(markerName), true);
+
+            // Hide and navigate in the same task: the delayed manual-close clear
+            // has not fired, so a restored page is still recognised as stale.
+            trackedBackdrop.hidden = true;
+            lifecycleObserverCallback();
+            assert.equal(trackedDocumentElement.hasAttribute(markerName), true);
+            pageshowHandler({{ persisted: true }});
+            assert.equal(trackedReloadCount, 1);
+            assert.equal(trackedDocumentElement.hasAttribute(markerName), false);
+            lifecycleCleanup();
+            assert.equal(lifecycleObserverDisconnected, true);
+            assert.equal(pageshowHandler, null);
 
             const blankInput = {{ value: '' }};
             assert.equal(

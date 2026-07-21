@@ -476,7 +476,11 @@ function claimNeedsLiveRefresh(claim) {
     if (!claim) return false;
     const status = String(claim.status_label || '').toLowerCase();
     if (status === 'pending') {
-        if (Number(claim.duration_required || 0) > 0 && !durationGoalReached(claim)) return false;
+        const durationRequired = Number(claim.duration_required || 0);
+        const serverRemaining = Number(claim.duration_remaining || 0);
+        // Trust the server when it has already reached the verification phase.
+        // A phone clock that is a few seconds slow must not stop status polling.
+        if (durationRequired > 0 && serverRemaining > 0 && !durationGoalReached(claim)) return false;
         return true;
     }
     if (!claim.is_prizedraw) {

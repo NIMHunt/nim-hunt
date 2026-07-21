@@ -1555,6 +1555,7 @@ def _serialise_claim_detail(
         "payout_transaction_count": int(payout["payout_count"]),
         "payout_pending_count": int(payout["payout_pending_count"]),
         "payout_confirmed_count": int(payout["payout_confirmed_count"]),
+        "payout_failed_count": int(payout["payout_failed_count"]),
         "payout_amount": int(payout["payout_amount"]),
         "progress_label": display_status["text"] if is_prizedraw else None,
         "viewer_is_owner": viewer_user_id is not None and int(spot.get(schema.SPOT_CREATED_BY) or -1) == int(viewer_user_id),

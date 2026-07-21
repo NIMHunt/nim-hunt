@@ -45,26 +45,7 @@ jobs:
           npm ci --prefix helpers
 
       - name: Run Python tests
-        run: |
-          cat > conftest.py <<'PY'
-          import json
-
-          def pytest_exception_interact(node, call, report):
-              for entry in call.excinfo.traceback:
-                  settled = entry.frame.f_locals.get("settled")
-                  if settled is not None:
-                      print("\nFULL_SETTLED_RESULT")
-                      print(json.dumps(settled, default=str, indent=2, sort_keys=True))
-          PY
-          set -o pipefail
-          python -m pytest -q --showlocals -s 2>&1 | tee pytest.log
-
-      - name: Upload Python test log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-log
-          path: pytest.log
+        run: python -m pytest -q
 
       - name: Run Node tests
         run: npm test --prefix helpers

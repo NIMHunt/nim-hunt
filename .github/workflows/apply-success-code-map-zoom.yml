@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/success-only-claim-codes-map-zoom
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write

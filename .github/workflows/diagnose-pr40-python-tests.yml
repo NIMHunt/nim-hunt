@@ -1,0 +1,32 @@
+name: Diagnose PR 40 Python tests
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run Python tests
+        id: tests
+        continue-on-error: true
+        run: python -m unittest discover -s tests -v > pr40-python-tests.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr40-python-tests
+          path: pr40-python-tests.log
+      - name: Fail when tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1

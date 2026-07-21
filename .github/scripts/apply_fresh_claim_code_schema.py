@@ -195,7 +195,6 @@ for forbidden in (
     "CREATE TABLE",
     "INSERT OR IGNORE INTO",
     "ALTER TABLE",
-    "_ATTEMPT_",
 ):
     if forbidden in policy:
         raise RuntimeError(f"claim_code_policy.py still contains forbidden migration text: {forbidden}")

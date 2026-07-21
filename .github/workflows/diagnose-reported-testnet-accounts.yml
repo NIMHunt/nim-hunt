@@ -20,4 +20,8 @@ jobs:
         with:
           python-version: '3.11'
       - name: Query TestAlbatross RPC
-        run: python .github/scripts/diagnose_reported_testnet_accounts.py
+        run: python .github/scripts/diagnose_reported_testnet_accounts.py | tee reported-testnet-accounts.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reported-testnet-accounts
+          path: reported-testnet-accounts.json

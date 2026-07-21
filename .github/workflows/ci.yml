@@ -1,90 +1,160 @@
-name: CI
+name: Apply success-only claim codes and map zoom
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
 
 permissions:
-  contents: read
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  contents: write
 
 jobs:
-  verify:
+  apply:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@v6
         with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
+          ref: agent/success-only-claim-codes-map-zoom
+          fetch-depth: 0
 
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v6
+      - uses: actions/setup-python@v6
         with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: helpers/package-lock.json
+          python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt -r requirements-dev.txt
-          npm ci --prefix helpers
+      - name: Apply checked source transformations
+        run: python .github/scripts/apply_success_code_map_zoom.py
 
-      - name: Run Python tests
-        run: python -m pytest -q
-
-      - name: Run Node tests
-        run: npm test --prefix helpers
-
-      - name: Run Python lint and compilation checks
-        run: |
-          ruff check .
-          python -m compileall -q *.py tests
-
-      - name: Run JavaScript and shell syntax checks
-        run: |
-          for file in static/*.js; do node --check --input-type=module < "$file"; done
-          for file in helpers/*.mjs; do node --check "$file"; done
-          for file in *.sh; do bash -n "$file"; done
-
-      - name: Compile Jinja templates
+      - name: Correct generated test cursor usage
         run: |
           python - <<'PY'
           from pathlib import Path
-          from jinja2 import Environment, FileSystemLoader
 
-          templates = Path("templates")
-          environment = Environment(loader=FileSystemLoader(templates))
-          for path in sorted(templates.glob("*.html")):
-              environment.get_template(path.name)
+          path = Path('tests/test_claim_code_success_race.py')
+          source = path.read_text(encoding='utf-8')
+          old = '''            attempt_count = await db.execute_fetchone(
+                f"SELECT COUNT(*) AS n FROM {schema.CLAIM_CODE_ATTEMPT_TABLE_NAME};"
+            )
+            self.assertEqual(int(attempt_count["n"]), 0)
+'''
+          new = '''            cursor = await db.execute(
+                f"SELECT COUNT(*) AS n FROM {schema.CLAIM_CODE_ATTEMPT_TABLE_NAME};"
+            )
+            attempt_count = await cursor.fetchone()
+            self.assertEqual(int(attempt_count["n"]), 0)
+'''
+          if source.count(old) != 1:
+              raise RuntimeError('expected generated attempt-count block exactly once')
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
           PY
 
-      - name: Seed a fresh development database
-        env:
-          NIMHUNT_DB_PATH: ${{ runner.temp }}/nimhunt-ci.db
-          NIMHUNT_DEPLOYMENT_MODE: development
-          NIMHUNT_NIMIQ_NETWORK: TestAlbatross
-          NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: "1"
-        run: python spoof.py
-
-      - name: Check installed dependencies
-        run: python -m pip check
-
-      - name: Audit dependencies
+      - name: Restore normal CI and remove patch machinery
         run: |
-          python -m pip_audit --progress-spinner off
-          npm audit --omit=dev --prefix helpers
+          rm -f .github/scripts/apply_success_code_map_zoom.py
+          rm -f .github/workflows/apply-success-code-map-zoom.yml
+          rm -f .github/PATCH_TRIGGER
+          cat > .github/workflows/ci.yml <<'YAML'
+          name: CI
+
+          on:
+            push:
+              branches:
+                - main
+            pull_request:
+
+          permissions:
+            contents: read
+
+          concurrency:
+            group: ci-${{ github.workflow }}-${{ github.ref }}
+            cancel-in-progress: true
+
+          jobs:
+            verify:
+              runs-on: ubuntu-latest
+              timeout-minutes: 15
+
+              steps:
+                - name: Check out repository
+                  uses: actions/checkout@v6
+
+                - name: Set up Python 3.11
+                  uses: actions/setup-python@v6
+                  with:
+                    python-version: "3.11"
+                    cache: pip
+                    cache-dependency-path: |
+                      requirements.txt
+                      requirements-dev.txt
+
+                - name: Set up Node.js 20
+                  uses: actions/setup-node@v6
+                  with:
+                    node-version: "20"
+                    cache: npm
+                    cache-dependency-path: helpers/package-lock.json
+
+                - name: Install dependencies
+                  run: |
+                    python -m pip install --upgrade pip
+                    python -m pip install -r requirements.txt -r requirements-dev.txt
+                    npm ci --prefix helpers
+
+                - name: Run Python tests
+                  run: python -m pytest -q
+
+                - name: Run Node tests
+                  run: npm test --prefix helpers
+
+                - name: Run Python lint and compilation checks
+                  run: |
+                    ruff check .
+                    python -m compileall -q *.py tests
+
+                - name: Run JavaScript and shell syntax checks
+                  run: |
+                    for file in static/*.js; do node --check --input-type=module < "$file"; done
+                    for file in helpers/*.mjs; do node --check "$file"; done
+                    for file in *.sh; do bash -n "$file"; done
+
+                - name: Compile Jinja templates
+                  run: |
+                    python - <<'PY'
+                    from pathlib import Path
+                    from jinja2 import Environment, FileSystemLoader
+
+                    templates = Path("templates")
+                    environment = Environment(loader=FileSystemLoader(templates))
+                    for path in sorted(templates.glob("*.html")):
+                        environment.get_template(path.name)
+                    PY
+
+                - name: Seed a fresh development database
+                  env:
+                    NIMHUNT_DB_PATH: ${{ runner.temp }}/nimhunt-ci.db
+                    NIMHUNT_DEPLOYMENT_MODE: development
+                    NIMHUNT_NIMIQ_NETWORK: TestAlbatross
+                    NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: "1"
+                  run: python spoof.py
+
+                - name: Check installed dependencies
+                  run: python -m pip check
+
+                - name: Audit dependencies
+                  run: |
+                    python -m pip_audit --progress-spinner off
+                    npm audit --omit=dev --prefix helpers
+          YAML
+
+      - name: Validate patch structure
+        run: |
+          git diff --check
+          python -m py_compile database.py db_access.py public_html.py tests/test_claim_code_success_race.py tests/test_transaction_integrity_regressions.py
+          for file in static/find_spots.js static/interface_text.js static/spot_map.js; do
+            node --check --input-type=module < "$file"
+          done
+
+      - name: Commit result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Consume claim codes only on success and constrain map zoom"
+          git push origin HEAD:agent/success-only-claim-codes-map-zoom

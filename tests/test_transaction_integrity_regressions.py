@@ -10,7 +10,6 @@ import db_access
 import public_html
 import trans_updater
 
-
 BASIC_FROM = "NQ88 MK32 JK09 4U4P 2QXU D4BY JHCU C0AB SKB4"
 BASIC_TO = "NQ54 FTGY F6VJ EJPU NSMN RA5Q 0K21 8EQT Q05P"
 TX_HASH = "cf41b77531dd7fc5b3ae0ba26d1f95bd8eff6ffe6df612dcf01a0f50ba7a2692"

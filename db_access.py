@@ -1900,7 +1900,7 @@ async def get_spot_ids_ready_for_creation_fee(
         f"""
         SELECT s.{schema.SPOT_ID} AS spot_id
         FROM {schema.SPOT_TABLE_NAME} s
-        WHERE s.{schema.SPOT_STATUS} = ?
+        WHERE s.{schema.SPOT_STATUS} IN (?, ?, ?)
           AND s.{schema.SPOT_CANCELLATION_STARTED_AT} IS NULL
           AND s.{schema.SPOT_CREATION_FEE} > 0
           AND (
@@ -1922,6 +1922,8 @@ async def get_spot_ids_ready_for_creation_fee(
         """,
         (
             const.SPOT_STATUS_DRAFT,
+            const.SPOT_STATUS_PUBLISHED,
+            const.SPOT_STATUS_COMPLETED,
             const.TRANS_TYPE_FILL_SPOT,
             const.TRANS_STATUS_CONFIRMED,
             const.TRANS_TYPE_CREATION_FEE,
@@ -1999,7 +2001,12 @@ async def can_publish_spot(db, *, spot_id: int) -> bool:
     confirmed_amount = await get_confirmed_spot_deposit_total(db, spot_id=spot_id)
     if confirmed_amount < spot_required_deposit_amount(spot):
         return False
-    return await has_confirmed_spot_creation_fee_transaction(db, spot_id=spot_id)
+
+    # The creator deposits the Spot value and the snapshotted creation fee in one
+    # combined payment. Once that complete deposit confirms, the draft is funded.
+    # The internal fee transfer is reconciled independently and must not make the
+    # creator wait to publish a fully funded Spot.
+    return True
 
 
 async def is_spot_claim_capacity_available(db, *, spot_id: int) -> bool:

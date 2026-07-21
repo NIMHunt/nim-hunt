@@ -307,18 +307,21 @@ class CreationFeeFundingTests(SpotCreationFeeFixture):
                         tx_hash="wrong-owner",
                     )
 
-    async def test_publish_waits_for_fee_confirmation(self):
+    async def test_publish_does_not_wait_for_internal_fee_confirmation(self):
         fee = const.LUNA_PER_NIM
         spot_id = await self.create_standard_spot(fee=fee)
         spot = await self.get_spot(spot_id)
         await self.create_deposit(spot_id, db_access.spot_required_deposit_amount(spot))
 
+        # The creator has already deposited both the Spot value and the
+        # snapshotted creation fee. Publishing must not wait for NimHunt's
+        # separate internal transfer to the shared fee address.
         async with schema.get_db() as db:
-            self.assertFalse(await db_access.can_publish_spot(db, spot_id=spot_id))
+            self.assertTrue(await db_access.can_publish_spot(db, spot_id=spot_id))
 
         fee_trans_id = await self.create_creation_fee_transaction(spot_id)
         async with schema.get_db() as db:
-            self.assertFalse(await db_access.can_publish_spot(db, spot_id=spot_id))
+            self.assertTrue(await db_access.can_publish_spot(db, spot_id=spot_id))
             await db_access.set_transaction_status_to_confirmed(
                 db,
                 trans_id=fee_trans_id,
@@ -715,7 +718,7 @@ class CreationFeePresentationTests(unittest.TestCase):
         self.assertFalse(summary["funding_complete"])
         self.assertFalse(summary["fee_paid"])
 
-    def test_deposit_summary_reports_processing_until_fee_confirms(self):
+    def test_deposit_summary_is_ready_while_fee_reconciles(self):
         total = 100 * const.LUNA_PER_NIM
         fee = const.LUNA_PER_NIM
         transactions = [
@@ -736,8 +739,8 @@ class CreationFeePresentationTests(unittest.TestCase):
             creation_fee_address=const.DEV_PLATFORM_FEE_ADDRESS,
             transactions=transactions,
         )
-        self.assertEqual(summary["status"], "processing")
-        self.assertEqual(summary["status_label"], "Creation Fee Processing")
+        self.assertEqual(summary["status"], "ready")
+        self.assertEqual(summary["status_label"], "Ready")
         self.assertTrue(summary["funding_complete"])
         self.assertFalse(summary["fee_paid"])
         self.assertEqual(summary["fee_status"], "pending")
@@ -760,7 +763,7 @@ class CreationFeePresentationTests(unittest.TestCase):
         self.assertEqual(summary["failed_deposit_amount"], amount)
         self.assertEqual(summary["remaining_amount"], 0)
 
-    def test_confirmed_fee_to_wrong_address_does_not_unlock_publishing_ui(self):
+    def test_wrong_internal_fee_destination_is_reported_without_blocking_publish(self):
         total = 100 * const.LUNA_PER_NIM
         fee = const.LUNA_PER_NIM
         deposit_address = "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF"
@@ -788,7 +791,10 @@ class CreationFeePresentationTests(unittest.TestCase):
         self.assertFalse(summary["fee_paid"])
         self.assertEqual(summary["matching_confirmed_fee_amount"], 0)
         self.assertEqual(summary["fee_status"], "verification_mismatch")
-        self.assertEqual(summary["status"], "processing")
+        # The combined creator deposit is still complete. The mismatched internal
+        # fee transfer remains visible for operational repair without falsely
+        # telling the creator that their deposit is incomplete.
+        self.assertEqual(summary["status"], "ready")
 
     def test_pending_deposit_is_counted_and_blocks_a_second_full_request(self):
         total = 100 * const.LUNA_PER_NIM

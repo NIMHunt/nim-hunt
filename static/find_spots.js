@@ -1,5 +1,5 @@
 import { init, requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=polish-live-v1-20260720';
+import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=transaction-integrity-v1-20260721';
 import {
     appendBulletLine,
     appendDetailDescription,
@@ -1000,8 +1000,15 @@ function populateClaimSummary(spot) {
     }
 
     const duration = durationText(spot.claim_duration);
+    const needsPassword = Boolean(status.requires_password || spot.use_password);
     if (duration) rows.push(claimSummaryLine(claimText.durationRequired ? claimText.durationRequired(duration) : `You must remain within the area for ${duration}.`));
-    if (status.requires_password || spot.use_password) rows.push(claimSummaryLine(claimText.passwordRequired || 'A password is required.'));
+    if (needsPassword) rows.push(claimSummaryLine(claimText.passwordRequired || 'A password is required.'));
+    if (needsPassword && duration) {
+        rows.push(claimSummaryLine(
+            claimText.codeUsedWhenVerificationStarts
+            || 'This one-time code is used when verification begins and is not restored if the duration check later fails.'
+        ));
+    }
 
     els.claimSummary.replaceChildren(...rows);
 }

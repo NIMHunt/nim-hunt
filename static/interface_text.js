@@ -78,6 +78,7 @@ function buildSpotDetailTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = 
             prizeValue: (amountText) => `Prize value: ${amountText}`,
             durationRequired: (duration) => `You must remain within the area for ${duration}.`,
             passwordRequired: 'A password is required.',
+            codeUsedWhenVerificationStarts: 'This one-time code is used when verification begins and is not restored if the duration check later fails.',
             passwordLabel: 'Password',
             passwordPlaceholder: 'Enter password',
             captchaLabel: 'Captcha',
@@ -283,6 +284,7 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
             claimCodes: ({ unused, total }) => `Claim codes: ${unused} unused / ${total} total`,
             claimCodesOnPublish: ({ total }) => `Claim codes will be created when published (${total} total)`,
             reports: ({ pending, total }) => `Reports: ${pending} pending / ${total} total`,
+            refundTransaction: ({ amountText, destination, status, shortHash }) => `Refund: ${amountText} sent to ${destination} (${status}${shortHash ? `, tx ${shortHash}` : ''})`,
         },
         sections: {
             active: {

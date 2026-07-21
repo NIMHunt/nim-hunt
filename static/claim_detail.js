@@ -1,5 +1,5 @@
 import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { makeClaimDetailText } from './interface_text.js?v=polish-live-v1-20260720';
+import { makeClaimDetailText } from './interface_text.js?v=transaction-integrity-v1-20260721';
 import {
     createNoticePresenter,
     getLanguage,
@@ -157,6 +157,9 @@ function claimPresentationSignature(claim) {
         claim?.display_status_class,
         Boolean(claim?.location_monitoring_required),
         Boolean(claim?.viewer_is_recipient),
+        Number(claim?.payout_pending_count || 0),
+        Number(claim?.payout_confirmed_count || 0),
+        Number(claim?.payout_failed_count || 0),
         Number(spot.success_claim_count || 0),
         Number(spot.pending_claim_count || 0),
     ]);
@@ -178,7 +181,7 @@ function applyClaimUpdate(claim, { forceRender = false } = {}) {
 }
 
 
-function createDurationTimerText(claim) {
+function createDurationTimerText(claim, statusKeyword) {
     const span = document.createElement('span');
     const required = Math.max(0, Number(claim.duration_required || 0));
     const claimedAt = Math.max(0, Number(claim.claimed_at || 0));
@@ -188,9 +191,12 @@ function createDurationTimerText(claim) {
         const elapsed = claimedAt > 0 ? Math.max(0, now - claimedAt) : Number(claim.duration_elapsed || 0);
         const cappedElapsed = Math.min(elapsed, required);
         const reachedGoal = required > 0 && cappedElapsed >= required;
-        span.textContent = reachedGoal
-            ? ' (Verifying)'
-            : ` (${formatSeconds(cappedElapsed)}/${formatSeconds(required)})`;
+        if (reachedGoal) {
+            statusKeyword.textContent = 'Verifying';
+            span.textContent = '';
+        } else {
+            span.textContent = ` (${formatSeconds(cappedElapsed)}/${formatSeconds(required)})`;
+        }
 
         if (reachedGoal && span._nhTimerId) {
             window.clearInterval(span._nhTimerId);
@@ -235,10 +241,13 @@ function buildStatusKeyword(claim, text = null) {
 
 function buildStatusWithTimer(claim) {
     const fragment = document.createDocumentFragment();
-    fragment.append(buildStatusKeyword(claim));
+    const statusKeyword = buildStatusKeyword(claim);
+    fragment.append(statusKeyword);
 
-    if (Number(claim.duration_required || 0) > 0) {
-        fragment.append(createDurationTimerText(claim));
+    const status = String(claim.status_label || '').toLowerCase();
+    const durationRemaining = Number(claim.duration_remaining || 0);
+    if (Number(claim.duration_required || 0) > 0 && status === 'pending' && durationRemaining > 0) {
+        fragment.append(createDurationTimerText(claim, statusKeyword));
     }
 
     return fragment;
@@ -465,11 +474,18 @@ function isExpectedClaimDetailError(err) {
 
 function claimNeedsLiveRefresh(claim) {
     if (!claim) return false;
-    if (String(claim.status_label || '').toLowerCase() === 'pending') {
-        if (Number(claim.duration_required || 0) > 0 && !durationGoalReached(claim)) return false;
+    const status = String(claim.status_label || '').toLowerCase();
+    if (status === 'pending') {
+        const durationRequired = Number(claim.duration_required || 0);
+        const serverRemaining = Number(claim.duration_remaining || 0);
+        // Trust the server when it has already reached the verification phase.
+        // A phone clock that is a few seconds slow must not stop status polling.
+        if (durationRequired > 0 && serverRemaining > 0 && !durationGoalReached(claim)) return false;
         return true;
     }
-    if (!claim.is_prizedraw) return false;
+    if (!claim.is_prizedraw) {
+        return status === 'success' && Number(claim.payout_confirmed_count || 0) <= 0;
+    }
     return ['waiting', 'pending', 'won_pending', 'won_retrying'].includes(
         String(claim.display_status_label || '').toLowerCase()
     );

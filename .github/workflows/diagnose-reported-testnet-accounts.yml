@@ -1,0 +1,20 @@
+name: Diagnose reported testnet accounts
+
+on:
+  push:
+    branches:
+      - agent/transaction-diagnostic-20260721
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Query TestAlbatross RPC
+        run: python .github/scripts/diagnose_reported_testnet_accounts.py

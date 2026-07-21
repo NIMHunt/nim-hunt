@@ -17,11 +17,11 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt -r requirements-dev.txt
       - name: Run Python tests
         id: tests
         continue-on-error: true
-        run: python -m unittest discover -s tests -v > pr40-python-tests.log 2>&1
+        run: python -m pytest -q > pr40-python-tests.log 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
         with:

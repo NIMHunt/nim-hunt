@@ -188,7 +188,7 @@ MAX_SPOT_CLAIM_DURATION_SECONDS = 12 * 60 * 60
 # SPOT.starts_at, not an absolute unix timestamp.
 MIN_SPOT_ENDS_AFTER_SECONDS = 60 * 60
 MAX_SPOT_ENDS_AFTER_SECONDS = 4 * 7 * 24 * 60 * 60
-DEFAULT_DRAFT_SPOT_ENDS_AFTER_SECONDS = 7 * 24 * 60 * 60
+DEFAULT_DRAFT_SPOT_ENDS_AFTER_SECONDS = 24 * 60 * 60
 
 # Per-user claim bounds. 0 means unlimited claims per user.
 MIN_SPOT_MAX_CLAIMS_PER_USER = 0
@@ -262,7 +262,7 @@ SPOT_CANCELLATION_FEE_ADDRESS = os.getenv(
 
 # Draft SPOT defaults used when a creator has only entered the initial title.
 # These keep the row valid while the full Create Spot form is still incomplete.
-DEFAULT_DRAFT_SPOT_RADIUS_METRES = MIN_SPOT_RADIUS_METRES
+DEFAULT_DRAFT_SPOT_RADIUS_METRES = 200
 DEFAULT_DRAFT_SPOT_CLAIM_DURATION_SECONDS = 0
 DEFAULT_DRAFT_SPOT_MAX_CLAIMS_PER_USER = 1
 DEFAULT_DRAFT_SPOT_MAX_TOTAL_CLAIMS = MIN_SPOT_MAX_TOTAL_CLAIMS
@@ -517,10 +517,3 @@ REPORT_REASON_VALUES = {
     REPORT_REASON_SCAM,
     REPORT_REASON_OTHER,
 }
-
-REPORT_DETAILS_MAX_CHARS = 300
-
-# Claim modal captcha bounds. Kept with other human-friction constants so the
-# frontend and backend can stay aligned if the challenge is tuned later.
-CLAIM_CAPTCHA_MIN = 1
-CLAIM_CAPTCHA_MAX = 9

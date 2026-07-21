@@ -5,10 +5,10 @@ import time
 import unittest
 from pathlib import Path
 
+import claim_code_policy
 import constants as const
 import database as schema
 import db_access
-import claim_code_policy
 
 CLAIM_CODE = "RACECODE01"
 

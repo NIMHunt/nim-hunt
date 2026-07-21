@@ -59,7 +59,7 @@ DB_PATH = os.getenv("NIMHUNT_DB_PATH", "records.db").strip() or "records.db"
 # instead of carrying schema migrations. Increment this whenever the schema
 # changes. Existing non-empty databases with another version are rejected
 # with a clear instruction to recreate them.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Durable chain and deployment identity prevents a TestAlbatross database from
 # being silently reinterpreted as MainAlbatross, and prevents a local/mock
@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS {APP_METADATA_TABLE_NAME} (
 # Prizedraw
 # Claim
 # Claim-Code
+# Claim-Code-Attempt
 # Transaction
 # Report
 # Views
@@ -811,6 +812,99 @@ BEGIN
             ) IS NOT NEW.{CLAIM_CODE_SPOT_ID}
             THEN RAISE(ABORT, 'claim_code.used_by must reference a claim from the same spot')
         END;
+END;
+"""
+
+
+# CLAIM_CODE_ATTEMPT #
+# A CLAIM_CODE_ATTEMPT records the code a pending claim is trying to use.
+#
+# The relationship is intentionally non-exclusive on claim_code_id: several
+# pending duration claims may race using the same code. A claim can reference
+# only one code, and CLAIM_CODE.used_by is set only by the successful winner.
+CLAIM_CODE_ATTEMPT_TABLE_NAME = "claim_code_attempt"
+
+CLAIM_CODE_ATTEMPT_CLAIM_ID = "claim_id"
+CLAIM_CODE_ATTEMPT_CODE_ID = "claim_code_id"
+CLAIM_CODE_ATTEMPT_CREATED_AT = "created_at"
+
+CREATE_CLAIM_CODE_ATTEMPT_TABLE = f"""
+CREATE TABLE IF NOT EXISTS {CLAIM_CODE_ATTEMPT_TABLE_NAME} (
+    {CLAIM_CODE_ATTEMPT_CLAIM_ID} INTEGER PRIMARY KEY,
+    {CLAIM_CODE_ATTEMPT_CODE_ID} INTEGER NOT NULL,
+    {CLAIM_CODE_ATTEMPT_CREATED_AT} INTEGER NOT NULL
+        DEFAULT (unixepoch()),
+
+    CHECK ({CLAIM_CODE_ATTEMPT_CREATED_AT} > 0),
+
+    FOREIGN KEY ({CLAIM_CODE_ATTEMPT_CLAIM_ID})
+        REFERENCES {CLAIM_TABLE_NAME}({CLAIM_ID})
+        ON DELETE CASCADE,
+
+    FOREIGN KEY ({CLAIM_CODE_ATTEMPT_CODE_ID})
+        REFERENCES {CLAIM_CODE_TABLE_NAME}({CLAIM_CODE_ID})
+        ON DELETE CASCADE
+);
+"""
+
+
+# Finds all pending contenders for a particular code.
+# This is deliberately not unique: sharing a code is permitted until success.
+CLAIM_CODE_ATTEMPT_INDEX_CODE = "idx_claim_code_attempt_code"
+CLAIM_CODE_ATTEMPT_INDEX_CODE_QUERY = f"""
+CREATE INDEX IF NOT EXISTS {CLAIM_CODE_ATTEMPT_INDEX_CODE}
+ON {CLAIM_CODE_ATTEMPT_TABLE_NAME}({CLAIM_CODE_ATTEMPT_CODE_ID});
+"""
+
+
+# A claim and its candidate code must belong to the same Spot.
+CLAIM_CODE_ATTEMPT_TRIGGER_MATCH_SPOT = "trg_claim_code_attempt_match_spot"
+CLAIM_CODE_ATTEMPT_TRIGGER_MATCH_SPOT_QUERY = f"""
+CREATE TRIGGER IF NOT EXISTS {CLAIM_CODE_ATTEMPT_TRIGGER_MATCH_SPOT}
+BEFORE INSERT ON {CLAIM_CODE_ATTEMPT_TABLE_NAME}
+FOR EACH ROW
+WHEN (
+    SELECT c.{CLAIM_SPOT_ID}
+    FROM {CLAIM_TABLE_NAME} c
+    WHERE c.{CLAIM_ID} = NEW.{CLAIM_CODE_ATTEMPT_CLAIM_ID}
+) IS NOT (
+    SELECT cc.{CLAIM_CODE_SPOT_ID}
+    FROM {CLAIM_CODE_TABLE_NAME} cc
+    WHERE cc.{CLAIM_CODE_ID} = NEW.{CLAIM_CODE_ATTEMPT_CODE_ID}
+)
+BEGIN
+    SELECT RAISE(ABORT, 'claim_code_attempt must join a claim and code from the same spot');
+END;
+"""
+
+
+# Only a pending claim may retain a candidate-code association.
+CLAIM_CODE_ATTEMPT_TRIGGER_PENDING = "trg_claim_code_attempt_pending"
+CLAIM_CODE_ATTEMPT_TRIGGER_PENDING_QUERY = f"""
+CREATE TRIGGER IF NOT EXISTS {CLAIM_CODE_ATTEMPT_TRIGGER_PENDING}
+BEFORE INSERT ON {CLAIM_CODE_ATTEMPT_TABLE_NAME}
+FOR EACH ROW
+WHEN (
+    SELECT c.{CLAIM_STATUS}
+    FROM {CLAIM_TABLE_NAME} c
+    WHERE c.{CLAIM_ID} = NEW.{CLAIM_CODE_ATTEMPT_CLAIM_ID}
+) IS NOT {CLAIM_STATUS_PENDING}
+BEGIN
+    SELECT RAISE(ABORT, 'claim_code_attempt requires a pending claim');
+END;
+"""
+
+
+# A terminal claim no longer needs a pending candidate-code association.
+CLAIM_CODE_ATTEMPT_TRIGGER_CLEANUP = "trg_claim_code_attempt_cleanup"
+CLAIM_CODE_ATTEMPT_TRIGGER_CLEANUP_QUERY = f"""
+CREATE TRIGGER IF NOT EXISTS {CLAIM_CODE_ATTEMPT_TRIGGER_CLEANUP}
+AFTER UPDATE OF {CLAIM_STATUS} ON {CLAIM_TABLE_NAME}
+FOR EACH ROW
+WHEN NEW.{CLAIM_STATUS} IN ({CLAIM_STATUS_SUCCESS}, {CLAIM_STATUS_FAILED})
+BEGIN
+    DELETE FROM {CLAIM_CODE_ATTEMPT_TABLE_NAME}
+    WHERE {CLAIM_CODE_ATTEMPT_CLAIM_ID} = NEW.{CLAIM_ID};
 END;
 """
 
@@ -1609,6 +1703,12 @@ async def init_db():
         await db.executescript(CLAIM_CODE_INDEX_USED_BY_UNIQUE_QUERY)
         await db.executescript(CLAIM_CODE_TRIGGER_MATCH_SPOT_INSERT_QUERY)
         await db.executescript(CLAIM_CODE_TRIGGER_MATCH_SPOT_UPDATE_QUERY)
+
+        await db.executescript(CREATE_CLAIM_CODE_ATTEMPT_TABLE)
+        await db.executescript(CLAIM_CODE_ATTEMPT_INDEX_CODE_QUERY)
+        await db.executescript(CLAIM_CODE_ATTEMPT_TRIGGER_MATCH_SPOT_QUERY)
+        await db.executescript(CLAIM_CODE_ATTEMPT_TRIGGER_PENDING_QUERY)
+        await db.executescript(CLAIM_CODE_ATTEMPT_TRIGGER_CLEANUP_QUERY)
 
         await db.executescript(CREATE_TRANS_TABLE)
         await db.executescript(TRANS_INDEX_USER_CREATED_QUERY)

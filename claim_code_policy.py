@@ -16,144 +16,21 @@ import database as schema
 import db_access
 
 RowDict = dict[str, Any]
-ClaimCreator = Callable[..., Awaitable[RowDict]]
 ClaimPromoter = Callable[..., Awaitable[RowDict | None]]
 
-_ATTEMPT_TABLE = "claim_code_attempt"
-_ATTEMPT_CLAIM_ID = "claim_id"
-_ATTEMPT_CODE_ID = "claim_code_id"
-_ATTEMPT_CREATED_AT = "created_at"
-_ATTEMPT_CODE_INDEX = "idx_claim_code_attempt_code"
-_ATTEMPT_MATCH_TRIGGER = "trg_claim_code_attempt_match_spot"
-_ATTEMPT_CLEANUP_TRIGGER = "trg_claim_code_attempt_cleanup"
-
-_ORIGINAL_CREATE_CLAIM_ATTEMPT: ClaimCreator = db_access.create_claim_attempt
 _ORIGINAL_PROMOTE_CLAIM: ClaimPromoter = (
     db_access.promote_pending_claim_to_success_if_capacity_available
 )
 _INSTALLED = False
 
 
-async def _ensure_attempt_table(db) -> None:
-    """Create the additive policy table and migrate old pending code claims.
-
-    Earlier NimHunt versions wrote CLAIM_CODE.used_by as soon as a duration claim
-    began. The INSERT/UPDATE pair below converts any such still-pending claim into
-    the new non-exclusive association and releases the code for a fair race.
-    Successful historical claims keep their used_by link unchanged.
-    """
-    await db.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {_ATTEMPT_TABLE} (
-            {_ATTEMPT_CLAIM_ID} INTEGER PRIMARY KEY,
-            {_ATTEMPT_CODE_ID} INTEGER NOT NULL,
-            {_ATTEMPT_CREATED_AT} INTEGER NOT NULL DEFAULT (unixepoch()),
-
-            CHECK ({_ATTEMPT_CREATED_AT} > 0),
-
-            FOREIGN KEY ({_ATTEMPT_CLAIM_ID})
-                REFERENCES {schema.CLAIM_TABLE_NAME}({schema.CLAIM_ID})
-                ON DELETE CASCADE,
-
-            FOREIGN KEY ({_ATTEMPT_CODE_ID})
-                REFERENCES {schema.CLAIM_CODE_TABLE_NAME}({schema.CLAIM_CODE_ID})
-                ON DELETE CASCADE
-        );
-        """
-    )
-    await db.execute(
-        f"""
-        CREATE INDEX IF NOT EXISTS {_ATTEMPT_CODE_INDEX}
-        ON {_ATTEMPT_TABLE}({_ATTEMPT_CODE_ID});
-        """
-    )
-    await db.execute(
-        f"""
-        CREATE TRIGGER IF NOT EXISTS {_ATTEMPT_MATCH_TRIGGER}
-        BEFORE INSERT ON {_ATTEMPT_TABLE}
-        FOR EACH ROW
-        WHEN (
-            SELECT c.{schema.CLAIM_SPOT_ID}
-            FROM {schema.CLAIM_TABLE_NAME} c
-            WHERE c.{schema.CLAIM_ID} = NEW.{_ATTEMPT_CLAIM_ID}
-        ) IS NOT (
-            SELECT cc.{schema.CLAIM_CODE_SPOT_ID}
-            FROM {schema.CLAIM_CODE_TABLE_NAME} cc
-            WHERE cc.{schema.CLAIM_CODE_ID} = NEW.{_ATTEMPT_CODE_ID}
-        )
-        BEGIN
-            SELECT RAISE(
-                ABORT,
-                'claim_code_attempt must join a claim and code from the same spot'
-            );
-        END;
-        """
-    )
-    await db.execute(
-        f"""
-        CREATE TRIGGER IF NOT EXISTS {_ATTEMPT_CLEANUP_TRIGGER}
-        AFTER UPDATE OF {schema.CLAIM_STATUS} ON {schema.CLAIM_TABLE_NAME}
-        FOR EACH ROW
-        WHEN NEW.{schema.CLAIM_STATUS} IN (
-            {const.CLAIM_STATUS_SUCCESS},
-            {const.CLAIM_STATUS_FAILED}
-        )
-        BEGIN
-            DELETE FROM {_ATTEMPT_TABLE}
-            WHERE {_ATTEMPT_CLAIM_ID} = NEW.{schema.CLAIM_ID};
-        END;
-        """
-    )
-
-    # Convert still-pending claims created by the previous immediate-consumption
-    # policy. Multiple future attempts may then reference the same released code.
-    await db.execute(
-        f"""
-        INSERT OR IGNORE INTO {_ATTEMPT_TABLE} (
-            {_ATTEMPT_CLAIM_ID},
-            {_ATTEMPT_CODE_ID}
-        )
-        SELECT
-            c.{schema.CLAIM_ID},
-            cc.{schema.CLAIM_CODE_ID}
-        FROM {schema.CLAIM_TABLE_NAME} c
-        JOIN {schema.CLAIM_CODE_TABLE_NAME} cc
-            ON cc.{schema.CLAIM_CODE_USED_BY} = c.{schema.CLAIM_ID}
-        WHERE c.{schema.CLAIM_STATUS} = ?;
-        """,
-        (const.CLAIM_STATUS_PENDING,),
-    )
-    await db.execute(
-        f"""
-        UPDATE {schema.CLAIM_CODE_TABLE_NAME}
-        SET {schema.CLAIM_CODE_USED_BY} = NULL
-        WHERE {schema.CLAIM_CODE_USED_BY} IN (
-            SELECT c.{schema.CLAIM_ID}
-            FROM {schema.CLAIM_TABLE_NAME} c
-            WHERE c.{schema.CLAIM_STATUS} = ?
-        );
-        """,
-        (const.CLAIM_STATUS_PENDING,),
-    )
-    await db.execute(
-        f"""
-        DELETE FROM {_ATTEMPT_TABLE}
-        WHERE {_ATTEMPT_CLAIM_ID} IN (
-            SELECT c.{schema.CLAIM_ID}
-            FROM {schema.CLAIM_TABLE_NAME} c
-            WHERE c.{schema.CLAIM_STATUS} != ?
-        );
-        """,
-        (const.CLAIM_STATUS_PENDING,),
-    )
-
 
 async def _create_attempt(db, *, claim_id: int, claim_code_id: int) -> None:
     await db.execute(
         f"""
-        INSERT INTO {_ATTEMPT_TABLE} (
-            {_ATTEMPT_CLAIM_ID},
-            {_ATTEMPT_CODE_ID}
+        INSERT INTO {schema.CLAIM_CODE_ATTEMPT_TABLE_NAME} (
+            {schema.CLAIM_CODE_ATTEMPT_CLAIM_ID},
+            {schema.CLAIM_CODE_ATTEMPT_CODE_ID}
         )
         VALUES (?, ?);
         """,
@@ -165,16 +42,16 @@ async def _attempt_for_claim(db, *, claim_id: int) -> RowDict | None:
     cur = await db.execute(
         f"""
         SELECT
-            a.{_ATTEMPT_CLAIM_ID},
-            a.{_ATTEMPT_CODE_ID},
-            a.{_ATTEMPT_CREATED_AT},
+            a.{schema.CLAIM_CODE_ATTEMPT_CLAIM_ID},
+            a.{schema.CLAIM_CODE_ATTEMPT_CODE_ID},
+            a.{schema.CLAIM_CODE_ATTEMPT_CREATED_AT},
             cc.{schema.CLAIM_CODE_SPOT_ID},
             cc.{schema.CLAIM_CODE_CODE},
             cc.{schema.CLAIM_CODE_USED_BY}
-        FROM {_ATTEMPT_TABLE} a
+        FROM {schema.CLAIM_CODE_ATTEMPT_TABLE_NAME} a
         JOIN {schema.CLAIM_CODE_TABLE_NAME} cc
-            ON cc.{schema.CLAIM_CODE_ID} = a.{_ATTEMPT_CODE_ID}
-        WHERE a.{_ATTEMPT_CLAIM_ID} = ?;
+            ON cc.{schema.CLAIM_CODE_ID} = a.{schema.CLAIM_CODE_ATTEMPT_CODE_ID}
+        WHERE a.{schema.CLAIM_CODE_ATTEMPT_CLAIM_ID} = ?;
         """,
         (int(claim_id),),
     )
@@ -216,8 +93,6 @@ async def promote_pending_claim_to_success_if_code_available(
     claim_id: int,
 ) -> RowDict | None:
     """Consume a candidate code and promote the claim in one DB transaction."""
-    await _ensure_attempt_table(db)
-
     claim = await db_access.get_claim(db, claim_id=int(claim_id))
     if claim is None:
         return None
@@ -243,7 +118,7 @@ async def promote_pending_claim_to_success_if_code_available(
                 reason="claim_code_attempt_missing",
             )
 
-        code_id = int(attempt[_ATTEMPT_CODE_ID])
+        code_id = int(attempt[schema.CLAIM_CODE_ATTEMPT_CODE_ID])
         cur = await db.execute(
             f"""
             UPDATE {schema.CLAIM_CODE_TABLE_NAME}
@@ -299,8 +174,6 @@ async def create_claim_attempt_success_only(
     payout_address: str | None = None,
 ) -> RowDict:
     """Create a claim while keeping its code available until final success."""
-    await _ensure_attempt_table(db)
-
     spot = await db_access.get_spot(db, spot_id=spot_id)
     if spot is None:
         raise ValueError("This spot could not be found.")

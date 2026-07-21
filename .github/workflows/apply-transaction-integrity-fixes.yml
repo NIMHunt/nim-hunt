@@ -1,0 +1,34 @@
+name: Apply transaction integrity fixes
+
+on:
+  push:
+    branches:
+      - agent/transaction-integrity-status-fixes
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/transaction-integrity-status-fixes
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply checked source transformations
+        run: python .github/scripts/apply_transaction_integrity_fixes.py
+      - name: Validate patch
+        run: |
+          git diff --check
+          python -m py_compile public_html.py db_access.py trans_updater.py tests/test_transaction_integrity_regressions.py
+      - name: Commit result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix transaction integrity and claim status handling"
+          git push origin HEAD:agent/transaction-integrity-status-fixes

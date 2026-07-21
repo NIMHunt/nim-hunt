@@ -54,6 +54,7 @@ jobs:
         run: |
           rm .github/scripts/apply_success_code_map_zoom.py
           rm .github/workflows/apply-success-code-map-zoom.yml
+          rm -f .github/PATCH_TRIGGER
 
       - name: Validate patch structure
         run: |

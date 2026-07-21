@@ -1,0 +1,32 @@
+name: Diagnose PR 40 Ruff
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install Ruff
+        run: pip install -r requirements-dev.txt
+      - name: Run Ruff
+        id: ruff
+        continue-on-error: true
+        run: ruff check . > pr40-ruff.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr40-ruff
+          path: pr40-ruff.log
+      - name: Fail when Ruff failed
+        if: steps.ruff.outcome == 'failure'
+        run: exit 1

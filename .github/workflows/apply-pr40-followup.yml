@@ -1,0 +1,34 @@
+name: Apply PR 40 follow-up
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/transaction-integrity-status-fixes
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Apply follow-up
+        run: python .github/scripts/apply_pr40_followup.py
+      - name: Validate patch
+        run: |
+          git diff --check
+          python -m py_compile public_html.py tests/test_spot_creation_fees.py tests/test_transaction_integrity_regressions.py
+      - name: Commit result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Align fee tests and harden claim polling"
+          git push origin HEAD:agent/transaction-integrity-status-fixes

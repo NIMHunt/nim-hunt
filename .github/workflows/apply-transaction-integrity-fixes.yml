@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/transaction-integrity-status-fixes
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write

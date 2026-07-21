@@ -403,6 +403,12 @@ def _verify_chain_details_for_record(trans: RowDict, status: ChainTransactionSta
     for server-initiated claim/refund/fee sends.
     """
     raw = status.raw
+    if _execution_result_is_failure(raw):
+        return VerifiedChainDetails(
+            ok=False,
+            reason="confirmed transaction explicitly reported a failed execution result",
+        )
+
     chain_from = _extract_chain_from_address(raw)
     chain_to = _extract_chain_to_address(raw)
     chain_amount = _extract_chain_amount(raw)
@@ -668,8 +674,14 @@ def _unwrap_rpc_result(result: Any) -> tuple[Any, Any | None]:
 
 
 def _execution_result_is_failure(value: Any) -> bool:
-    """Return True when the returned transaction explicitly failed execution."""
-    return isinstance(value, dict) and value.get("executionResult") is False
+    """Return True when any RPC layer explicitly reports failed execution."""
+    for path, item in _walk_json(value):
+        if not path:
+            continue
+        key = path[-1].replace("_", "").lower()
+        if key == "executionresult" and item is False:
+            return True
+    return False
 
 
 def _is_not_found_error(error: Any) -> bool:
@@ -1423,6 +1435,14 @@ async def check_pending_transaction(
             )
         matched = _find_transaction_by_hash(history, tx_hash)
         if matched is not None:
+            if _execution_result_is_failure(matched):
+                return ChainTransactionStatus(
+                    status="failed",
+                    tx_hash=tx_hash,
+                    block_number=_extract_block_number(matched),
+                    raw=matched,
+                    reason="deposit hash was found in address history with a failed execution result",
+                )
             return ChainTransactionStatus(
                 status="confirmed",
                 tx_hash=tx_hash,
@@ -2049,7 +2069,7 @@ async def submit_spot_creation_fee_transaction(
     *,
     spot_id: int,
 ) -> RowDict:
-    """Send one fully funded draft's snapshotted creation fee.
+    """Send one fully funded Spot's snapshotted creation fee.
 
     The function is intentionally idempotent. A pending or confirmed fee leg
     causes an immediate no-op; a definitively failed leg may be retried. The
@@ -2059,8 +2079,13 @@ async def submit_spot_creation_fee_transaction(
     if spot is None:
         raise ValueError(f"spot id={spot_id} does not exist")
     spot_status_value = spot.get(schema.SPOT_STATUS)
-    if spot_status_value is None or int(spot_status_value) != const.SPOT_STATUS_DRAFT:
-        raise ValueError("creation fees can only be submitted for draft spots")
+    allowed_statuses = {
+        const.SPOT_STATUS_DRAFT,
+        const.SPOT_STATUS_PUBLISHED,
+        const.SPOT_STATUS_COMPLETED,
+    }
+    if spot_status_value is None or int(spot_status_value) not in allowed_statuses:
+        raise ValueError("creation fees can only be submitted for funded, non-cancelled spots")
     if spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None:
         return {
             "ok": True,
@@ -2162,7 +2187,7 @@ async def submit_ready_spot_creation_fees(
     *,
     limit: int = 50,
 ) -> RowDict:
-    """Submit missing creation fees for fully funded drafts.
+    """Submit missing creation fees for fully funded Spots.
 
     This recovery pass runs even when no funding transaction was confirmed in
     the current process. It therefore covers restarts after a deposit confirmed

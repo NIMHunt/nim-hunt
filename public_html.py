@@ -41,7 +41,7 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(const.TEMPLATES_DIR))
 logger = logging.getLogger(__name__)
 
-_ASSET_VERSION = "blockchain-flow-v1-20260720"
+_ASSET_VERSION = "transaction-integrity-v1-20260721"
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ALLOWED_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$")
@@ -638,8 +638,9 @@ def _deposit_summary(
     """Summarise creator deposits and the one-time creation-fee leg.
 
     Deposits may arrive in parts. The server requests only the still-unsubmitted
-    portion of ``Spot value + creation fee`` and does not consider the draft
-    publishable until the creation-fee transaction itself confirms.
+    portion of ``Spot value + creation fee``. Once that combined creator deposit
+    confirms, the draft is publishable; the internal fee transfer is reported and
+    reconciled separately.
     """
     fill_transactions = [
         trans
@@ -736,9 +737,6 @@ def _deposit_summary(
     elif not funding_complete:
         status_value = "partial"
         status_label = "Partial Deposit"
-    elif not fee_paid:
-        status_value = "processing"
-        status_label = "Creation Fee Processing"
     else:
         status_value = "ready"
         status_label = "Ready"
@@ -807,6 +805,30 @@ def _cancellation_summary(transactions: list[dict[str, Any]]) -> dict[str, Any]:
     fee_amount = min(configured_fee, remaining_amount)
     refund_amount = max(0, remaining_amount - fee_amount)
     remaining_lost = remaining_amount > 0 and refund_amount <= 0
+
+    refund_transactions = [
+        trans
+        for trans in transactions
+        if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CANCEL_SPOT
+    ]
+    refund_transactions.sort(
+        key=lambda trans: (
+            int(trans.get(schema.TRANS_CREATED_AT) or 0),
+            int(trans.get(schema.TRANS_ID) or 0),
+        ),
+        reverse=True,
+    )
+    latest_refund = refund_transactions[0] if refund_transactions else None
+    refund_transaction = None
+    if latest_refund is not None:
+        refund_transaction = {
+            "status": _transaction_status_label(latest_refund.get(schema.TRANS_STATUS)),
+            "amount": int(latest_refund.get(schema.TRANS_AMOUNT) or 0),
+            "to_address": latest_refund.get(schema.TRANS_TO_ADDRESS),
+            "tx_hash": latest_refund.get(schema.TRANS_TX_HASH),
+            "block_number": latest_refund.get(schema.TRANS_BLOCK_NUMBER),
+        }
+
     return {
         "confirmed_deposit_amount": confirmed_deposit_amount,
         "failed_deposit_count": len(failed_deposits),
@@ -824,6 +846,7 @@ def _cancellation_summary(transactions: list[dict[str, Any]]) -> dict[str, Any]:
         "fee_amount": fee_amount,
         "refund_amount": refund_amount,
         "remaining_lost": remaining_lost,
+        "refund_transaction": refund_transaction,
         "fee_address": getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", ""),
     }
 
@@ -888,15 +911,11 @@ def _serialise_owner_spot(
     )
     minimum_payout_ok = total_value >= minimum_payout * payout_divisor
     fully_funded = bool(deposit.get("funding_complete"))
-    creation_fee_paid = bool(deposit.get("fee_paid"))
-    ready_to_publish = fully_funded and creation_fee_paid
+    ready_to_publish = fully_funded
 
     publish_block_reason = None
     publish_block_message = None
-    if fully_funded and not creation_fee_paid:
-        publish_block_reason = "creation_fee_processing"
-        publish_block_message = "The creation fee must confirm before publishing."
-    elif ready_to_publish and draft_end_time_elapsed:
+    if ready_to_publish and draft_end_time_elapsed:
         publish_block_reason = "end_time_elapsed"
         publish_block_message = "The configured end time has already elapsed."
     elif ready_to_publish and not minimum_payout_ok:
@@ -1407,13 +1426,22 @@ def _claim_display_status(
     is_prizedraw: bool,
     status_label: str,
     payout: dict[str, Any],
+    duration_remaining: int = 0,
 ) -> dict[str, str]:
     """Return the user-facing claim status text and colour class."""
     if not is_prizedraw:
-        if status_label == "success":
-            return {"label": "success", "text": "Success", "class": "success"}
         if status_label == "failed":
             return {"label": "failed", "text": "Failed", "class": "failed"}
+        if status_label == "success":
+            if int(payout.get("payout_confirmed_count") or 0) > 0:
+                return {"label": "success", "text": "Success", "class": "success"}
+            return {
+                "label": "success_processing",
+                "text": "Success (Processing)",
+                "class": "success",
+            }
+        if int(spot.get(schema.SPOT_CLAIM_DURATION) or 0) > 0 and int(duration_remaining) <= 0:
+            return {"label": "verifying", "text": "Verifying", "class": "pending"}
         return {"label": "pending", "text": "Pending", "class": "pending"}
 
     draw_settled = int(spot.get(schema.SPOT_STATUS) or -1) == const.SPOT_STATUS_COMPLETED
@@ -1464,6 +1492,7 @@ def _serialise_claim_detail(
         is_prizedraw=is_prizedraw,
         status_label=status_label,
         payout=payout,
+        duration_remaining=remaining,
     )
     link = spot.get(schema.SPOT_LINK)
     spot_id = int(spot[schema.SPOT_ID])

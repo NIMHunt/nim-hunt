@@ -19,7 +19,7 @@ import {
 } from './spot_ui.js?v=polish-live-v1-20260720';
 import { createReusableSpotMap } from './spot_map.js';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
-import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=polish-live-v1-20260720';
+import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=transaction-integrity-v1-20260721';
 import {
     createNoticePresenter,
     getLanguage,
@@ -758,6 +758,21 @@ function buildMySpotDetail(spot) {
 
     appendBulletLine(lines, TEXT.spotDetail.claimRadius(Number(spot.radius || 0)));
 
+    const refundTransaction = spot.cancellation?.refund_transaction;
+    if (refundTransaction?.to_address) {
+        const txHash = String(refundTransaction.tx_hash || '').trim();
+        const shortHash = txHash ? `${txHash.slice(0, 12)}…` : '';
+        const refundLine = document.createElement('span');
+        refundLine.textContent = TEXT.spotDetail.refundTransaction({
+            amountText: nimFromLunaText(refundTransaction.amount || 0),
+            destination: refundTransaction.to_address,
+            status: refundTransaction.status || 'unknown',
+            shortHash,
+        });
+        if (txHash) refundLine.title = txHash;
+        appendBulletLine(lines, refundLine);
+    }
+
     const maxClaimsPerUser = Number(spot.max_claims_per_user ?? 1);
     if (maxClaimsPerUser !== 1) {
         appendBulletLine(lines, TEXT.spotDetail.claimsPerUser(maxClaimsPerUser));
@@ -1216,6 +1231,8 @@ async function confirmPublishSpot() {
     } catch (err) {
         console.error(err);
         state.publishInProgress = false;
+        els.publishBackdrop.hidden = true;
+        state.publishSpot = null;
         els.publishConfirm.disabled = false;
         els.publishCancel.disabled = false;
         els.publishConfirm.textContent = TEXT.publish.confirm;

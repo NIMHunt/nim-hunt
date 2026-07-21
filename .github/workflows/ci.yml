@@ -45,7 +45,14 @@ jobs:
           npm ci --prefix helpers
 
       - name: Run Python tests
-        run: python -m pytest -q
+        run: python -m pytest -q 2>&1 | tee pytest.log
+
+      - name: Upload Python test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-log
+          path: pytest.log
 
       - name: Run Node tests
         run: npm test --prefix helpers

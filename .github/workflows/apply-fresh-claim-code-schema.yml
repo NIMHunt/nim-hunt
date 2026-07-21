@@ -1,0 +1,43 @@
+name: Apply fresh claim-code schema
+
+on:
+  push:
+    branches:
+      - agent/fresh-claim-code-schema
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/fresh-claim-code-schema
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Apply checked source transformations
+        run: python .github/scripts/apply_fresh_claim_code_schema.py
+
+      - name: Remove temporary patch machinery
+        run: |
+          rm .github/scripts/apply_fresh_claim_code_schema.py
+          rm .github/workflows/apply-fresh-claim-code-schema.yml
+
+      - name: Validate transformed source
+        run: |
+          git diff --check
+          python -m py_compile database.py claim_code_policy.py tests/test_claim_code_success_policy.py
+
+      - name: Commit result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Define claim-code attempts in the fresh schema"
+          git push origin HEAD:agent/fresh-claim-code-schema

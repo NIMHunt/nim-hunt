@@ -36,7 +36,7 @@
     data-min-prizedraw-prize-payout-nim="{{ min_prizedraw_prize_payout_nim | default(1000) }}"
     data-min-ends-after="{{ min_ends_after_seconds | default(3600) }}"
     data-max-ends-after="{{ max_ends_after_seconds | default(2419200) }}"
-    data-default-ends-after="{{ default_ends_after_seconds | default(604800) }}"
+    data-default-ends-after="{{ default_ends_after_seconds | default(86400) }}"
     data-prizedraw-prize-count-options="{{ prizedraw_prize_count_options | default('1,2,3,4,5,6,7,8,9,10,11,12,15,20,25,50,100') }}"
 >
     <div id="notice-backdrop" class="notice-backdrop" hidden>
@@ -98,7 +98,7 @@
                     <label class="create-spot-field-label create-spot-radius-label" for="spot-radius-input" data-i18n="createSpot.radius">Radius</label>
                     <div class="create-spot-slider-control create-spot-radius-control">
                         <div class="create-spot-range-wrap">
-                            <span id="spot-radius-value" class="create-spot-range-bubble">25 m</span>
+                            <span id="spot-radius-value" class="create-spot-range-bubble">200 m</span>
                             <input id="spot-radius-input" class="create-spot-range-input" type="range" min="0" max="1" step="1">
                         </div>
                     </div>
@@ -173,7 +173,7 @@
                     <label for="spot-ends-input" data-i18n="createSpot.endsAfter">Ends After</label>
                     <div class="create-spot-slider-control">
                         <div class="create-spot-range-wrap">
-                            <span id="spot-ends-value" class="create-spot-range-bubble">1 Week</span>
+                            <span id="spot-ends-value" class="create-spot-range-bubble">1 Day</span>
                             <input id="spot-ends-input" class="create-spot-range-input" type="range" min="0" max="1" step="1">
                         </div>
                     </div>
@@ -200,6 +200,7 @@
         </section>
     </main>
 
+    <script type="module" src="/static/page_lifecycle.js?v=history-card-v1-20260721"></script>
     <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
     <script src="{{ leaflet_js_url }}"></script>
     <script type="module" src="/static/create_spot.js?v=claim-live-v1-20260719-{{ asset_version | default('owner-actions-deposit-publish-v1-20260628') }}"></script>

@@ -3,6 +3,7 @@
 import sys
 
 from cancellation_safety import install as install_cancellation_safety
+from claim_code_policy import install as install_claim_code_policy
 from funding_fee_worker import install as install_fee_worker
 from funding_monitor import funding_flow_diagnostics
 from funding_monitor import install as install_monitor
@@ -16,6 +17,7 @@ def install() -> None:
     global _INSTALLED
     if _INSTALLED or "pytest" in sys.modules:
         return
+    install_claim_code_policy()
     install_cancellation_safety()
     install_status()
     install_fee_worker()

@@ -89,7 +89,7 @@ class ClaimCodeSuccessRaceTest(unittest.IsolatedAsyncioTestCase):
     async def _attempt_count(self) -> int:
         async with schema.get_db() as db:
             cur = await db.execute(
-                "SELECT COUNT(*) AS n FROM claim_code_attempt;"
+                f"SELECT COUNT(*) AS n FROM {schema.CLAIM_CODE_ATTEMPT_TABLE_NAME};"
             )
             row = await cur.fetchone()
             return int(row["n"])
@@ -167,39 +167,24 @@ class ClaimCodeSuccessRaceTest(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(code[schema.CLAIM_CODE_USED_BY])
         self.assertEqual(await self._attempt_count(), 0)
 
-    async def test_old_pending_claim_is_converted_and_its_code_released(self):
-        async with schema.get_db() as db:
-            async with db_access.transaction(db):
-                claim_id = await db_access.create_claim(
-                    db,
-                    spot_id=self.spot_id,
-                    user_id=self.first_user_id,
-                    lat=51.5,
-                    long=-0.1,
-                    accuracy=1.0,
-                    payout_address=None,
-                )
-                await db_access.claim_code_for_claim(
-                    db,
-                    spot_id=self.spot_id,
-                    claim_code=CLAIM_CODE,
-                    claim_id=claim_id,
-                )
-                await claim_code_policy._ensure_attempt_table(db)
 
+    async def test_attempt_table_is_created_by_the_fresh_schema(self):
         async with schema.get_db() as db:
-            code = await db_access.get_claim_code_by_code(
-                db,
-                spot_id=self.spot_id,
-                claim_code=CLAIM_CODE,
-            )
-            self.assertIsNone(code[schema.CLAIM_CODE_USED_BY])
             cur = await db.execute(
-                "SELECT claim_code_id FROM claim_code_attempt WHERE claim_id = ?;",
-                (claim_id,),
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table' AND name = ?;
+                """,
+                (schema.CLAIM_CODE_ATTEMPT_TABLE_NAME,),
             )
-            attempt = await cur.fetchone()
-            self.assertEqual(int(attempt["claim_code_id"]), self.code_id)
+            table = await cur.fetchone()
+            version_cur = await db.execute("PRAGMA user_version;")
+            version = await version_cur.fetchone()
+
+        self.assertIsNotNone(table)
+        self.assertEqual(int(version[0]), schema.SCHEMA_VERSION)
+        self.assertEqual(schema.SCHEMA_VERSION, 3)
 
 
 class PolicyWiringSourceTest(unittest.TestCase):
@@ -233,6 +218,18 @@ class PolicyWiringSourceTest(unittest.TestCase):
         )
         self.assertIn("first successful claim uses it", source)
         self.assertIn("claim_code_policy_ui.js", template)
+
+
+    def test_policy_contains_no_runtime_schema_or_compatibility_migration(self):
+        root = Path(__file__).resolve().parents[1]
+        policy_source = (root / "claim_code_policy.py").read_text(encoding="utf-8")
+        database_source = (root / "database.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("ALTER TABLE", policy_source.upper())
+        self.assertNotIn("CREATE TABLE", policy_source.upper())
+        self.assertNotIn("INSERT OR IGNORE INTO", policy_source.upper())
+        self.assertIn("CREATE_CLAIM_CODE_ATTEMPT_TABLE", database_source)
+        self.assertIn("SCHEMA_VERSION = 3", database_source)
 
 
 if __name__ == "__main__":

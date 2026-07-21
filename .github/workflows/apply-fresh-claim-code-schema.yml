@@ -25,10 +25,26 @@ jobs:
           python-version: '3.11'
 
       - name: Apply checked source transformations
-        run: python .github/scripts/apply_fresh_claim_code_schema.py
+        id: patch
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python .github/scripts/apply_fresh_claim_code_schema.py 2>&1 | tee fresh-schema-patch-output.txt
+
+      - name: Upload patch diagnostics
+        if: steps.patch.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fresh-schema-patch-output
+          path: fresh-schema-patch-output.txt
+
+      - name: Stop after patch failure
+        if: steps.patch.outcome == 'failure'
+        run: exit 1
 
       - name: Remove temporary patch machinery
         run: |
+          rm fresh-schema-patch-output.txt
           rm .github/scripts/apply_fresh_claim_code_schema.py
           rm .github/workflows/apply-fresh-claim-code-schema.yml
 
@@ -40,7 +56,7 @@ jobs:
       - name: Commit result
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "4189823+github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Define claim-code attempts in the fresh schema"
           git push origin HEAD:agent/fresh-claim-code-schema

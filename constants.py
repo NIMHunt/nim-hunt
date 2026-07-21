@@ -517,3 +517,10 @@ REPORT_REASON_VALUES = {
     REPORT_REASON_SCAM,
     REPORT_REASON_OTHER,
 }
+
+REPORT_DETAILS_MAX_CHARS = 300
+
+# Claim modal captcha bounds. Kept with other human-friction constants so the
+# frontend and backend can stay aligned if the challenge is tuned later.
+CLAIM_CAPTCHA_MIN = 1
+CLAIM_CAPTCHA_MAX = 9

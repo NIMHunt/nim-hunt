@@ -25,7 +25,9 @@ jobs:
       - name: Apply checked source transformations
         id: apply
         continue-on-error: true
-        run: python .github/scripts/apply_transaction_integrity_fixes.py > apply-transaction-integrity.log 2>&1
+        run: |
+          python .github/scripts/prepare_transaction_integrity_patch.py
+          python .github/scripts/apply_transaction_integrity_fixes.py > apply-transaction-integrity.log 2>&1
       - name: Upload patch diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -39,6 +41,7 @@ jobs:
           exit 1
       - name: Validate patch
         run: |
+          rm -f .github/scripts/prepare_transaction_integrity_patch.py .github/transaction-integrity-trigger.txt
           git diff --check
           python -m py_compile public_html.py db_access.py trans_updater.py tests/test_transaction_integrity_regressions.py
       - name: Commit result

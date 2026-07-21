@@ -3,13 +3,16 @@
  *
  * Safari and WKWebView may restore a page from the back-forward cache with its
  * previous DOM and JavaScript memory intact. If a modal initiated navigation,
- * that can revive both the visible card and page-specific "in progress" flags.
- * Reload only when a history traversal restores an actually open backdrop; an
- * ordinary initial load and deliberately open server-rendered cards are left
- * untouched.
+ * that can revive both the card and page-specific "in progress" flags. Track a
+ * recently active card in the cached DOM, then reload only when browser history
+ * restores that marked page. Ordinary initial loads and normal Back navigation
+ * from pages that had no active card remain untouched.
  */
 
+const BACKDROP_SELECTOR = '.notice-backdrop';
 const OPEN_BACKDROP_SELECTOR = '.notice-backdrop:not([hidden])';
+const CARD_NAVIGATION_MARKER = 'data-nimhunt-card-navigation-pending';
+const MANUAL_CLOSE_GRACE_MILLISECONDS = 250;
 
 function navigationType(performanceObj) {
     try {
@@ -23,6 +26,26 @@ function navigationType(performanceObj) {
     if (legacyType === 2) return 'back_forward';
     if (Number.isFinite(legacyType)) return 'navigate';
     return null;
+}
+
+function documentMarkerElement(documentObj) {
+    return documentObj?.documentElement || documentObj?.body || null;
+}
+
+function hasCardNavigationMarker(documentObj) {
+    return Boolean(documentMarkerElement(documentObj)?.hasAttribute?.(CARD_NAVIGATION_MARKER));
+}
+
+function setCardNavigationMarker(documentObj) {
+    documentMarkerElement(documentObj)?.setAttribute?.(CARD_NAVIGATION_MARKER, '1');
+}
+
+function clearCardNavigationMarker(documentObj) {
+    documentMarkerElement(documentObj)?.removeAttribute?.(CARD_NAVIGATION_MARKER);
+}
+
+function openBackdrops(documentObj) {
+    return [...(documentObj?.querySelectorAll?.(OPEN_BACKDROP_SELECTOR) || [])];
 }
 
 export function isBackForwardRestore(event, performanceObj = globalThis.performance) {
@@ -42,11 +65,14 @@ export function repairOpenCardsAfterHistoryRestore({
         return false;
     }
 
-    const openBackdrops = [...documentObj.querySelectorAll(OPEN_BACKDROP_SELECTOR)];
-    if (openBackdrops.length === 0) return false;
+    const restoredBackdrops = openBackdrops(documentObj);
+    if (!hasCardNavigationMarker(documentObj) && restoredBackdrops.length === 0) {
+        return false;
+    }
 
+    clearCardNavigationMarker(documentObj);
     // Hide first so the stale card does not flash while the fresh page loads.
-    for (const backdrop of openBackdrops) backdrop.hidden = true;
+    for (const backdrop of restoredBackdrops) backdrop.hidden = true;
     windowObj.location.reload();
     return true;
 }
@@ -55,17 +81,60 @@ export function installHistoryCardRestoreGuard({
     windowObj = globalThis.window,
     documentObj = globalThis.document,
     performanceObj = globalThis.performance,
+    MutationObserverClass = globalThis.MutationObserver,
 } = {}) {
     if (!windowObj || !documentObj) return () => {};
 
-    const handler = (event) => repairOpenCardsAfterHistoryRestore({
+    let clearTimer = null;
+    const clearScheduledMarker = () => {
+        if (clearTimer !== null) windowObj.clearTimeout(clearTimer);
+        clearTimer = null;
+    };
+    const syncMarker = () => {
+        if (openBackdrops(documentObj).length > 0) {
+            clearScheduledMarker();
+            setCardNavigationMarker(documentObj);
+            return;
+        }
+
+        // A successful card action often hides the backdrop and assigns a new
+        // location in the same task. Delay clearing so that navigation preserves
+        // the marker in the old history entry. A normal manual close remains on
+        // the page long enough for this timer to remove it.
+        clearScheduledMarker();
+        clearTimer = windowObj.setTimeout(() => {
+            clearTimer = null;
+            if (openBackdrops(documentObj).length === 0) {
+                clearCardNavigationMarker(documentObj);
+            }
+        }, MANUAL_CLOSE_GRACE_MILLISECONDS);
+    };
+
+    const pageshowHandler = (event) => repairOpenCardsAfterHistoryRestore({
         event,
         windowObj,
         documentObj,
         performanceObj,
     });
-    windowObj.addEventListener('pageshow', handler);
-    return () => windowObj.removeEventListener('pageshow', handler);
+    windowObj.addEventListener('pageshow', pageshowHandler);
+
+    let observer = null;
+    const root = documentObj.body || documentObj.documentElement;
+    if (root && typeof MutationObserverClass === 'function') {
+        observer = new MutationObserverClass(syncMarker);
+        observer.observe(root, {
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['hidden'],
+        });
+    }
+    if (documentObj.querySelectorAll?.(BACKDROP_SELECTOR)?.length) syncMarker();
+
+    return () => {
+        clearScheduledMarker();
+        observer?.disconnect();
+        windowObj.removeEventListener('pageshow', pageshowHandler);
+    };
 }
 
 export function localDateTimeValue(nowMilliseconds = Date.now()) {

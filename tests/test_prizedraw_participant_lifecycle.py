@@ -14,7 +14,7 @@ import trans_updater
 
 
 class PrizedrawParticipantLifecycleTest(unittest.IsolatedAsyncioTestCase):
-    """Exercise a multi-user draw through the real SQLite and outbox layers."""
+    """Exercise a multi-user draw through the real entry, SQLite and outbox layers."""
 
     async def asyncSetUp(self):
         self._tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=True)
@@ -91,30 +91,41 @@ class PrizedrawParticipantLifecycleTest(unittest.IsolatedAsyncioTestCase):
                     db,
                     device_id_hash=f"prizedraw-lifecycle-participant-{index}",
                 )
-                cur = await db.execute(
-                    f"""
-                    INSERT INTO {schema.CLAIM_TABLE_NAME} (
-                        {schema.CLAIM_SPOT_ID},
-                        {schema.CLAIM_RECIPIENT},
-                        {schema.CLAIM_PAYOUT_ADDRESS},
-                        {schema.CLAIM_LAT},
-                        {schema.CLAIM_LONG},
-                        {schema.CLAIM_ACCURACY},
-                        {schema.CLAIM_STATUS}
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?);
-                    """,
-                    (
-                        spot_id,
-                        participant_id,
-                        const.DEV_PLATFORM_FEE_ADDRESS,
-                        51.5,
-                        -0.1,
-                        1.0,
-                        const.CLAIM_STATUS_SUCCESS,
-                    ),
+                entry = await db_access.create_claim_attempt(
+                    db,
+                    spot_id=spot_id,
+                    user_id=participant_id,
+                    lat=51.5,
+                    long=-0.1,
+                    location_accuracy_metres=5.0,
+                    payout_address=const.DEV_PLATFORM_FEE_ADDRESS,
                 )
-                claim_ids.append(int(cur.lastrowid))
+                self.assertEqual(
+                    int(entry[schema.CLAIM_STATUS]),
+                    const.CLAIM_STATUS_SUCCESS,
+                )
+                self.assertEqual(
+                    int(entry[schema.CLAIM_RECIPIENT]),
+                    participant_id,
+                )
+                claim_ids.append(int(entry[schema.CLAIM_ID]))
+
+            # This uses the same user-facing claim rules as the HTTP entry route.
+            # Once four people have entered, a fifth must not overfill the draw.
+            extra_participant_id = await db_access.create_user(
+                db,
+                device_id_hash="prizedraw-lifecycle-participant-extra",
+            )
+            with self.assertRaisesRegex(ValueError, "no remaining claim capacity"):
+                await db_access.create_claim_attempt(
+                    db,
+                    spot_id=spot_id,
+                    user_id=extra_participant_id,
+                    lat=51.5,
+                    long=-0.1,
+                    location_accuracy_metres=5.0,
+                    payout_address=const.DEV_PLATFORM_FEE_ADDRESS,
+                )
 
             await db.commit()
         return spot_id, claim_ids

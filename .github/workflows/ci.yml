@@ -45,7 +45,9 @@ jobs:
           npm ci --prefix helpers
 
       - name: Run Python tests
-        run: python -m pytest -q 2>&1 | tee pytest.log
+        run: |
+          set -o pipefail
+          python -m pytest -q --showlocals 2>&1 | tee pytest.log
 
       - name: Upload Python test log
         if: always()

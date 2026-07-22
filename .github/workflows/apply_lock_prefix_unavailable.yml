@@ -1,0 +1,191 @@
+name: Apply lock prefix and unavailable priority
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/lock-prefix-unavailable-priority'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/lock-prefix-unavailable-priority
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Apply focused changes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}: {old[:100]!r}')
+              file.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_once(
+              'static/spot_ui.js',
+              """    titleEl.append(titleText);
+              if (spot.use_password) {
+                  const lockIcon = createPasswordRequiredIcon();
+                  titleEl.append(lockIcon);
+              }""",
+              """    if (spot.use_password) {
+                  const lockIcon = createPasswordRequiredIcon();
+                  titleEl.append(lockIcon);
+              }
+              titleEl.append(titleText);""",
+          )
+
+          replace_once(
+              'static/home.css',
+              """    margin-left: 0;
+              vertical-align: -0.12em;""",
+              """    margin-left: 0;
+              margin-right: 0.25em;
+              vertical-align: -0.12em;""",
+          )
+
+          replace_once(
+              'static/find_spots.js',
+              """function shouldShowClaimAction(spot) {
+              if (spot.status_label !== 'active') return false;
+
+              const status = claimStatusForSpot(spot);""",
+              """function shouldShowClaimAction(spot) {
+              const statusLabel = String(spot.status_label || '').toLowerCase();
+              if (statusLabel === 'upcoming') return true;
+              if (statusLabel !== 'active') return false;
+
+              const status = claimStatusForSpot(spot);""",
+          )
+
+          replace_once(
+              'public_html.py',
+              '_ASSET_VERSION = "desktop-location-lock-v1-20260722"',
+              '_ASSET_VERSION = "lock-prefix-unavailable-v1-20260722"',
+          )
+
+          for file in Path('static').glob('*.js'):
+              text = file.read_text(encoding='utf-8')
+              text = text.replace('long-titles-v2-20260722', 'lock-prefix-v1-20260722')
+              file.write_text(text, encoding='utf-8')
+
+          test_path = Path('tests/test_presentation_spots.py')
+          test = test_path.read_text(encoding='utf-8')
+          old = """        self.assertIn("titleEl.append(lockIcon);", source)
+              self.assertNotIn("document.createTextNode(' '), lockIcon", source)
+              self.assertIn("flex: 0 1 auto;", css)
+              self.assertIn("margin-left: 0;", css)"""
+          new = """        self.assertIn("titleEl.append(lockIcon);", source)
+              self.assertNotIn("document.createTextNode(' '), lockIcon", source)
+              self.assertLess(
+                  source.index("titleEl.append(lockIcon);"),
+                  source.index("titleEl.append(titleText);"),
+              )
+              self.assertIn("flex: 0 1 auto;", css)
+              self.assertIn("margin-left: 0;", css)
+              self.assertIn("margin-right: 0.25em;", css)"""
+          if test.count(old) != 1:
+              raise SystemExit('tests/test_presentation_spots.py: expected lock assertion block not found')
+          test_path.write_text(test.replace(old, new, 1), encoding='utf-8')
+
+          Path('tests/test_spot_action_priority.py').write_text(
+              '''from __future__ import annotations
+
+          import unittest
+          from pathlib import Path
+
+
+          class SpotActionPriorityTest(unittest.TestCase):
+              def test_upcoming_spots_show_unavailable_action_before_status_badge(self):
+                  root = Path(__file__).resolve().parents[1]
+                  source = (root / "static" / "find_spots.js").read_text(encoding="utf-8")
+                  start = source.index("function shouldShowClaimAction(spot)")
+                  end = source.index("function claimActionText(spot)", start)
+                  block = source[start:end]
+
+                  upcoming_rule = "if (statusLabel === 'upcoming') return true;"
+                  inactive_rule = "if (statusLabel !== 'active') return false;"
+                  self.assertIn(upcoming_rule, block)
+                  self.assertIn(inactive_rule, block)
+                  self.assertLess(block.index(upcoming_rule), block.index(inactive_rule))
+
+              def test_upcoming_unavailable_tooltip_explains_not_active(self):
+                  root = Path(__file__).resolve().parents[1]
+                  source = (root / "static" / "find_spots.js").read_text(encoding="utf-8")
+                  self.assertIn("if (reason === 'not_active')", source)
+                  self.assertIn("This spot is not active right now.", source)
+
+
+          if __name__ == "__main__":
+              unittest.main()
+          '''.replace('\n          ', '\n'),
+              encoding='utf-8',
+          )
+          PY
+
+      - name: Remove temporary workflow
+        run: rm .github/workflows/apply_lock_prefix_unavailable.yml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          npm ci --prefix helpers
+
+      - name: Verify complete project
+        run: |
+          python -m pytest -q
+          npm test --prefix helpers
+          ruff check .
+          python -m compileall -q '*.py' tests
+          for file in static/*.js; do node --check --input-type=module < "$file"; done
+          for file in helpers/*.mjs; do node --check "$file"; done
+          for file in *.sh; do bash -n "$file"; done
+          python - <<'PY'
+          from pathlib import Path
+          from jinja2 import Environment, FileSystemLoader
+
+          templates = Path('templates')
+          environment = Environment(loader=FileSystemLoader(templates))
+          for path in sorted(templates.glob('*.html')):
+              environment.get_template(path.name)
+          PY
+          NIMHUNT_DB_PATH="${RUNNER_TEMP}/nimhunt-ci.db" \
+          NIMHUNT_DEPLOYMENT_MODE=development \
+          NIMHUNT_NIMIQ_NETWORK=TestAlbatross \
+          NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC=1 \
+          python spoof.py
+          python -m pip check
+          git diff --check
+
+      - name: Commit final result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Prefix coded Spot locks and prioritise unavailable"
+          git push origin HEAD:agent/lock-prefix-unavailable-priority

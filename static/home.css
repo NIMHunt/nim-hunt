@@ -3450,3 +3450,48 @@ h2 {
     margin: 1rem 0 0;
     text-align: center;
 }
+
+
+/* Prominent server-controlled Home-page disclaimer. */
+.project-disclaimer {
+    width: 100%;
+    margin: 0;
+    padding: 15px 17px 16px;
+    border: 1px solid rgba(134, 70, 0, 0.18);
+    border-radius: 22px;
+    background: linear-gradient(135deg, #ff9f1c 0%, #ffc435 52%, #f28b16 100%);
+    color: #472b08;
+    box-shadow:
+        0 12px 30px rgba(209, 106, 0, 0.27),
+        inset 0 1px 0 rgba(255, 255, 255, 0.42);
+    text-align: center;
+}
+
+.project-disclaimer-title {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.55rem;
+    color: inherit;
+    font-size: 1.25rem;
+    font-weight: 900;
+    letter-spacing: 0.035em;
+    line-height: 1.1;
+    text-transform: uppercase;
+}
+
+.project-disclaimer-icon {
+    width: 1.15em;
+    height: 1.15em;
+    flex: 0 0 auto;
+    fill: currentColor;
+}
+
+.project-disclaimer p {
+    margin: 0.65rem 0 0;
+    color: inherit;
+    font-size: 1rem;
+    font-weight: 750;
+    line-height: 1.38;
+}

@@ -33,6 +33,21 @@
     {% endif %}
 
     <main class="home-shell" aria-live="polite">
+        {% if show_project_disclaimer | default(false) %}
+        <section class="project-disclaimer" role="note" aria-labelledby="project-disclaimer-title">
+            <h2 id="project-disclaimer-title" class="project-disclaimer-title">
+                <svg class="project-disclaimer-icon" viewBox="0 0 17 16" aria-hidden="true" focusable="false">
+                    <use href="/static/nimiq-style.icons.svg#nq-alert-triangle"></use>
+                </svg>
+                <span>Disclaimer</span>
+                <svg class="project-disclaimer-icon" viewBox="0 0 17 16" aria-hidden="true" focusable="false">
+                    <use href="/static/nimiq-style.icons.svg#nq-alert-triangle"></use>
+                </svg>
+            </h2>
+            <p>This project is new and may still have some issues. Please use this mini-app cautiously, and never spend more than you can afford to lose. Have fun!</p>
+        </section>
+        {% endif %}
+
         {% if hero_href is defined and hero_href %}
         <a class="hero-card home-hero-link" href="{{ hero_href }}" aria-label="{{ hero_aria_label | default('Back home') }}" data-i18n-aria-label="home.returnHome">
             <h1 class="hero-title"><span>{{ app_name | default('NimHunt') }}</span><span class="hero-diamond" aria-hidden="true">◆</span></h1>
@@ -117,7 +132,7 @@
         {% endif %}
     </main>
 
-    <script type="module" src="/static/page_lifecycle.js?v=history-card-v1-20260721"></script>
+    <script type="module" src="/static/page_lifecycle.js?v=history-card-v2-20260722"></script>
     <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
 
     {% if home_script_src is defined and home_script_src %}

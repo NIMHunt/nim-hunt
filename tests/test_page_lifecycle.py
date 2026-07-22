@@ -115,24 +115,38 @@ class PageLifecycleJavaScriptTest(unittest.TestCase):
             assert.equal(documentElement.hasAttribute(markerName), false);
             assert.equal(reloadCount, 2);
 
+            // Navigation timing can identify a history return even when persisted is false.
             openBackdrop.hidden = false;
             assert.equal(lifecycle.repairOpenCardsAfterHistoryRestore({{
                 event: {{ persisted: false }},
                 windowObj,
                 documentObj,
                 performanceObj: backForwardPerformance,
-            }}), false);
-            assert.equal(openBackdrop.hidden, false);
-            assert.equal(reloadCount, 2);
+            }}), true);
+            assert.equal(openBackdrop.hidden, true);
+            assert.equal(reloadCount, 3);
 
+            // The cached DOM marker is scoped to this exact history entry and is
+            // trusted even when both browser signals claim this is a normal load.
+            documentElement.setAttribute(markerName, '1');
             assert.equal(lifecycle.repairOpenCardsAfterHistoryRestore({{
-                event: {{ persisted: true }},
+                event: {{ persisted: false }},
+                windowObj,
+                documentObj,
+                performanceObj: {{ getEntriesByType: () => [{{ type: 'navigate' }}] }},
+            }}), true);
+            assert.equal(documentElement.hasAttribute(markerName), false);
+            assert.equal(reloadCount, 4);
+
+            // A fresh document has no marker, so the same unreliable signals do
+            // nothing and cannot create a reload loop.
+            assert.equal(lifecycle.repairOpenCardsAfterHistoryRestore({{
+                event: {{ persisted: false }},
                 windowObj,
                 documentObj,
                 performanceObj: {{ getEntriesByType: () => [{{ type: 'navigate' }}] }},
             }}), false);
-            assert.equal(openBackdrop.hidden, false);
-            assert.equal(reloadCount, 2);
+            assert.equal(reloadCount, 4);
 
             const trackedBackdrop = {{ hidden: true }};
             const trackedAttributes = new Map();

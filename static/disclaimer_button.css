@@ -1,14 +1,37 @@
 /*
  * Home disclaimer presentation.
  *
- * The notice deliberately reuses NimHunt's existing Nimiq green primary-action
- * classes. This file only removes interactive button behaviour; it does not
- * invent a separate colour, gradient, border, radius, shadow, or typography.
+ * The notice uses the same Nimiq action-card structure as the Home navigation.
+ * Only its orange colour, non-interactive behaviour, icon row and extra wrapping
+ * space differ from the ordinary buttons.
  */
 .project-disclaimer-note {
+    height: auto !important;
+    min-height: 112px;
     cursor: default !important;
     pointer-events: none;
     user-select: text;
+    white-space: normal !important;
+    overflow: visible !important;
+    background: var(--nh-warning) !important;
+}
+
+.project-disclaimer-note .action-detail {
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+}
+
+.project-disclaimer-title {
+    display: flex !important;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+.project-disclaimer-icon {
+    width: 1em;
+    height: 1em;
+    flex: 0 0 auto;
+    fill: currentColor;
 }
 
 .project-disclaimer-note::before,

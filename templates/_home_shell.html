@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="{{ google_font_muli }}">
     <link rel="stylesheet" href="{{ nimiq_style_cdn }}">
     <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-polish-v2-20260704') }}">
-    <link rel="stylesheet" href="/static/disclaimer_button.css?v=disclaimer-button-v1-20260722">
+    <link rel="stylesheet" href="/static/disclaimer_button.css?v=disclaimer-button-v2-20260722">
 </head>
 <body class="nq-style"
     data-app-name="{{ app_name | default('NimHunt') }}"
@@ -35,9 +35,13 @@
 
     <main class="home-shell" aria-live="polite">
         {% if show_project_disclaimer | default(false) %}
-        <section class="project-disclaimer-note nq-button green action-button primary-action" role="note" aria-labelledby="project-disclaimer-title">
-            <h2 id="project-disclaimer-title" class="action-title">Disclaimer</h2>
-            <p class="action-detail">This project is new and may still have some issues. Please use this mini-app cautiously, and never spend more than you can afford to lose. Have fun!</p>
+        <section class="project-disclaimer-note nq-button gold action-button primary-action" role="note" aria-labelledby="project-disclaimer-title">
+            <span id="project-disclaimer-title" class="action-title project-disclaimer-title">
+                <svg class="project-disclaimer-icon" viewBox="0 0 17 16" aria-hidden="true" focusable="false"><use href="/static/nimiq-style.icons.svg#nq-alert-triangle"></use></svg>
+                <span>Disclaimer</span>
+                <svg class="project-disclaimer-icon" viewBox="0 0 17 16" aria-hidden="true" focusable="false"><use href="/static/nimiq-style.icons.svg#nq-alert-triangle"></use></svg>
+            </span>
+            <span class="action-detail">This project is new and may still have some issues. Please use this mini-app cautiously, and never spend more than you can afford to lose. Have fun!</span>
         </section>
         {% endif %}
 
@@ -125,7 +129,7 @@
         {% endif %}
     </main>
 
-    <script type="module" src="/static/page_lifecycle.js?v=history-card-v1-20260721"></script>
+    <script type="module" src="/static/page_lifecycle.js?v=history-card-v3-20260722"></script>
     <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
 
     {% if home_script_src is defined and home_script_src %}

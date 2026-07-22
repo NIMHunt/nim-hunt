@@ -1,12 +1,11 @@
 /*
  * Shared browser lifecycle repairs.
  *
- * Safari and WKWebView may restore a page from the back-forward cache with its
- * previous DOM and JavaScript memory intact. If a modal initiated navigation,
- * that can revive both the card and page-specific "in progress" flags. Track a
- * recently active card in the cached DOM, then reload only when browser history
- * restores that marked page. Ordinary initial loads and normal Back navigation
- * from pages that had no active card remain untouched.
+ * Safari and embedded WKWebViews may restore a page with its previous DOM and
+ * JavaScript memory intact while incorrectly reporting `pageshow.persisted` as
+ * false. The card marker lives only in the cached document itself, so it is
+ * naturally scoped to that exact history entry and cannot leak into a fresh
+ * reload or a later visit to the same URL.
  */
 
 const BACKDROP_SELECTOR = '.notice-backdrop';
@@ -49,10 +48,7 @@ function openBackdrops(documentObj) {
 }
 
 export function isBackForwardRestore(event, performanceObj = globalThis.performance) {
-    if (!event?.persisted) return false;
-    const type = navigationType(performanceObj);
-    // `persisted` is the strongest signal available in older iOS WebViews.
-    return type === null || type === 'back_forward';
+    return Boolean(event?.persisted) || navigationType(performanceObj) === 'back_forward';
 }
 
 export function repairOpenCardsAfterHistoryRestore({
@@ -61,12 +57,16 @@ export function repairOpenCardsAfterHistoryRestore({
     documentObj = globalThis.document,
     performanceObj = globalThis.performance,
 } = {}) {
-    if (!windowObj || !documentObj || !isBackForwardRestore(event, performanceObj)) {
-        return false;
-    }
+    if (!windowObj || !documentObj) return false;
 
+    const markedHistoryEntry = hasCardNavigationMarker(documentObj);
     const restoredBackdrops = openBackdrops(documentObj);
-    if (!hasCardNavigationMarker(documentObj) && restoredBackdrops.length === 0) {
+    const browserReportsHistoryReturn = isBackForwardRestore(event, performanceObj);
+
+    // A marker retained in the cached DOM belongs to this exact history entry.
+    // Trust it even when WKWebView reports both browser-history signals wrongly.
+    // Without a marker, require a history-return signal and a visibly stale card.
+    if (!markedHistoryEntry && (!browserReportsHistoryReturn || restoredBackdrops.length === 0)) {
         return false;
     }
 
@@ -98,9 +98,9 @@ export function installHistoryCardRestoreGuard({
         }
 
         // A successful card action often hides the backdrop and assigns a new
-        // location in the same task. Delay clearing so that navigation preserves
-        // the marker in the old history entry. A normal manual close remains on
-        // the page long enough for this timer to remove it.
+        // location in the same task. Delay clearing so navigation preserves the
+        // marker inside the old cached history entry. A normal manual close stays
+        // on the page long enough for this timer to remove it.
         clearScheduledMarker();
         clearTimer = windowObj.setTimeout(() => {
             clearTimer = null;

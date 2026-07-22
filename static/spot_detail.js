@@ -1,5 +1,5 @@
 import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { getCommonText, getReportReasonOptions, makeSpotDetailText } from './interface_text.js?v=qol-v1-20260717';
+import { getCommonText, getReportReasonOptions, makeSpotDetailText } from './interface_text.js?v=single-open-details-v1-20260722';
 import { formatNimFromLuna } from './nim_format.js';
 import {
     appendBulletLine,
@@ -10,7 +10,7 @@ import {
     highestTimeUnitText,
     spotScheduleTooltip,
     unixToText,
-} from './spot_ui.js?v=lock-prefix-v1-20260722';
+} from './spot_ui.js?v=single-open-details-v1-20260722';
 import {
     createNoticePresenter,
     getLanguage,
@@ -885,6 +885,14 @@ function renderLockedSpotMap(mapEl, spot) {
     }, 0);
 }
 
+function buildRewardAmountLine(amountText) {
+    const fragment = document.createDocumentFragment();
+    const amount = document.createElement('strong');
+    amount.textContent = amountText;
+    fragment.append(amount, document.createTextNode(' Per Claim'));
+    return fragment;
+}
+
 function buildSpotDetail(spot) {
     const detail = document.createElement('div');
     detail.className = 'spot-list-detail';
@@ -895,7 +903,6 @@ function buildSpotDetail(spot) {
     const existingClaims = Number(spot.claim_count || 0);
     const maxClaims = Number(spot.max_total_claims || 1);
     const availableClaims = Math.max(0, maxClaims - existingClaims);
-    const claimWord = availableClaims === 1 ? 'claim' : 'claims';
     const maxClaimsPerUser = Number(spot.max_claims_per_user ?? 1);
     const duration = durationText(spot.claim_duration);
     const creator = spot.creator_display_name || 'unknown creator';
@@ -904,7 +911,8 @@ function buildSpotDetail(spot) {
 
     const lines = document.createElement('ul');
     lines.className = 'spot-detail-lines';
-    appendBulletLine(lines, `${nimPerClaimText(spot)} Per Claim (${availableClaims} ${claimWord} available)`);
+    appendBulletLine(lines, buildRewardAmountLine(nimPerClaimText(spot)));
+    appendBulletLine(lines, `${availableClaims} ${availableClaims === 1 ? 'Claim' : 'Claims'} Remaining`);
 
     if (maxClaimsPerUser !== 1) {
         appendBulletLine(
@@ -916,7 +924,7 @@ function buildSpotDetail(spot) {
     appendBulletLine(lines, scheduleTextSpan(spot));
 
     if (duration) {
-        appendBulletLine(lines, `Requires a claim duration of ${duration}`);
+        appendBulletLine(lines, `Must remain on Spot for ${duration}`);
     }
 
     appendBulletLine(lines, buildSpotLinkControl(spot));

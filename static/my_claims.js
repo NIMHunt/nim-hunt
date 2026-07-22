@@ -1,5 +1,5 @@
 import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { makeMyClaimsText } from './interface_text.js?v=qol-v1-20260717';
+import { makeMyClaimsText } from './interface_text.js?v=single-open-details-v1-20260722';
 import {
     appendBulletLine,
     appendDetailDescription,
@@ -8,7 +8,7 @@ import {
     nimFromLunaText,
     spotPlaceText,
     unixToText,
-} from './spot_ui.js?v=lock-prefix-v1-20260722';
+} from './spot_ui.js?v=single-open-details-v1-20260722';
 import { createReusableSpotMap } from './spot_map.js';
 import {
     createNoticePresenter,
@@ -212,7 +212,25 @@ function buildClaimDetail(claim) {
     return detail;
 }
 
+function collapseOtherClaimItems(activeClaimId) {
+    const activeId = Number(activeClaimId);
+    for (const expandedId of [...state.expandedClaimIds]) {
+        if (Number(expandedId) !== activeId) state.expandedClaimIds.delete(expandedId);
+    }
+
+    for (const item of els.list.querySelectorAll('.my-claim-list-item.is-expanded')) {
+        const otherClaimId = Number(item.dataset.claimId);
+        if (otherClaimId === activeId) continue;
+        const summary = item.querySelector('.spot-list-toggle');
+        const detail = item.querySelector('.claim-list-detail');
+        if (summary?.getAttribute('aria-expanded') === 'true' && detail) {
+            setClaimExpanded(item, summary, detail, otherClaimId, false);
+        }
+    }
+}
+
 function setClaimExpanded(item, summary, detail, claimId, expanded) {
+    if (expanded) collapseOtherClaimItems(claimId);
     item.classList.toggle('is-expanded', expanded);
     summary.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     detail.hidden = !expanded;
@@ -230,6 +248,7 @@ function buildClaimListItem(claim) {
 
     const item = document.createElement('li');
     item.className = 'spot-list-item my-claim-list-item';
+    item.dataset.claimId = String(claimId);
 
     const summary = document.createElement('button');
     summary.type = 'button';

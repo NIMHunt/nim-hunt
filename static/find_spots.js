@@ -1418,10 +1418,7 @@ function setSpotMapHighlighted(spotId, highlighted) {
     if (!entry) return false;
     const colour = highlighted ? MAP_COLOURS.highlight : entry.colour;
     entry.radiusCircle?.setStyle({ color: colour, fillColor: colour });
-    entry.dot?.setStyle({
-        color: highlighted ? colour : '#ffffff',
-        fillColor: colour,
-    });
+    entry.dot?.setStyle({ fillColor: colour });
     if (highlighted) entry.dot?.bringToFront?.();
     return true;
 }

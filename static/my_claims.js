@@ -9,7 +9,7 @@ import {
     spotPlaceText,
     unixToText,
 } from './spot_ui.js?v=single-open-details-v1-20260722';
-import { createReusableSpotMap } from './spot_map.js?v=map-list-hover-visual-fix-v1-20260723';
+import { createReusableSpotMap } from './spot_map.js?v=marker-white-outline-v1-20260723';
 import {
     createNoticePresenter,
     getLanguage,

@@ -1,0 +1,46 @@
+name: Apply history and disclaimer patch on PR
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/fix-history-cards-disclaimer'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/fix-history-cards-disclaimer
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Apply checked source transformations
+        run: python .github/scripts/apply_history_disclaimer_patch.py
+
+      - name: Remove temporary patch machinery
+        run: |
+          rm .github/scripts/apply_history_disclaimer_patch.py
+          rm .github/workflows/apply-history-disclaimer-patch.yml
+          rm .github/workflows/apply-history-disclaimer-pr.yml
+
+      - name: Validate transformed source
+        run: |
+          git diff --check
+          python -m py_compile constants.py public_html.py tests/test_page_lifecycle.py tests/test_history_card_pagehide.py tests/test_home_disclaimer.py
+          node --check --input-type=module < static/page_lifecycle.js
+
+      - name: Commit result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix restored cards and add project disclaimer"
+          git push origin HEAD:agent/fix-history-cards-disclaimer

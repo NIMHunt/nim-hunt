@@ -1,0 +1,68 @@
+name: Finalize presentation Spots
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.head_ref == 'agent/presentation-spots-long-titles'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/presentation-spots-long-titles
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Correct patch regex and apply transformations
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/scripts/apply_presentation_spots_patch.py')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          revised = []
+          changed = False
+          for line in lines:
+              if line.startswith('import_pattern = re.compile('):
+                  revised.append(r'''import_pattern = re.compile(r"spot_ui\.js\?v=[^'\"]+")''')
+                  changed = True
+              else:
+                  revised.append(line)
+          if not changed:
+              raise RuntimeError('Could not locate import_pattern line')
+          path.write_text('\n'.join(revised) + '\n', encoding='utf-8')
+          PY
+          python .github/scripts/apply_presentation_spots_patch.py
+
+      - name: Remove temporary patch machinery
+        run: |
+          rm -f .github/scripts/apply_presentation_spots_patch.py
+          rm -f .github/workflows/finalize-presentation-spots.yml
+
+      - name: Validate transformed source
+        run: |
+          git diff --check
+          python -m py_compile constants.py public_html.py spoof.py tests/test_presentation_spots.py
+          node --check --input-type=module < static/spot_ui.js
+          node --check --input-type=module < static/find_spots.js
+
+      - name: Commit result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Expand Spot titles and seed presentation data"
+          git push origin HEAD:agent/presentation-spots-long-titles

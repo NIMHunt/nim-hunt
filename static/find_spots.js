@@ -36,6 +36,7 @@ const state = {
     lastSpots: [],
     expandedSpotIds: new Set(),
     listEntriesBySpotId: new Map(),
+    mapLayersBySpotId: new Map(),
     expandedClaimCodeSpotIds: new Set(),
     fetchController: null,
     deviceIdHash: null,
@@ -75,6 +76,7 @@ const MAP_COLOURS = {
     standard: '#21bca5',
     prizedraw: '#ffc435',
     muted: '#8c90a8',
+    highlight: '#1f2348',
 };
 
 const REPORT_TEXT = makeSpotDetailText({
@@ -1406,6 +1408,24 @@ function focusSpotInList(spotId) {
     return true;
 }
 
+function setSpotListMapHighlighted(spotId, highlighted) {
+    const entry = state.listEntriesBySpotId.get(Number(spotId));
+    entry?.item.classList.toggle('is-map-highlighted', Boolean(highlighted));
+}
+
+function setSpotMapHighlighted(spotId, highlighted) {
+    const entry = state.mapLayersBySpotId.get(Number(spotId));
+    if (!entry) return false;
+    const colour = highlighted ? MAP_COLOURS.highlight : entry.colour;
+    entry.radiusCircle?.setStyle({ color: colour, fillColor: colour });
+    entry.dot?.setStyle({
+        color: highlighted ? colour : '#ffffff',
+        fillColor: colour,
+    });
+    if (highlighted) entry.dot?.bringToFront?.();
+    return true;
+}
+
 function renderList(spots) {
     const hasSpots = spots.length > 0;
 
@@ -1476,6 +1496,8 @@ function renderList(spots) {
         const initiallyExpanded = state.expandedSpotIds.has(spotId);
         setListItemExpanded(item, summary, detail, spotId, initiallyExpanded);
         state.listEntriesBySpotId.set(spotId, { item, summary, detail });
+        item.addEventListener('mouseenter', () => setSpotMapHighlighted(spotId, true));
+        item.addEventListener('mouseleave', () => setSpotMapHighlighted(spotId, false));
 
         const toggleExpanded = () => {
             const expanded = summary.getAttribute('aria-expanded') !== 'true';
@@ -1529,6 +1551,10 @@ function renderMapSpots(spots) {
     const dots = [];
 
     state.spotLayer.clearLayers();
+    state.mapLayersBySpotId.clear();
+    for (const entry of state.listEntriesBySpotId.values()) {
+        entry.item.classList.remove('is-map-highlighted');
+    }
 
     for (const spot of spots) {
         const matchesFilters = spotMatchesFilters(spot, filters);
@@ -1536,9 +1562,10 @@ function renderMapSpots(spots) {
         const latLng = [Number(spot.lat), Number(spot.long)];
         let showTooltip = null;
         let hideTooltip = null;
+        let radiusCircle = null;
 
         if (matchesFilters) {
-            const radiusCircle = L.circle(latLng, {
+            radiusCircle = L.circle(latLng, {
                 radius: spot.radius,
                 color: colour,
                 opacity: 0.95,
@@ -1583,10 +1610,23 @@ function renderMapSpots(spots) {
             className: `spot-centre-marker ${matchesFilters ? 'is-interactive' : 'is-muted'}`,
         });
 
+        state.mapLayersBySpotId.set(Number(spot.id), {
+            radiusCircle,
+            dot,
+            colour,
+            matchesFilters,
+        });
+
         if (matchesFilters) {
             dot.on('click', () => focusSpotInList(spot.id));
-            dot.on('mouseover', showTooltip);
-            dot.on('mouseout', hideTooltip);
+            dot.on('mouseover', () => {
+                showTooltip?.();
+                setSpotListMapHighlighted(spot.id, true);
+            });
+            dot.on('mouseout', () => {
+                hideTooltip?.();
+                setSpotListMapHighlighted(spot.id, false);
+            });
         }
         dots.push(dot);
     }

@@ -9,7 +9,7 @@ import {
     spotPlaceText,
     unixToText,
 } from './spot_ui.js?v=single-open-details-v1-20260722';
-import { createReusableSpotMap } from './spot_map.js';
+import { createReusableSpotMap } from './spot_map.js?v=map-list-hover-sync-v1-20260722';
 import {
     createNoticePresenter,
     getLanguage,
@@ -20,6 +20,7 @@ const APP_NAME = document.body.dataset.appName || 'NimHunt';
 const NIMIQ_PAY_URL = document.body.dataset.nimiqPayUrl || 'https://nimpay.app';
 const MAP_TILE_URL = document.body.dataset.mapTileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const MAP_TILE_ATTRIBUTION = document.body.dataset.mapTileAttribution || '&copy; OpenStreetMap contributors';
+const MAP_LIST_SCROLL_DURATION_MS = 420;
 
 const TEXT = makeMyClaimsText({ appName: APP_NAME, nimiqPayUrl: NIMIQ_PAY_URL });
 
@@ -242,6 +243,50 @@ function setClaimExpanded(item, summary, detail, claimId, expanded) {
     }
 }
 
+function setClaimListMapHighlighted(claimId, highlighted) {
+    const item = els.list.querySelector(`[data-claim-id="${Number(claimId)}"]`);
+    item?.classList.toggle('is-map-highlighted', Boolean(highlighted));
+}
+
+function setClaimMapHighlighted(claimId, highlighted) {
+    return state.claimMap?.setSpotHighlighted(Number(claimId), Boolean(highlighted)) || false;
+}
+
+function fastSmoothScrollToClaim(element, durationMs = MAP_LIST_SCROLL_DURATION_MS) {
+    if (!element) return false;
+    const startY = window.scrollY;
+    const targetY = Math.max(0, startY + element.getBoundingClientRect().top - 12);
+    const distance = targetY - startY;
+    if (Math.abs(distance) < 2) return true;
+
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+        window.scrollTo(0, targetY);
+        return true;
+    }
+
+    const startedAt = performance.now();
+    const duration = Math.min(1800, Math.max(120, Number(durationMs) || MAP_LIST_SCROLL_DURATION_MS));
+    const step = (now) => {
+        const progress = Math.min(1, (now - startedAt) / duration);
+        const eased = 1 - ((1 - progress) ** 3);
+        window.scrollTo(0, startY + distance * eased);
+        if (progress < 1) window.requestAnimationFrame(step);
+    };
+    window.requestAnimationFrame(step);
+    return true;
+}
+
+function focusClaimInList(claimId) {
+    const item = els.list.querySelector(`[data-claim-id="${Number(claimId)}"]`);
+    if (!item) return false;
+    const summary = item.querySelector('.spot-list-toggle');
+    const detail = item.querySelector('.claim-list-detail');
+    if (!summary || !detail) return false;
+    setClaimExpanded(item, summary, detail, Number(claimId), true);
+    window.requestAnimationFrame(() => fastSmoothScrollToClaim(item));
+    return true;
+}
+
 function buildClaimListItem(claim) {
     const claimId = Number(claim.id);
     const spot = claim.spot || {};
@@ -249,6 +294,8 @@ function buildClaimListItem(claim) {
     const item = document.createElement('li');
     item.className = 'spot-list-item my-claim-list-item';
     item.dataset.claimId = String(claimId);
+    item.addEventListener('mouseenter', () => setClaimMapHighlighted(claimId, true));
+    item.addEventListener('mouseleave', () => setClaimMapHighlighted(claimId, false));
 
     const summary = document.createElement('button');
     summary.type = 'button';
@@ -346,10 +393,9 @@ function renderMap(claims) {
                 tileAttribution: MAP_TILE_ATTRIBUTION,
                 spots: items,
                 colourForSpot: (item) => claimMapColour(item.claim || {}),
-                popupBuilder: claimPopupContent,
-                onSpotClick: (item) => {
-                    window.location.href = item.href;
-                },
+                onSpotCentreClick: (item) => focusClaimInList(item.id),
+                onSpotHover: (item, highlighted) => setClaimListMapHighlighted(item.id, highlighted),
+                radiusInteractive: false,
             });
             if (!state.claimMap) throw new Error('Leaflet not available.');
             return;

@@ -830,6 +830,11 @@ h2 {
     overflow: hidden;
 }
 
+.spot-list-item.is-map-highlighted {
+    outline: 2px solid var(--nimiq-blue, #1f2348);
+    outline-offset: 1px;
+}
+
 .spot-list-link {
     display: flex;
     align-items: center;
@@ -1011,17 +1016,15 @@ h2 {
     display: none;
 }
 
+/* Intentionally compact on every Spot and Claim detail card. */
 .spot-detail-description {
-    margin: 0 0 0.75em;
+    margin: -0.35em 0 0.75em;
     color: var(--nh-muted);
     font-style: italic;
     font-weight: 750;
     text-align: center;
 }
 
-.find-shell .spot-list-item.is-expanded .spot-list-detail .spot-detail-description {
-    margin-top: -0.35em;
-}
 
 
 #claim-error,

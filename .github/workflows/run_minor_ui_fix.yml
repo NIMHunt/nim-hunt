@@ -1,15 +1,20 @@
 name: Run minor UI patch
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/desktop-location-lock-spacing
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.head_ref == 'agent/desktop-location-lock-spacing'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

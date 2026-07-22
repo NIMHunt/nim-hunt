@@ -24,30 +24,39 @@ class HomeDisclaimerTest(unittest.TestCase):
     def test_server_switch_is_a_plain_boolean(self):
         self.assertIs(type(const.SHOW_PROJECT_DISCLAIMER), bool)
 
-    def test_enabled_disclaimer_renders_with_two_warning_icons(self):
+    def test_enabled_disclaimer_reuses_primary_action_classes(self):
         rendered = self.render_home(enabled=True)
         self.assertIn('id="project-disclaimer-title"', rendered)
-        self.assertEqual(rendered.count("#nq-alert-triangle"), 2)
+        self.assertIn(
+            'class="project-disclaimer-note nq-button green action-button primary-action"',
+            rendered,
+        )
+        self.assertIn('class="action-title"', rendered)
+        self.assertIn('class="action-detail"', rendered)
         self.assertIn("never spend more than you can afford to lose", rendered)
+        self.assertNotIn("#nq-alert-triangle", rendered)
+        self.assertNotIn('class="project-disclaimer"', rendered)
 
     def test_disabled_disclaimer_is_not_rendered(self):
         rendered = self.render_home(enabled=False)
-        self.assertNotIn("project-disclaimer", rendered)
+        self.assertNotIn("project-disclaimer-note", rendered)
 
-    def test_server_context_and_button_like_styling_are_present(self):
+    def test_only_noninteractive_overrides_are_custom(self):
         public_source = (self.root / "public_html.py").read_text(encoding="utf-8")
-        css_source = (self.root / "static" / "home.css").read_text(encoding="utf-8")
+        css_source = (
+            self.root / "static" / "disclaimer_button.css"
+        ).read_text(encoding="utf-8")
         banner_source = (
             self.root / "static" / "network_mode_banner.js"
         ).read_text(encoding="utf-8")
 
         self.assertIn("project_disclaimer_enabled", public_source)
         self.assertIn("SHOW_PROJECT_DISCLAIMER", public_source)
-        self.assertIn("linear-gradient", css_source)
-        self.assertIn(".project-disclaimer", css_source)
-        self.assertIn("box-shadow", css_source)
-        # The network label is asynchronously prepended, so it remains above
-        # the server-rendered disclaimer and the hero.
+        self.assertIn("pointer-events: none", css_source)
+        self.assertIn("cursor: default", css_source)
+        self.assertNotIn("linear-gradient", css_source)
+        self.assertNotIn("box-shadow", css_source)
+        self.assertNotIn("background:", css_source)
         self.assertIn("shell.prepend(createNetworkModeBanner(label))", banner_source)
 
 

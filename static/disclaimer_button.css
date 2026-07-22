@@ -1,0 +1,18 @@
+/*
+ * Home disclaimer presentation.
+ *
+ * The notice deliberately reuses NimHunt's existing Nimiq green primary-action
+ * classes. This file only removes interactive button behaviour; it does not
+ * invent a separate colour, gradient, border, radius, shadow, or typography.
+ */
+.project-disclaimer-note {
+    cursor: default !important;
+    pointer-events: none;
+    user-select: text;
+}
+
+.project-disclaimer-note::before,
+.project-disclaimer-note::after {
+    display: none !important;
+    content: none !important;
+}

@@ -112,6 +112,11 @@ APP_ICON_PATH = "/favicon.ico"
 # Used by homepage copy when the mini app is opened outside Nimiq Pay.
 NIMIQ_PAY_URL = "https://nimpay.app"
 
+# Show the prominent Home-page safety notice. This is deliberately a simple
+# server-side switch rather than browser state, so one deployment setting
+# controls every visitor consistently.
+SHOW_PROJECT_DISCLAIMER = True
+
 # -----------------------------
 # Development / test settings
 # -----------------------------

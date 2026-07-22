@@ -1,53 +1,56 @@
 from pathlib import Path
 
 
-def replace_once(path: str, old: str, new: str) -> None:
+def replace_exact(path: str, old: str, new: str, expected_count: int = 1) -> None:
     file_path = Path(path)
     text = file_path.read_text(encoding="utf-8")
     count = text.count(old)
-    if count != 1:
-        raise RuntimeError(f"Expected one match in {path}, found {count}: {old!r}")
-    file_path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    if count != expected_count:
+        raise RuntimeError(
+            f"Expected {expected_count} matches in {path}, found {count}: {old!r}"
+        )
+    file_path.write_text(text.replace(old, new), encoding="utf-8")
 
 
-replace_once(
+replace_exact(
     "public_html.py",
     '_ASSET_VERSION = "map-list-hover-sync-v1-20260722"',
     '_ASSET_VERSION = "map-list-hover-visual-fix-v1-20260723"',
 )
 
-replace_once(
+replace_exact(
     "static/find_spots.js",
     "    highlight: '#1f2348',",
     "    highlight: '#0582ca',",
 )
 
-replace_once(
+replace_exact(
     "static/spot_map.js",
     "    highlightColour = '#1f2348',",
     "    highlightColour = '#0582ca',",
+    expected_count=2,
 )
 
 for path in ("static/my_spots.js", "static/my_claims.js"):
-    replace_once(
+    replace_exact(
         path,
         "./spot_map.js?v=map-list-hover-sync-v1-20260722",
         "./spot_map.js?v=map-list-hover-visual-fix-v1-20260723",
     )
 
-replace_once(
+replace_exact(
     "static/home.css",
     "    --nh-success: #21bca5;\n",
     "    --nh-success: #21bca5;\n    --nh-highlight-blue: #0582ca;\n",
 )
 
-replace_once(
+replace_exact(
     "static/home.css",
     "    outline: 2px solid var(--nimiq-blue, #1f2348);",
     "    outline: 2px solid var(--nh-highlight-blue);",
 )
 
-replace_once(
+replace_exact(
     "static/home.css",
     """/* Intentionally compact on every Spot and Claim detail card. */
 .spot-detail-description {
@@ -73,25 +76,25 @@ replace_once(
 """,
 )
 
-replace_once(
+replace_exact(
     "tests/test_map_list_hover_sync.py",
     '    assert "outline: 2px solid var(--nimiq-blue, #1f2348);" in css\n',
     '    assert "--nh-highlight-blue: #0582ca;" in css\n'
     '    assert "outline: 2px solid var(--nh-highlight-blue);" in css\n',
 )
-replace_once(
+replace_exact(
     "tests/test_map_list_hover_sync.py",
     '    assert "/* Intentionally compact on every Spot and Claim detail card. */" in css\n',
     '    assert ".nq-style .spot-list-detail > .spot-detail-description" in css\n'
     '    assert "overrides Nimiq Style\'s generic paragraph margins" in css\n',
 )
-replace_once(
+replace_exact(
     "tests/test_map_list_hover_sync.py",
     '    assert \'_ASSET_VERSION = "map-list-hover-sync-v1-20260722"\' in public_html\n',
     '    assert \'_ASSET_VERSION = "map-list-hover-visual-fix-v1-20260723"\' in public_html\n',
 )
 
-replace_once(
+replace_exact(
     "tests/test_find_spots_map_interactions.py",
     '            "/* Intentionally compact on every Spot and Claim detail card. */",\n',
     '            ".nq-style .spot-list-detail > .spot-detail-description",\n',

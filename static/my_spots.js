@@ -16,10 +16,10 @@ import {
     setCopyButtonIcon,
     spotScheduleSummary,
     unixToText,
-} from './spot_ui.js?v=lock-prefix-v1-20260722';
+} from './spot_ui.js?v=single-open-details-v1-20260722';
 import { createReusableSpotMap } from './spot_map.js';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
-import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=transaction-integrity-v1-20260721';
+import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=single-open-details-v1-20260722';
 import {
     createNoticePresenter,
     getLanguage,
@@ -835,6 +835,19 @@ function mySpotRenderSignature(spot) {
     return JSON.stringify(spot);
 }
 
+function collapseOtherMySpotItems(activeSpotId) {
+    const activeId = Number(activeSpotId);
+    for (const expandedId of [...state.expandedSpotIds]) {
+        if (Number(expandedId) !== activeId) state.expandedSpotIds.delete(expandedId);
+    }
+
+    for (const item of els.sections.querySelectorAll('.spot-list-item.is-expanded')) {
+        if (Number(item.dataset.spotId) === activeId) continue;
+        const summary = item.querySelector('.spot-list-toggle');
+        if (summary?.getAttribute('aria-expanded') === 'true') summary.click();
+    }
+}
+
 function buildMySpotListItem(spot) {
     const item = createSpotListItem({
         spot,
@@ -842,8 +855,12 @@ function buildMySpotListItem(spot) {
         metaBuilder: buildMySpotMeta,
         expanded: state.expandedSpotIds.has(Number(spot.id)),
         onToggle: (spotId, expanded) => {
-            if (expanded) state.expandedSpotIds.add(spotId);
-            else state.expandedSpotIds.delete(spotId);
+            if (expanded) {
+                collapseOtherMySpotItems(spotId);
+                state.expandedSpotIds.add(spotId);
+            } else {
+                state.expandedSpotIds.delete(spotId);
+            }
         },
     });
     item.dataset.spotId = String(Number(spot.id));

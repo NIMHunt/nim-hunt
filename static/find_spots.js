@@ -1,5 +1,5 @@
 import { init, requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=find-spots-visual-polish-v1-20260722';
+import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=single-open-details-v1-20260722';
 import {
     appendBulletLine,
     appendDetailDescription,
@@ -12,7 +12,7 @@ import {
     metresToText,
     spotScheduleTooltip,
     unixToText,
-} from './spot_ui.js?v=lock-prefix-v1-20260722';
+} from './spot_ui.js?v=single-open-details-v1-20260722';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { formatNimFromLuna } from './nim_format.js';
 import {
@@ -1296,6 +1296,14 @@ function buildReportControl(spot) {
     return line;
 }
 
+function buildRewardAmountLine(amountText) {
+    const fragment = document.createDocumentFragment();
+    const amount = document.createElement('strong');
+    amount.textContent = amountText;
+    fragment.append(amount, document.createTextNode(' Per Claim'));
+    return fragment;
+}
+
 function buildSpotDetail(spot) {
     const detail = document.createElement('div');
     detail.className = 'spot-list-detail';
@@ -1303,7 +1311,6 @@ function buildSpotDetail(spot) {
     const existingClaims = Number(spot.claim_count || 0);
     const maxClaims = Number(spot.max_total_claims || 1);
     const availableClaims = Math.max(0, maxClaims - existingClaims);
-    const claimWord = availableClaims === 1 ? 'claim' : 'claims';
     const maxClaimsPerUser = Number(spot.max_claims_per_user ?? 1);
     const duration = durationText(spot.claim_duration);
     const creator = spot.creator_display_name || 'unknown creator';
@@ -1312,7 +1319,8 @@ function buildSpotDetail(spot) {
 
     const lines = document.createElement('ul');
     lines.className = 'spot-detail-lines';
-    appendBulletLine(lines, `${nimPerClaimText(spot)} Per Claim (${availableClaims} ${claimWord} available)`);
+    appendBulletLine(lines, buildRewardAmountLine(nimPerClaimText(spot)));
+    appendBulletLine(lines, `${availableClaims} ${availableClaims === 1 ? 'Claim' : 'Claims'} Remaining`);
 
     if (maxClaimsPerUser !== 1) {
         appendBulletLine(
@@ -1324,7 +1332,7 @@ function buildSpotDetail(spot) {
     appendBulletLine(lines, scheduleTextSpan(spot));
 
     if (duration) {
-        appendBulletLine(lines, `Requires a claim duration of ${duration}`);
+        appendBulletLine(lines, `Must remain on Spot for ${duration}`);
     }
 
     appendBulletLine(lines, buildSpotLinkControl(spot));
@@ -1340,7 +1348,21 @@ function buildSpotDetail(spot) {
     return detail;
 }
 
+function collapseOtherSpotEntries(activeSpotId) {
+    const activeId = Number(activeSpotId);
+    for (const expandedId of [...state.expandedSpotIds]) {
+        if (Number(expandedId) !== activeId) state.expandedSpotIds.delete(expandedId);
+    }
+
+    for (const [otherSpotId, entry] of state.listEntriesBySpotId.entries()) {
+        if (Number(otherSpotId) === activeId) continue;
+        if (entry.summary.getAttribute('aria-expanded') !== 'true') continue;
+        setListItemExpanded(entry.item, entry.summary, entry.detail, Number(otherSpotId), false);
+    }
+}
+
 function setListItemExpanded(item, summary, detail, spotId, expanded) {
+    if (expanded) collapseOtherSpotEntries(spotId);
     item.classList.toggle('is-expanded', expanded);
     summary.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     detail.hidden = !expanded;

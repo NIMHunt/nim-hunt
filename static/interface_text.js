@@ -278,7 +278,7 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
             ran: ({ starts, ends }) => `Ran ${starts} until ${ends}`,
             scheduled: ({ starts, ends }) => `Scheduled ${starts} until ${ends}`,
             activeWindow: ({ starts, ends }) => `Active ${starts} until ${ends}`,
-            claimDuration: (duration) => `Requires a claim duration of ${duration}`,
+            claimDuration: (duration) => `Must remain on Spot for ${duration}`,
             claimRadius: (radius) => `Claim radius: ${radius} m`,
             claimsPerUser: (maxClaimsPerUser) => (maxClaimsPerUser <= 0 ? 'Unlimited claims per user' : `${maxClaimsPerUser} claims per user`),
             claimCodes: ({ unused, total }) => `Claim codes: ${unused} unused / ${total} total`,

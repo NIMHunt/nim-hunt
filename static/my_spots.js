@@ -16,7 +16,7 @@ import {
     setCopyButtonIcon,
     spotScheduleSummary,
     unixToText,
-} from './spot_ui.js?v=long-titles-v2-20260722';
+} from './spot_ui.js?v=lock-prefix-v1-20260722';
 import { createReusableSpotMap } from './spot_map.js';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=transaction-integrity-v1-20260721';

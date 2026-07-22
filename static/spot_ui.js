@@ -363,11 +363,11 @@ export function appendSpotTitleWithLock(
         );
     }
 
-    titleEl.append(titleText);
     if (spot.use_password) {
         const lockIcon = createPasswordRequiredIcon();
         titleEl.append(lockIcon);
     }
+    titleEl.append(titleText);
 }
 
 export function buildSpotLinkControl(spot) {

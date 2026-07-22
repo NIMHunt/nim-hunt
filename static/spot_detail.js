@@ -10,7 +10,7 @@ import {
     highestTimeUnitText,
     spotScheduleTooltip,
     unixToText,
-} from './spot_ui.js?v=long-titles-v2-20260722';
+} from './spot_ui.js?v=lock-prefix-v1-20260722';
 import {
     createNoticePresenter,
     getLanguage,

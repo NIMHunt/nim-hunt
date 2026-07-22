@@ -2798,6 +2798,7 @@ h2 {
     width: 1em;
     height: 1em;
     margin-left: 0;
+    margin-right: 0.25em;
     vertical-align: -0.12em;
     color: currentColor;
 }

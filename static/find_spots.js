@@ -1,5 +1,5 @@
 import { init, requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=map-list-interactions-v1-20260722';
+import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=find-spots-visual-polish-v1-20260722';
 import {
     appendBulletLine,
     appendDetailDescription,

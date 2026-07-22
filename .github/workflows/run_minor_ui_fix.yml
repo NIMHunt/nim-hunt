@@ -43,13 +43,13 @@ jobs:
 
           path = Path('tests/test_page_lifecycle.py')
           text = path.read_text(encoding='utf-8')
-          old = """                performanceObj: backForwardPerformance,
-                MutationObserverClass: LifecycleMutationObserver,"""
-          new = """                performanceObj: {{ getEntriesByType: () => [{{ type: 'navigate' }}] }},
-                MutationObserverClass: LifecycleMutationObserver,"""
-          if text.count(old) != 1:
-              raise SystemExit(f'Expected one tracked performance block, found {text.count(old)}')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          old = '                performanceObj: backForwardPerformance,'
+          new = "                performanceObj: {{ getEntriesByType: () => [{{ type: 'navigate' }}] }},"
+          index = text.rfind(old)
+          if index < 0:
+              raise SystemExit('Tracked performance configuration was not found')
+          text = text[:index] + new + text[index + len(old):]
+          path.write_text(text, encoding='utf-8')
           PY
 
       - name: Upload patch diagnostics

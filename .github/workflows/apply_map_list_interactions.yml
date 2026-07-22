@@ -33,12 +33,10 @@ jobs:
           node-version: '20'
 
       - name: Apply focused changes
-        run: python tools/apply_map_list_interactions.py
-
-      - name: Remove temporary machinery
         run: |
-          rm .github/workflows/apply_map_list_interactions.yml
-          rm tools/apply_map_list_interactions.py
+          python tools/apply_map_list_interactions.py
+          sed -i '/^import re$/d' tests/test_find_spots_map_interactions.py
+          sed -i "s/\` ,$/\`,/" static/interface_text.js
 
       - name: Install dependencies
         run: |
@@ -47,15 +45,18 @@ jobs:
           npm ci --prefix helpers
 
       - name: Verify complete project
+        id: verification
+        continue-on-error: true
         run: |
-          python -m pytest -q
-          npm test --prefix helpers
-          ruff check .
-          python -m compileall -q *.py tests
-          for file in static/*.js; do node --check --input-type=module < "$file"; done
-          for file in helpers/*.mjs; do node --check "$file"; done
-          for file in *.sh; do bash -n "$file"; done
-          python - <<'PY'
+          {
+            python -m pytest -q
+            npm test --prefix helpers
+            ruff check .
+            python -m compileall -q *.py tests
+            for file in static/*.js; do node --check --input-type=module < "$file"; done
+            for file in helpers/*.mjs; do node --check "$file"; done
+            for file in *.sh; do bash -n "$file"; done
+            python - <<'PY'
           from pathlib import Path
           from jinja2 import Environment, FileSystemLoader
 
@@ -64,13 +65,31 @@ jobs:
           for path in sorted(templates.glob('*.html')):
               environment.get_template(path.name)
           PY
-          NIMHUNT_DB_PATH="${RUNNER_TEMP}/nimhunt-ci.db" \
-          NIMHUNT_DEPLOYMENT_MODE=development \
-          NIMHUNT_NIMIQ_NETWORK=TestAlbatross \
-          NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC=1 \
-          python spoof.py
-          python -m pip check
-          git diff --check
+            NIMHUNT_DB_PATH="${RUNNER_TEMP}/nimhunt-ci.db" \
+            NIMHUNT_DEPLOYMENT_MODE=development \
+            NIMHUNT_NIMIQ_NETWORK=TestAlbatross \
+            NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC=1 \
+            python spoof.py
+            python -m pip check
+            git diff --check
+          } > verification-output.txt 2>&1
+
+      - name: Upload validation output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: map-list-verification-output
+          path: verification-output.txt
+
+      - name: Stop on validation failure
+        if: steps.verification.outcome == 'failure'
+        run: exit 1
+
+      - name: Remove temporary machinery
+        run: |
+          rm .github/workflows/apply_map_list_interactions.yml
+          rm tools/apply_map_list_interactions.py
+          rm -f verification-output.txt
 
       - name: Commit final result
         run: |

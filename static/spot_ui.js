@@ -366,7 +366,7 @@ export function appendSpotTitleWithLock(
     titleEl.append(titleText);
     if (spot.use_password) {
         const lockIcon = createPasswordRequiredIcon();
-        titleEl.append(document.createTextNode(' '), lockIcon);
+        titleEl.append(lockIcon);
     }
 }
 

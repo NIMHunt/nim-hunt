@@ -56,6 +56,7 @@ class HomeDisclaimerTest(unittest.TestCase):
         self.assertIn("SHOW_PROJECT_DISCLAIMER", public_source)
         self.assertIn("background: var(--nh-warning)", css_source)
         self.assertIn("height: auto", css_source)
+        self.assertNotIn("min-height: 112px", css_source)
         self.assertIn("white-space: normal", css_source)
         self.assertIn("overflow-wrap: anywhere", css_source)
         self.assertNotIn("linear-gradient", css_source)

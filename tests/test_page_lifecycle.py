@@ -126,14 +126,28 @@ class PageLifecycleJavaScriptTest(unittest.TestCase):
             assert.equal(openBackdrop.hidden, true);
             assert.equal(reloadCount, 3);
 
-            // The cached DOM marker is scoped to this exact history entry and is
-            // trusted even when both browser signals claim this is a normal load.
+            // A marker that appears before the initial pageshow—for example when
+            // location permission is denied immediately—must not be mistaken for
+            // a restored history entry.
             documentElement.setAttribute(markerName, '1');
             assert.equal(lifecycle.repairOpenCardsAfterHistoryRestore({{
                 event: {{ persisted: false }},
                 windowObj,
                 documentObj,
                 performanceObj: {{ getEntriesByType: () => [{{ type: 'navigate' }}] }},
+                historyEntryWasHidden: false,
+            }}), false);
+            assert.equal(documentElement.hasAttribute(markerName), true);
+            assert.equal(reloadCount, 3);
+
+            // Once the same page instance has received pagehide, its cached DOM
+            // marker is trustworthy even when both browser signals are wrong.
+            assert.equal(lifecycle.repairOpenCardsAfterHistoryRestore({{
+                event: {{ persisted: false }},
+                windowObj,
+                documentObj,
+                performanceObj: {{ getEntriesByType: () => [{{ type: 'navigate' }}] }},
+                historyEntryWasHidden: true,
             }}), true);
             assert.equal(documentElement.hasAttribute(markerName), false);
             assert.equal(reloadCount, 4);
@@ -145,6 +159,7 @@ class PageLifecycleJavaScriptTest(unittest.TestCase):
                 windowObj,
                 documentObj,
                 performanceObj: {{ getEntriesByType: () => [{{ type: 'navigate' }}] }},
+                historyEntryWasHidden: false,
             }}), false);
             assert.equal(reloadCount, 4);
 
@@ -172,13 +187,16 @@ class PageLifecycleJavaScriptTest(unittest.TestCase):
             let nextTimerId = 1;
             const timers = new Map();
             let trackedReloadCount = 0;
+            let pagehideHandler = null;
             let pageshowHandler = null;
             const trackedWindow = {{
                 location: {{ reload() {{ trackedReloadCount += 1; }} }},
                 addEventListener(name, handler) {{
+                    if (name === 'pagehide') pagehideHandler = handler;
                     if (name === 'pageshow') pageshowHandler = handler;
                 }},
                 removeEventListener(name, handler) {{
+                    if (name === 'pagehide' && pagehideHandler === handler) pagehideHandler = null;
                     if (name === 'pageshow' && pageshowHandler === handler) pageshowHandler = null;
                 }},
                 setTimeout(callback) {{
@@ -202,9 +220,10 @@ class PageLifecycleJavaScriptTest(unittest.TestCase):
             const lifecycleCleanup = lifecycle.installHistoryCardRestoreGuard({{
                 windowObj: trackedWindow,
                 documentObj: trackedDocument,
-                performanceObj: backForwardPerformance,
+                performanceObj: {{ getEntriesByType: () => [{{ type: 'navigate' }}] }},
                 MutationObserverClass: LifecycleMutationObserver,
             }});
+            assert.equal(typeof pagehideHandler, 'function');
             assert.equal(typeof pageshowHandler, 'function');
             for (const callback of [...timers.values()]) callback();
             timers.clear();
@@ -214,16 +233,24 @@ class PageLifecycleJavaScriptTest(unittest.TestCase):
             lifecycleObserverCallback();
             assert.equal(trackedDocumentElement.hasAttribute(markerName), true);
 
+            // An immediately denied location request can open a notice before the
+            // initial pageshow. Without a preceding pagehide, it must not reload.
+            pageshowHandler({{ persisted: false }});
+            assert.equal(trackedReloadCount, 0);
+            assert.equal(trackedDocumentElement.hasAttribute(markerName), true);
+
             // Hide and navigate in the same task: the delayed manual-close clear
             // has not fired, so a restored page is still recognised as stale.
             trackedBackdrop.hidden = true;
             lifecycleObserverCallback();
             assert.equal(trackedDocumentElement.hasAttribute(markerName), true);
-            pageshowHandler({{ persisted: true }});
+            pagehideHandler();
+            pageshowHandler({{ persisted: false }});
             assert.equal(trackedReloadCount, 1);
             assert.equal(trackedDocumentElement.hasAttribute(markerName), false);
             lifecycleCleanup();
             assert.equal(lifecycleObserverDisconnected, true);
+            assert.equal(pagehideHandler, null);
             assert.equal(pageshowHandler, null);
 
             const blankInput = {{ value: '' }};

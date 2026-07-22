@@ -8,7 +8,7 @@ import {
     nimFromLunaText,
     spotPlaceText,
     unixToText,
-} from './spot_ui.js?v=long-titles-v1-20260722';
+} from './spot_ui.js?v=long-titles-v2-20260722';
 import { createReusableSpotMap } from './spot_map.js';
 import {
     createNoticePresenter,

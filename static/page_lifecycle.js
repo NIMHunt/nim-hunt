@@ -56,6 +56,7 @@ export function repairOpenCardsAfterHistoryRestore({
     windowObj = globalThis.window,
     documentObj = globalThis.document,
     performanceObj = globalThis.performance,
+    historyEntryWasHidden = false,
 } = {}) {
     if (!windowObj || !documentObj) return false;
 
@@ -63,10 +64,14 @@ export function repairOpenCardsAfterHistoryRestore({
     const restoredBackdrops = openBackdrops(documentObj);
     const browserReportsHistoryReturn = isBackForwardRestore(event, performanceObj);
 
-    // A marker retained in the cached DOM belongs to this exact history entry.
-    // Trust it even when WKWebView reports both browser-history signals wrongly.
-    // Without a marker, require a history-return signal and a visibly stale card.
-    if (!markedHistoryEntry && (!browserReportsHistoryReturn || restoredBackdrops.length === 0)) {
+    // A marker retained in the cached DOM is trustworthy only after this same
+    // JavaScript page instance has actually been hidden. This distinguishes a
+    // genuine history restoration from the initial pageshow event, where an
+    // immediately denied location request may already have opened a notice.
+    const trustedMarkedHistoryEntry = markedHistoryEntry
+        && (historyEntryWasHidden || browserReportsHistoryReturn);
+    if (!trustedMarkedHistoryEntry
+        && (!browserReportsHistoryReturn || restoredBackdrops.length === 0)) {
         return false;
     }
 
@@ -110,12 +115,22 @@ export function installHistoryCardRestoreGuard({
         }, MANUAL_CLOSE_GRACE_MILLISECONDS);
     };
 
-    const pageshowHandler = (event) => repairOpenCardsAfterHistoryRestore({
-        event,
-        windowObj,
-        documentObj,
-        performanceObj,
-    });
+    let historyEntryWasHidden = false;
+    const pagehideHandler = () => {
+        historyEntryWasHidden = true;
+    };
+    const pageshowHandler = (event) => {
+        const wasHidden = historyEntryWasHidden;
+        historyEntryWasHidden = false;
+        return repairOpenCardsAfterHistoryRestore({
+            event,
+            windowObj,
+            documentObj,
+            performanceObj,
+            historyEntryWasHidden: wasHidden,
+        });
+    };
+    windowObj.addEventListener('pagehide', pagehideHandler);
     windowObj.addEventListener('pageshow', pageshowHandler);
 
     let observer = null;
@@ -133,6 +148,7 @@ export function installHistoryCardRestoreGuard({
     return () => {
         clearScheduledMarker();
         observer?.disconnect();
+        windowObj.removeEventListener('pagehide', pagehideHandler);
         windowObj.removeEventListener('pageshow', pageshowHandler);
     };
 }

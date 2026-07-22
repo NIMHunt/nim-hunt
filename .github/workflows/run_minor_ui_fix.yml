@@ -26,6 +26,10 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Refresh patch base label
+        run: |
+          sed -i 's/presentation-spots-v1-20260722/orange-disclaimer-history-v1-20260722/' tools/apply_minor_ui_refresh_fix.py
+
       - name: Apply patch
         id: patch
         continue-on-error: true

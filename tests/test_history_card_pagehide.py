@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 class HistoryCardPagehideRegressionTest(unittest.TestCase):
-    def test_pagehide_persists_card_marker_and_history_restore_reloads(self):
+    def test_pagehide_marker_survives_unreliable_history_signals(self):
         module_path = Path(__file__).resolve().parents[1] / "static" / "page_lifecycle.js"
         module_url = module_path.as_uri()
         script = f"""
@@ -66,14 +66,14 @@ class HistoryCardPagehideRegressionTest(unittest.TestCase):
                 observe() {{}}
                 disconnect() {{}}
             }}
-            const backForwardPerformance = {{
-                getEntriesByType: () => [{{ type: 'back_forward' }}],
+            const misleadingPerformance = {{
+                getEntriesByType: () => [{{ type: 'navigate' }}],
             }};
 
             const cleanup = lifecycle.installHistoryCardRestoreGuard({{
                 windowObj,
                 documentObj,
-                performanceObj: backForwardPerformance,
+                performanceObj: misleadingPerformance,
                 MutationObserverClass: FakeMutationObserver,
             }});
 
@@ -84,8 +84,8 @@ class HistoryCardPagehideRegressionTest(unittest.TestCase):
             assert.equal(backdrop.hidden, true);
             assert.equal(stored.get('nimhunt:card-navigation:/my-spots'), '1');
 
-            // This is the reported case: browser Back restores stale page state,
-            // but the embedded browser reports pageshow.persisted as false.
+            // The embedded browser now supplies neither conventional history
+            // signal. The marker written for this exact page must still win.
             handlers.get('pageshow')({{ persisted: false }});
             assert.equal(reloads, 1);
             assert.equal(stored.has('nimhunt:card-navigation:/my-spots'), false);

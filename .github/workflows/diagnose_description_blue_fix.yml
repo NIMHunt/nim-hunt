@@ -1,0 +1,25 @@
+name: Diagnose description and blue fix
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'agent/fix-description-spacing-and-blue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Capture patch output
+        run: python .github/scripts/apply_description_blue_fix.py > apply-output.txt 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: description-blue-apply-output
+          path: apply-output.txt

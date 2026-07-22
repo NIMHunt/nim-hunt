@@ -41,7 +41,7 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(const.TEMPLATES_DIR))
 logger = logging.getLogger(__name__)
 
-_ASSET_VERSION = "lock-prefix-unavailable-v1-20260722"
+_ASSET_VERSION = "map-list-interactions-v1-20260722"
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ALLOWED_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$")
@@ -268,6 +268,7 @@ def _shared_template_context(request: Request, *, page_title: str | None = None)
         "spot_title_min": const.SPOT_TITLE_MIN_CHARS,
         "spot_title_max": const.SPOT_TITLE_MAX_CHARS,
         "max_draft_spots_per_user": int(getattr(const, "MAX_DRAFT_SPOTS_PER_USER", 3)),
+        "max_spot_radius_metres": int(getattr(const, "MAX_SPOT_RADIUS_METRES", 1000)),
         "test_features_enabled": bool(getattr(const, "TEST_FEATURES_ENABLED", False)),
         "project_disclaimer_enabled": bool(
             getattr(const, "SHOW_PROJECT_DISCLAIMER", False)

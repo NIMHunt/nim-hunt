@@ -660,6 +660,54 @@ h2 {
     font-size: 0.72rem;
 }
 
+.spot-radius-circle.leaflet-interactive {
+    cursor: default;
+}
+
+.spot-centre-marker.is-interactive.leaflet-interactive {
+    cursor: pointer;
+}
+
+.leaflet-tooltip.map-spot-title-tooltip {
+    padding: 8px 10px;
+    border: 1px solid var(--nh-border);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.96);
+    color: var(--nh-muted);
+    box-shadow: 0 8px 22px rgba(31, 35, 72, 0.10);
+    font-family: Muli, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 1rem;
+    font-weight: 900;
+    line-height: 1.15;
+    white-space: nowrap;
+}
+
+.leaflet-tooltip-top.map-spot-title-tooltip::before {
+    border-top-color: rgba(255, 255, 255, 0.96);
+}
+
+.map-spot-title-tooltip-content {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.map-spot-title-tooltip-lock {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1em;
+    height: 1em;
+    margin-right: 0.25em;
+    color: currentColor;
+}
+
+.map-spot-title-tooltip-lock .nq-icon {
+    display: block;
+    width: 1em;
+    height: 1em;
+}
+
 .spot-list-card {
     padding: 18px;
 }

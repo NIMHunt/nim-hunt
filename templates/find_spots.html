@@ -21,6 +21,7 @@
     data-map-tile-attribution="{{ map_tile_attribution }}"
     data-max-map-init-spots="{{ max_map_init_spots }}"
     data-max-map-zoom-out="{{ max_map_zoom_out }}"
+    data-max-spot-radius-metres="{{ max_spot_radius_metres | default(1000) }}"
     data-create-spot-url="{{ create_spot_url }}"
     data-claim-captcha-min="{{ claim_captcha_min | default(1) }}"
     data-claim-captcha-max="{{ claim_captcha_max | default(9) }}"
@@ -116,9 +117,9 @@
             <div id="spot-map" class="spot-map"></div>
         </section>
 
-        <section class="spot-list-card" aria-label="Visible spots" data-i18n-aria-label="findSpots.listAria">
+        <section class="spot-list-card" aria-label="Spots" data-i18n-aria-label="findSpots.listAria">
             <div class="spot-list-head">
-                <h2 id="visible-spots-title" data-i18n="findSpots.visibleSpots">Visible Spots</h2>
+                <h2 id="visible-spots-title" data-i18n="findSpots.visibleSpots">Spots</h2>
                 <fieldset class="spot-filters" aria-label="Spot filters" data-i18n-aria-label="findSpots.filtersAria">
                     <label class="filter-toggle">
                         <input id="filter-active" type="checkbox" checked>

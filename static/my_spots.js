@@ -17,7 +17,7 @@ import {
     spotScheduleSummary,
     unixToText,
 } from './spot_ui.js?v=single-open-details-v1-20260722';
-import { createReusableSpotMap } from './spot_map.js';
+import { createReusableSpotMap } from './spot_map.js?v=map-list-hover-sync-v1-20260722';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=single-open-details-v1-20260722';
 import {
@@ -848,6 +848,15 @@ function collapseOtherMySpotItems(activeSpotId) {
     }
 }
 
+function setMySpotListHighlighted(spotId, highlighted) {
+    const item = els.sections.querySelector(`[data-spot-id="${Number(spotId)}"]`);
+    item?.classList.toggle('is-map-highlighted', Boolean(highlighted));
+}
+
+function setMySpotMapHighlighted(spotId, highlighted) {
+    return state.spotMap?.setSpotHighlighted(Number(spotId), Boolean(highlighted)) || false;
+}
+
 function buildMySpotListItem(spot) {
     const item = createSpotListItem({
         spot,
@@ -865,6 +874,8 @@ function buildMySpotListItem(spot) {
     });
     item.dataset.spotId = String(Number(spot.id));
     item.dataset.renderSignature = mySpotRenderSignature(spot);
+    item.addEventListener('mouseenter', () => setMySpotMapHighlighted(spot.id, true));
+    item.addEventListener('mouseleave', () => setMySpotMapHighlighted(spot.id, false));
     return item;
 }
 
@@ -999,6 +1010,7 @@ function renderMap(spots) {
                 colourForSpot: mySpotsMapColourForSpot,
                 popupBuilder: spotPopupContent,
                 onSpotClick: openSpotPage,
+                onSpotHover: (spot, highlighted) => setMySpotListHighlighted(spot.id, highlighted),
             });
             if (!state.spotMap) throw new Error('Leaflet not available.');
             return;

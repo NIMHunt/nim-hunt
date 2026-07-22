@@ -41,7 +41,7 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(const.TEMPLATES_DIR))
 logger = logging.getLogger(__name__)
 
-_ASSET_VERSION = "single-open-details-v1-20260722"
+_ASSET_VERSION = "map-list-hover-sync-v1-20260722"
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ALLOWED_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$")

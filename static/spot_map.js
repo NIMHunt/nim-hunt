@@ -86,6 +86,26 @@ function bindSpotPopup({ map, layer, spot, popupBuilder, onSpotClick }) {
     );
 }
 
+function spotLayerKey(spotOrId) {
+    const value = typeof spotOrId === 'object' ? spotOrId?.id : spotOrId;
+    return String(value ?? '');
+}
+
+function setLayerEntryHighlighted(entry, highlighted, highlightColour) {
+    if (!entry) return false;
+    const colour = highlighted ? highlightColour : entry.colour;
+    entry.circle?.setStyle({
+        color: colour,
+        fillColor: colour,
+    });
+    entry.marker?.setStyle({
+        color: highlighted ? colour : '#ffffff',
+        fillColor: colour,
+    });
+    if (highlighted) entry.marker?.bringToFront?.();
+    return true;
+}
+
 export function createReusableSpotMap({
     mapEl,
     tileUrl,
@@ -94,6 +114,10 @@ export function createReusableSpotMap({
     colourForSpot,
     popupBuilder = null,
     onSpotClick = null,
+    onSpotHover = null,
+    onSpotCentreClick = null,
+    radiusInteractive = true,
+    highlightColour = '#1f2348',
 }) {
     if (!mapEl || !window.L) return null;
 
@@ -108,6 +132,7 @@ export function createReusableSpotMap({
     }).addTo(map);
 
     const spotLayer = window.L.layerGroup().addTo(map);
+    const layerEntries = new Map();
 
     const api = {
         map,
@@ -116,11 +141,23 @@ export function createReusableSpotMap({
             renderSpotsOnMap({
                 map,
                 spotLayer,
+                layerEntries,
                 spots: nextSpots,
                 colourForSpot,
                 popupBuilder,
                 onSpotClick,
+                onSpotHover,
+                onSpotCentreClick,
+                radiusInteractive,
+                highlightColour,
             });
+        },
+        setSpotHighlighted(spotId, highlighted) {
+            return setLayerEntryHighlighted(
+                layerEntries.get(spotLayerKey(spotId)),
+                Boolean(highlighted),
+                highlightColour,
+            );
         },
     };
 
@@ -131,14 +168,20 @@ export function createReusableSpotMap({
 export function renderSpotsOnMap({
     map,
     spotLayer,
+    layerEntries = new Map(),
     spots = [],
     colourForSpot,
     popupBuilder = null,
     onSpotClick = null,
+    onSpotHover = null,
+    onSpotCentreClick = null,
+    radiusInteractive = true,
+    highlightColour = '#1f2348',
 }) {
     if (!map || !spotLayer || !window.L) return;
 
     clearLayer(spotLayer);
+    layerEntries.clear();
     const visibleSpots = spots.filter(validSpotCoordinate);
 
     if (visibleSpots.length === 0) {
@@ -161,6 +204,8 @@ export function renderSpotsOnMap({
             fillOpacity: 0.14,
             opacity: 0.82,
             weight: 2,
+            interactive: Boolean(radiusInteractive),
+            bubblingMouseEvents: false,
         });
 
         const marker = window.L.circleMarker(latLng, {
@@ -170,10 +215,31 @@ export function renderSpotsOnMap({
             fillOpacity: 1,
             opacity: 1,
             weight: 2,
+            bubblingMouseEvents: false,
         });
 
-        bindSpotPopup({ map, layer: marker, spot, popupBuilder, onSpotClick });
-        bindSpotPopup({ map, layer: circle, spot, popupBuilder, onSpotClick });
+        if (typeof onSpotCentreClick === 'function') {
+            marker.on('click', () => onSpotCentreClick(spot));
+        } else {
+            bindSpotPopup({ map, layer: marker, spot, popupBuilder, onSpotClick });
+        }
+
+        if (Boolean(radiusInteractive)) {
+            bindSpotPopup({ map, layer: circle, spot, popupBuilder, onSpotClick });
+        }
+
+        if (typeof onSpotHover === 'function') {
+            marker.on('mouseover', () => onSpotHover(spot, true));
+            marker.on('mouseout', () => onSpotHover(spot, false));
+        }
+
+        layerEntries.set(spotLayerKey(spot), {
+            spot,
+            circle,
+            marker,
+            colour,
+            highlightColour,
+        });
 
         circle.addTo(spotLayer);
         marker.addTo(spotLayer);

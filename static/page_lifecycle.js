@@ -2,12 +2,12 @@
  * Shared browser lifecycle repairs.
  *
  * Safari and embedded WKWebViews may restore a page with its previous DOM and
- * JavaScript memory intact. Some of them report `pageshow.persisted = false`
- * even when PerformanceNavigationTiming correctly reports `back_forward`.
- * Store a short per-page marker during pagehide as well as in the cached DOM,
- * hide open cards before the page is frozen, and reload only the affected
- * history entry when it is restored. This also clears page-specific busy flags
- * such as `creatingSpot` that cannot safely be reset from this shared module.
+ * JavaScript memory intact. Some of them report unreliable `pageshow.persisted`
+ * and navigation-timing values. Store a short per-page marker during pagehide
+ * as well as in the cached DOM, hide open cards before the page is frozen, and
+ * reload only the affected history entry when it is restored. This also clears
+ * page-specific busy flags such as `creatingSpot` that cannot safely be reset
+ * from this shared module.
  */
 
 const BACKDROP_SELECTOR = '.notice-backdrop';
@@ -94,8 +94,7 @@ function clearStoredNavigationMarker(windowObj) {
 
 export function isBackForwardRestore(event, performanceObj = globalThis.performance) {
     const type = navigationType(performanceObj);
-    // Some Safari/WKWebView versions restore history with persisted=false, while
-    // other versions omit navigation timing. Either positive signal is enough.
+    // Either browser signal is useful when no durable page marker is available.
     return type === 'back_forward' || Boolean(event?.persisted);
 }
 
@@ -124,14 +123,22 @@ export function repairOpenCardsAfterHistoryRestore({
     documentObj = globalThis.document,
     performanceObj = globalThis.performance,
 } = {}) {
-    if (!windowObj || !documentObj || !isBackForwardRestore(event, performanceObj)) {
-        return false;
-    }
+    if (!windowObj || !documentObj) return false;
 
     const restoredBackdrops = openBackdrops(documentObj);
     const marked = hasCardNavigationMarker(documentObj)
         || hasStoredNavigationMarker(windowObj);
-    if (!marked && restoredBackdrops.length === 0) return false;
+
+    // A marker written during pagehide is direct evidence that this exact page
+    // left while a card action was active. Trust it even if an embedded browser
+    // reports both history signals incorrectly. Without a marker, only repair a
+    // visibly restored card when the browser supplies a history-return signal.
+    if (!marked && (
+        restoredBackdrops.length === 0
+        || !isBackForwardRestore(event, performanceObj)
+    )) {
+        return false;
+    }
 
     clearCardNavigationMarker(documentObj);
     clearStoredNavigationMarker(windowObj);

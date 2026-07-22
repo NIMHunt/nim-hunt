@@ -36,6 +36,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          from textwrap import dedent
 
           def replace_once(path: str, old: str, new: str) -> None:
               file = Path(path)
@@ -47,39 +48,37 @@ jobs:
 
           replace_once(
               'static/spot_ui.js',
-              """    titleEl.append(titleText);
-              if (spot.use_password) {
-                  const lockIcon = createPasswordRequiredIcon();
-                  titleEl.append(lockIcon);
-              }""",
-              """    if (spot.use_password) {
-                  const lockIcon = createPasswordRequiredIcon();
-                  titleEl.append(lockIcon);
-              }
-              titleEl.append(titleText);""",
+              '    titleEl.append(titleText);\n'
+              '    if (spot.use_password) {\n'
+              '        const lockIcon = createPasswordRequiredIcon();\n'
+              '        titleEl.append(lockIcon);\n'
+              '    }',
+              '    if (spot.use_password) {\n'
+              '        const lockIcon = createPasswordRequiredIcon();\n'
+              '        titleEl.append(lockIcon);\n'
+              '    }\n'
+              '    titleEl.append(titleText);',
           )
 
           replace_once(
               'static/home.css',
-              """    margin-left: 0;
-              vertical-align: -0.12em;""",
-              """    margin-left: 0;
-              margin-right: 0.25em;
-              vertical-align: -0.12em;""",
+              '    margin-left: 0;\n'
+              '    vertical-align: -0.12em;',
+              '    margin-left: 0;\n'
+              '    margin-right: 0.25em;\n'
+              '    vertical-align: -0.12em;',
           )
 
           replace_once(
               'static/find_spots.js',
-              """function shouldShowClaimAction(spot) {
-              if (spot.status_label !== 'active') return false;
-
-              const status = claimStatusForSpot(spot);""",
-              """function shouldShowClaimAction(spot) {
-              const statusLabel = String(spot.status_label || '').toLowerCase();
-              if (statusLabel === 'upcoming') return true;
-              if (statusLabel !== 'active') return false;
-
-              const status = claimStatusForSpot(spot);""",
+              "function shouldShowClaimAction(spot) {\n"
+              "    if (spot.status_label !== 'active') return false;\n\n"
+              "    const status = claimStatusForSpot(spot);",
+              "function shouldShowClaimAction(spot) {\n"
+              "    const statusLabel = String(spot.status_label || '').toLowerCase();\n"
+              "    if (statusLabel === 'upcoming') return true;\n"
+              "    if (statusLabel !== 'active') return false;\n\n"
+              "    const status = claimStatusForSpot(spot);",
           )
 
           replace_once(
@@ -95,54 +94,59 @@ jobs:
 
           test_path = Path('tests/test_presentation_spots.py')
           test = test_path.read_text(encoding='utf-8')
-          old = """        self.assertIn("titleEl.append(lockIcon);", source)
-              self.assertNotIn("document.createTextNode(' '), lockIcon", source)
-              self.assertIn("flex: 0 1 auto;", css)
-              self.assertIn("margin-left: 0;", css)"""
-          new = """        self.assertIn("titleEl.append(lockIcon);", source)
-              self.assertNotIn("document.createTextNode(' '), lockIcon", source)
-              self.assertLess(
-                  source.index("titleEl.append(lockIcon);"),
-                  source.index("titleEl.append(titleText);"),
-              )
-              self.assertIn("flex: 0 1 auto;", css)
-              self.assertIn("margin-left: 0;", css)
-              self.assertIn("margin-right: 0.25em;", css)"""
+          old = (
+              '        self.assertIn("titleEl.append(lockIcon);", source)\n'
+              '        self.assertNotIn("document.createTextNode(\' \'), lockIcon", source)\n'
+              '        self.assertIn("flex: 0 1 auto;", css)\n'
+              '        self.assertIn("margin-left: 0;", css)'
+          )
+          new = (
+              '        self.assertIn("titleEl.append(lockIcon);", source)\n'
+              '        self.assertNotIn("document.createTextNode(\' \'), lockIcon", source)\n'
+              '        self.assertLess(\n'
+              '            source.index("titleEl.append(lockIcon);"),\n'
+              '            source.index("titleEl.append(titleText);"),\n'
+              '        )\n'
+              '        self.assertIn("flex: 0 1 auto;", css)\n'
+              '        self.assertIn("margin-left: 0;", css)\n'
+              '        self.assertIn("margin-right: 0.25em;", css)'
+          )
           if test.count(old) != 1:
               raise SystemExit('tests/test_presentation_spots.py: expected lock assertion block not found')
           test_path.write_text(test.replace(old, new, 1), encoding='utf-8')
 
           Path('tests/test_spot_action_priority.py').write_text(
-              '''from __future__ import annotations
+              dedent('''\
+              from __future__ import annotations
 
-          import unittest
-          from pathlib import Path
-
-
-          class SpotActionPriorityTest(unittest.TestCase):
-              def test_upcoming_spots_show_unavailable_action_before_status_badge(self):
-                  root = Path(__file__).resolve().parents[1]
-                  source = (root / "static" / "find_spots.js").read_text(encoding="utf-8")
-                  start = source.index("function shouldShowClaimAction(spot)")
-                  end = source.index("function claimActionText(spot)", start)
-                  block = source[start:end]
-
-                  upcoming_rule = "if (statusLabel === 'upcoming') return true;"
-                  inactive_rule = "if (statusLabel !== 'active') return false;"
-                  self.assertIn(upcoming_rule, block)
-                  self.assertIn(inactive_rule, block)
-                  self.assertLess(block.index(upcoming_rule), block.index(inactive_rule))
-
-              def test_upcoming_unavailable_tooltip_explains_not_active(self):
-                  root = Path(__file__).resolve().parents[1]
-                  source = (root / "static" / "find_spots.js").read_text(encoding="utf-8")
-                  self.assertIn("if (reason === 'not_active')", source)
-                  self.assertIn("This spot is not active right now.", source)
+              import unittest
+              from pathlib import Path
 
 
-          if __name__ == "__main__":
-              unittest.main()
-          '''.replace('\n          ', '\n'),
+              class SpotActionPriorityTest(unittest.TestCase):
+                  def test_upcoming_spots_show_unavailable_action_before_status_badge(self):
+                      root = Path(__file__).resolve().parents[1]
+                      source = (root / "static" / "find_spots.js").read_text(encoding="utf-8")
+                      start = source.index("function shouldShowClaimAction(spot)")
+                      end = source.index("function claimActionText(spot)", start)
+                      block = source[start:end]
+
+                      upcoming_rule = "if (statusLabel === 'upcoming') return true;"
+                      inactive_rule = "if (statusLabel !== 'active') return false;"
+                      self.assertIn(upcoming_rule, block)
+                      self.assertIn(inactive_rule, block)
+                      self.assertLess(block.index(upcoming_rule), block.index(inactive_rule))
+
+                  def test_upcoming_unavailable_tooltip_explains_not_active(self):
+                      root = Path(__file__).resolve().parents[1]
+                      source = (root / "static" / "find_spots.js").read_text(encoding="utf-8")
+                      self.assertIn("if (reason === 'not_active')", source)
+                      self.assertIn("This spot is not active right now.", source)
+
+
+              if __name__ == "__main__":
+                  unittest.main()
+              '''),
               encoding='utf-8',
           )
           PY
@@ -161,7 +165,7 @@ jobs:
           python -m pytest -q
           npm test --prefix helpers
           ruff check .
-          python -m compileall -q '*.py' tests
+          python -m compileall -q *.py tests
           for file in static/*.js; do node --check --input-type=module < "$file"; done
           for file in helpers/*.mjs; do node --check "$file"; done
           for file in *.sh; do bash -n "$file"; done

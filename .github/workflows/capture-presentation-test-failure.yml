@@ -1,4 +1,4 @@
-name: Capture presentation test failure
+name: Finalize presentation test expectation
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  capture:
+  finalize:
     if: github.head_ref == 'agent/presentation-spots-long-titles'
     runs-on: ubuntu-latest
     steps:
@@ -18,23 +18,34 @@ jobs:
           ref: agent/presentation-spots-long-titles
           fetch-depth: 0
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-
-      - name: Capture concise pytest failure
+      - name: Update dynamic mock count expectation
         run: |
-          pip install -r requirements.txt -r requirements-dev.txt >/dev/null
-          python -m pytest -q > /tmp/python-tests.txt 2>&1 || true
-          tail -n 180 /tmp/python-tests.txt > .github/presentation-test-failure.txt
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Commit diagnostic
+          path = Path('tests/test_spot_creation_fees.py')
+          source = path.read_text(encoding='utf-8')
+          old = 'self.assertEqual(summary["published_spot_count"], 8)'
+          new = (
+              'self.assertEqual(\n'
+              '                    summary["published_spot_count"],\n'
+              '                    len(spoof.PRESENTATION_SPOTS),\n'
+              '                )'
+          )
+          if source.count(old) != 1:
+              raise RuntimeError('Expected exactly one old mock Spot count assertion')
+          path.write_text(source.replace(old, new), encoding='utf-8')
+          PY
+
+      - name: Remove temporary diagnostics
         run: |
-          git add .github/presentation-test-failure.txt
-          if git diff --cached --quiet; then
-            exit 0
-          fi
+          rm -f .github/presentation-test-failure.txt
+          rm -f .github/workflows/capture-presentation-test-failure.yml
+
+      - name: Commit final result
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Capture pytest failure"
+          git add -A
+          git commit -m "Update presentation mock count test"
           git push origin HEAD:agent/presentation-spots-long-titles

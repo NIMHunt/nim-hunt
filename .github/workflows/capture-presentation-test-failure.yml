@@ -22,13 +22,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Capture concise Python failure
+      - name: Capture concise pytest failure
         run: |
-          if [ -f .github/presentation-test-failure.txt ]; then
-            exit 0
-          fi
-          pip install -r requirements.txt >/dev/null
-          python -m unittest discover -v > /tmp/python-tests.txt 2>&1 || true
+          pip install -r requirements.txt -r requirements-dev.txt >/dev/null
+          python -m pytest -q > /tmp/python-tests.txt 2>&1 || true
           tail -n 180 /tmp/python-tests.txt > .github/presentation-test-failure.txt
 
       - name: Commit diagnostic
@@ -39,5 +36,5 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Capture presentation test failure"
+          git commit -m "Capture pytest failure"
           git push origin HEAD:agent/presentation-spots-long-titles

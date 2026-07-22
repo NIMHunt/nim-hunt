@@ -7,7 +7,6 @@
  */
 .project-disclaimer-note {
     height: auto !important;
-    min-height: 112px;
     cursor: default !important;
     pointer-events: none;
     user-select: text;

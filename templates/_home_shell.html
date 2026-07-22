@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="{{ google_font_muli }}">
     <link rel="stylesheet" href="{{ nimiq_style_cdn }}">
     <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-polish-v2-20260704') }}">
-    <link rel="stylesheet" href="/static/disclaimer_button.css?v=disclaimer-button-v2-20260722">
+    <link rel="stylesheet" href="/static/disclaimer_button.css?v=disclaimer-button-v3-20260722">
 </head>
 <body class="nq-style"
     data-app-name="{{ app_name | default('NimHunt') }}"
@@ -129,7 +129,7 @@
         {% endif %}
     </main>
 
-    <script type="module" src="/static/page_lifecycle.js?v=history-card-v3-20260722"></script>
+    <script type="module" src="/static/page_lifecycle.js?v=history-card-v4-20260722"></script>
     <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
 
     {% if home_script_src is defined and home_script_src %}

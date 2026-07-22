@@ -25,6 +25,10 @@ class SpotTitlePresentationTest(unittest.TestCase):
         self.assertIn("titleEl.title = fullTitle;", source)
         self.assertIn("text-overflow: ellipsis", css)
         self.assertIn("white-space: nowrap", css)
+        self.assertIn("titleEl.append(lockIcon);", source)
+        self.assertNotIn("document.createTextNode(' '), lockIcon", source)
+        self.assertIn("flex: 0 1 auto;", css)
+        self.assertIn("margin-left: 0;", css)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ import {
     metresToText,
     spotScheduleTooltip,
     unixToText,
-} from './spot_ui.js?v=long-titles-v2-20260722';
+} from './spot_ui.js?v=lock-prefix-v1-20260722';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { formatNimFromLuna } from './nim_format.js';
 import {
@@ -852,7 +852,9 @@ function claimStatusForSpot(spot) {
 }
 
 function shouldShowClaimAction(spot) {
-    if (spot.status_label !== 'active') return false;
+    const statusLabel = String(spot.status_label || '').toLowerCase();
+    if (statusLabel === 'upcoming') return true;
+    if (statusLabel !== 'active') return false;
 
     const status = claimStatusForSpot(spot);
     if (status.allowed || status.within_radius) return true;

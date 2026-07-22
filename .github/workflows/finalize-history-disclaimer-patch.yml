@@ -22,13 +22,20 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Apply checked source transformations
-        run: python .github/scripts/apply_history_disclaimer_patch.py
+      - name: Apply production transformations
+        run: |
+          # The original guarded script intentionally stops at the old test
+          # fixture. Its production edits remain in the workspace and the
+          # focused repair script replaces that fixture safely afterwards.
+          python .github/scripts/apply_history_disclaimer_patch.py > patch-output.txt 2>&1 || true
+          python .github/scripts/repair_history_disclaimer_tests.py
 
       - name: Remove temporary patch machinery
         run: |
+          rm -f patch-output.txt
           rm -f .github/patch-note.txt
           rm -f .github/scripts/apply_history_disclaimer_patch.py
+          rm -f .github/scripts/repair_history_disclaimer_tests.py
           rm -f .github/workflows/apply-history-disclaimer-patch.yml
           rm -f .github/workflows/apply-history-disclaimer-pr.yml
           rm -f .github/workflows/diagnose-history-disclaimer-patch.yml

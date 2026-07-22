@@ -1,5 +1,23 @@
+........................................................................ [ 29%]
+............................................... [ 47%]
+.................................................................. [ 74%]
+..................................F............................          [100%]
+=================================== FAILURES ===================================
+_ CreationFeeMockDataTests.test_mock_seed_applies_creation_fee_before_publishing _
 
-----------------------------------------------------------------------
-Ran 0 tests in 0.000s
+self = <test_spot_creation_fees.CreationFeeMockDataTests testMethod=test_mock_seed_applies_creation_fee_before_publishing>
 
-OK
+    async def test_mock_seed_applies_creation_fee_before_publishing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/records.db"
+            old_path = schema.DB_PATH
+            schema.DB_PATH = path
+            try:
+                summary = await spoof.seed_mock_data()
+>               self.assertEqual(summary["published_spot_count"], 8)
+E               AssertionError: 25 != 8
+
+tests/test_spot_creation_fees.py:678: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_spot_creation_fees.py::CreationFeeMockDataTests::test_mock_seed_applies_creation_fee_before_publishing - AssertionError: 25 != 8
+1 failed, 247 passed, 31 subtests passed in 14.53s

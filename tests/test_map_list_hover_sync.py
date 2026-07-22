@@ -17,6 +17,8 @@ def test_find_spots_hover_is_synchronised_both_ways():
     assert "setSpotListMapHighlighted(spot.id, true)" in js
     assert "setSpotListMapHighlighted(spot.id, false)" in js
     assert "MAP_COLOURS.highlight" in js
+    assert "highlight: '#0582ca'" in js
+    assert "highlight: '#1f2348'" not in js
 
 
 def test_shared_map_supports_layer_highlighting_and_centre_callbacks():
@@ -29,6 +31,7 @@ def test_shared_map_supports_layer_highlighting_and_centre_callbacks():
     assert "marker.on('click', () => onSpotCentreClick(spot))" in js
     assert "entry.circle?.setStyle" in js
     assert "entry.marker?.setStyle" in js
+    assert "highlightColour = '#0582ca'" in js
 
 
 def test_my_spots_hover_links_map_and_rows_without_changing_click_navigation():
@@ -53,12 +56,14 @@ def test_my_claims_centres_expand_scroll_and_hover_link_the_claim_row():
 def test_blue_outline_and_description_spacing_are_intentional_shared_rules():
     css = source("static/home.css")
     assert ".spot-list-item.is-map-highlighted" in css
-    assert "outline: 2px solid var(--nimiq-blue, #1f2348);" in css
-    assert "/* Intentionally compact on every Spot and Claim detail card. */" in css
+    assert "--nh-highlight-blue: #0582ca;" in css
+    assert "outline: 2px solid var(--nh-highlight-blue);" in css
+    assert ".nq-style .spot-list-detail > .spot-detail-description" in css
+    assert "overrides Nimiq Style's generic paragraph margins" in css
     assert "margin: -0.35em 0 0.75em;" in css
     assert ".find-shell .spot-list-item.is-expanded .spot-list-detail .spot-detail-description" not in css
 
 
 def test_asset_version_is_bumped():
     public_html = source("public_html.py")
-    assert '_ASSET_VERSION = "map-list-hover-sync-v1-20260722"' in public_html
+    assert '_ASSET_VERSION = "map-list-hover-visual-fix-v1-20260723"' in public_html

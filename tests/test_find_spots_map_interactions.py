@@ -47,7 +47,7 @@ class FindSpotsMapInteractionTest(unittest.TestCase):
 
     def test_detail_descriptions_use_the_intentional_shared_compact_spacing(self):
         self.assertIn(
-            "/* Intentionally compact on every Spot and Claim detail card. */",
+            ".nq-style .spot-list-detail > .spot-detail-description",
             self.css,
         )
         self.assertIn("margin: -0.35em 0 0.75em;", self.css)

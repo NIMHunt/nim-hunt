@@ -56,21 +56,36 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-dev.txt
           npm ci --prefix helpers
 
+      - name: Validate focused changes
+        id: validation
+        continue-on-error: true
+        run: |
+          {
+            pytest -q tests/test_page_lifecycle.py tests/test_presentation_spots.py tests/test_home_disclaimer.py
+            node --check --input-type=module < static/page_lifecycle.js
+            node --check --input-type=module < static/spot_ui.js
+            python -m compileall -q .
+            git diff --check
+          } > validation-output.txt 2>&1
+
+      - name: Upload validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: minor-ui-validation-output
+          path: validation-output.txt
+
+      - name: Stop on validation failure
+        if: steps.validation.outcome == 'failure'
+        run: exit 1
+
       - name: Remove temporary machinery
         run: |
           rm .github/workflows/apply_minor_ui_refresh_fix.yml
           rm .github/workflows/run_minor_ui_fix.yml
           rm tools/apply_minor_ui_refresh_fix.py
           rm -f tools/trigger_minor_ui_fix.txt
-          rm -f patch-output.txt
-
-      - name: Validate focused changes
-        run: |
-          pytest -q tests/test_page_lifecycle.py tests/test_presentation_spots.py tests/test_home_disclaimer.py
-          node --check --input-type=module < static/page_lifecycle.js
-          node --check --input-type=module < static/spot_ui.js
-          python -m compileall -q .
-          git diff --check
+          rm -f patch-output.txt validation-output.txt
 
       - name: Commit final result
         run: |

@@ -545,8 +545,8 @@ export function makeFindSpotsText({
             },
         },
         status: {
-            listTitle: 'Visible Spots',
-            listTitleWithCount: (n) => `Visible Spots (${n})`,
+            listTitle: 'Spots',
+            listTitleWithCount: (n) => `${n} ${n === 1 ? 'Spot' : 'Spots'}`,
             emptyBeforeLink: 'No spots meet your criteria. Be the first to ',
             emptyLink: 'make one',
             emptyAfterLink: '.',

@@ -1,11 +1,12 @@
 import { init, requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=transaction-integrity-v1-20260721';
+import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=map-list-interactions-v1-20260722';
 import {
     appendBulletLine,
     appendDetailDescription,
     appendSpotTitleWithLock,
     buildSpotLinkControl,
     createOwnerClaimCodesControl,
+    createNimiqInlineIcon,
     durationText,
     highestTimeUnitText,
     metresToText,
@@ -34,6 +35,7 @@ const state = {
     testLocationMode: false,
     lastSpots: [],
     expandedSpotIds: new Set(),
+    listEntriesBySpotId: new Map(),
     expandedClaimCodeSpotIds: new Set(),
     fetchController: null,
     deviceIdHash: null,
@@ -63,6 +65,8 @@ const MAP_TILE_URL = document.body.dataset.mapTileUrl || 'https://tile.openstree
 const MAP_TILE_ATTRIBUTION = document.body.dataset.mapTileAttribution || '&copy; OpenStreetMap contributors';
 const MAX_MAP_INIT_SPOTS = Number.parseInt(document.body.dataset.maxMapInitSpots || '10', 10);
 const MAX_MAP_ZOOM_OUT = Number.parseInt(document.body.dataset.maxMapZoomOut || '11', 10);
+const MAX_SPOT_RADIUS_METRES = Number.parseFloat(document.body.dataset.maxSpotRadiusMetres || '1000');
+const MAP_LIST_SCROLL_DURATION_MS = 420;
 const CREATE_SPOT_URL = document.body.dataset.createSpotUrl || '/create';
 const CLAIM_CAPTCHA_MIN = Number.parseInt(document.body.dataset.claimCaptchaMin || '1', 10);
 const CLAIM_CAPTCHA_MAX = Number.parseInt(document.body.dataset.claimCaptchaMax || '9', 10);
@@ -305,6 +309,32 @@ function spotMatchesFilters(spot, filters = getFilterParams()) {
     if (spot.is_prizedraw && !filters.includePrizedraws) return false;
     if (spot.status_label === 'upcoming') return filters.includeUpcoming;
     return filters.includeActive;
+}
+
+function spotCentreWithinBounds(spot, bounds) {
+    const lat = Number(spot?.lat);
+    const long = Number(spot?.long);
+    if (!Number.isFinite(lat) || !Number.isFinite(long) || !bounds?.contains) return false;
+    return Boolean(bounds.contains([lat, long]));
+}
+
+function expandedMapSearchBounds(bounds, radiusMetres = MAX_SPOT_RADIUS_METRES) {
+    const south = Number(bounds.getSouth());
+    const north = Number(bounds.getNorth());
+    const west = Number(bounds.getWest());
+    const east = Number(bounds.getEast());
+    const radius = Math.max(0, Number(radiusMetres) || 0);
+    const centreLatitude = (south + north) / 2;
+    const latitudePadding = radius / 111320;
+    const longitudeScale = Math.max(0.2, Math.cos(centreLatitude * Math.PI / 180));
+    const longitudePadding = radius / (111320 * longitudeScale);
+
+    return {
+        south: Math.max(-90, south - latitudePadding),
+        north: Math.min(90, north + latitudePadding),
+        west: west - longitudePadding,
+        east: east + longitudePadding,
+    };
 }
 
 function enforceActiveUpcomingPair() {
@@ -1322,10 +1352,43 @@ function setListItemExpanded(item, summary, detail, spotId, expanded) {
     }
 }
 
+function fastSmoothScrollToElement(element, durationMs = MAP_LIST_SCROLL_DURATION_MS) {
+    if (!element) return false;
+    const startY = window.scrollY;
+    const targetY = Math.max(0, startY + element.getBoundingClientRect().top - 12);
+    const distance = targetY - startY;
+    if (Math.abs(distance) < 2) return true;
+
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+        window.scrollTo(0, targetY);
+        return true;
+    }
+
+    const startedAt = performance.now();
+    const duration = Math.min(1800, Math.max(120, Number(durationMs) || MAP_LIST_SCROLL_DURATION_MS));
+    const step = (now) => {
+        const progress = Math.min(1, (now - startedAt) / duration);
+        const eased = 1 - ((1 - progress) ** 3);
+        window.scrollTo(0, startY + distance * eased);
+        if (progress < 1) window.requestAnimationFrame(step);
+    };
+    window.requestAnimationFrame(step);
+    return true;
+}
+
+function focusSpotInList(spotId) {
+    const entry = state.listEntriesBySpotId.get(Number(spotId));
+    if (!entry) return false;
+    setListItemExpanded(entry.item, entry.summary, entry.detail, Number(spotId), true);
+    window.requestAnimationFrame(() => fastSmoothScrollToElement(entry.item));
+    return true;
+}
+
 function renderList(spots) {
     const hasSpots = spots.length > 0;
 
     els.list.replaceChildren();
+    state.listEntriesBySpotId = new Map();
     els.list.hidden = !hasSpots;
     els.empty.hidden = false;
     els.listTitle.textContent = UI_COPY.status.listTitleWithCount(spots.length);
@@ -1339,6 +1402,7 @@ function renderList(spots) {
         const spotId = Number(spot.id);
         const item = document.createElement('li');
         item.className = 'spot-list-item';
+        item.dataset.spotId = String(spotId);
 
         const summary = document.createElement('div');
         summary.className = 'spot-list-toggle';
@@ -1389,6 +1453,7 @@ function renderList(spots) {
         const detail = buildSpotDetail(spot);
         const initiallyExpanded = state.expandedSpotIds.has(spotId);
         setListItemExpanded(item, summary, detail, spotId, initiallyExpanded);
+        state.listEntriesBySpotId.set(spotId, { item, summary, detail });
 
         const toggleExpanded = () => {
             const expanded = summary.getAttribute('aria-expanded') !== 'true';
@@ -1417,6 +1482,25 @@ function markerColour(spot) {
     return spot.is_prizedraw ? MAP_COLOURS.prizedraw : MAP_COLOURS.standard;
 }
 
+function createMapSpotTooltipContent(spot) {
+    const content = document.createElement('span');
+    content.className = 'map-spot-title-tooltip-content';
+
+    if (spot.use_password) {
+        const lock = document.createElement('span');
+        lock.className = 'map-spot-title-tooltip-lock';
+        lock.setAttribute('aria-hidden', 'true');
+        lock.append(createNimiqInlineIcon('nq-lock-locked'));
+        content.append(lock);
+    }
+
+    const title = document.createElement('span');
+    title.className = 'map-spot-title-tooltip-text';
+    title.textContent = String(spot.title || 'NimHunt Spot');
+    content.append(title);
+    return content;
+}
+
 function renderMapSpots(spots) {
     const filters = getFilterParams();
     const radiusCircles = [];
@@ -1427,31 +1511,61 @@ function renderMapSpots(spots) {
     for (const spot of spots) {
         const matchesFilters = spotMatchesFilters(spot, filters);
         const colour = matchesFilters ? markerColour(spot) : MAP_COLOURS.muted;
-        const openSpot = () => {
-            window.location.href = spot.href;
-        };
+        const latLng = [Number(spot.lat), Number(spot.long)];
+        let showTooltip = null;
+        let hideTooltip = null;
 
         if (matchesFilters) {
-            const radiusCircle = L.circle([spot.lat, spot.long], {
+            const radiusCircle = L.circle(latLng, {
                 radius: spot.radius,
                 color: colour,
                 opacity: 0.95,
                 fillColor: colour,
                 fillOpacity: 0.22,
                 weight: 2.5,
+                interactive: true,
+                bubblingMouseEvents: false,
+                className: 'spot-radius-circle',
             });
-            radiusCircle.on('click', openSpot);
+
+            const tooltip = L.tooltip({
+                className: 'map-spot-title-tooltip',
+                direction: 'top',
+                offset: [0, -16],
+                opacity: 1,
+                interactive: false,
+            })
+                .setLatLng(latLng)
+                .setContent(createMapSpotTooltipContent(spot));
+
+            showTooltip = () => {
+                if (!spotCentreWithinBounds(spot, state.map.getBounds())) return;
+                if (!state.spotLayer.hasLayer(tooltip)) state.spotLayer.addLayer(tooltip);
+            };
+            hideTooltip = () => {
+                if (state.spotLayer.hasLayer(tooltip)) state.spotLayer.removeLayer(tooltip);
+            };
+            radiusCircle.on('mouseover', showTooltip);
+            radiusCircle.on('mouseout', hideTooltip);
             radiusCircles.push(radiusCircle);
         }
 
-        const dot = L.circleMarker([spot.lat, spot.long], {
-            radius: 6,
+        const dot = L.circleMarker(latLng, {
+            radius: 12,
             color: '#ffffff',
             fillColor: colour,
             fillOpacity: matchesFilters ? 1 : 0.68,
             weight: 2,
+            interactive: matchesFilters,
+            bubblingMouseEvents: false,
+            className: `spot-centre-marker ${matchesFilters ? 'is-interactive' : 'is-muted'}`,
         });
-        dot.on('click', openSpot);
+
+        if (matchesFilters) {
+            dot.on('click', () => focusSpotInList(spot.id));
+            dot.on('mouseover', showTooltip);
+            dot.on('mouseout', hideTooltip);
+        }
         dots.push(dot);
     }
 
@@ -1536,12 +1650,13 @@ async function refreshVisibleSpots() {
     const params = new URLSearchParams();
     addAllVisibleMapParams(params);
 
-    const bounds = state.map.getBounds();
+    const visibleBounds = state.map.getBounds();
+    const searchBounds = expandedMapSearchBounds(visibleBounds);
     const origin = getDistanceOrigin();
-    params.set('min_lat', String(bounds.getSouth()));
-    params.set('max_lat', String(bounds.getNorth()));
-    params.set('min_long', String(bounds.getWest()));
-    params.set('max_long', String(bounds.getEast()));
+    params.set('min_lat', String(searchBounds.south));
+    params.set('max_lat', String(searchBounds.north));
+    params.set('min_long', String(searchBounds.west));
+    params.set('max_long', String(searchBounds.east));
     if (origin) {
         params.set('distance_lat', String(origin.lat));
         params.set('distance_long', String(origin.long));
@@ -1554,7 +1669,9 @@ async function refreshVisibleSpots() {
             signal: state.fetchController.signal,
         });
         const spots = data.spots || [];
-        const listSpots = spots.filter((spot) => spotMatchesFilters(spot));
+        const listSpots = spots.filter((spot) => (
+            spotMatchesFilters(spot) && spotCentreWithinBounds(spot, visibleBounds)
+        ));
 
         state.lastSpots = spots;
         await refreshClaimStatusesForSpots(listSpots);

@@ -43,6 +43,12 @@ for path in ("static/my_spots.js", "static/my_claims.js"):
         "./spot_map.js?v=marker-white-outline-v1-20260723",
     )
 
+replace_once(
+    "tests/test_map_list_hover_sync.py",
+    '    assert \'_ASSET_VERSION = "map-list-hover-visual-fix-v1-20260723"\' in public_html',
+    '    assert \'_ASSET_VERSION = "marker-white-outline-v1-20260723"\' in public_html',
+)
+
 Path("tests/test_marker_hover_outline.py").write_text(
     '''from __future__ import annotations
 

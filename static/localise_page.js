@@ -5,7 +5,7 @@ import {
 import { installCreateSpotDeleteNavigationGuard } from './create_spot_delete_guard.js?v=ios-delete-guard-v1-20260718';
 import { installNetworkModeBanner } from './network_mode_banner.js?v=network-mode-banner-v1-20260718';
 import { installOwnerUiPolish } from './owner_ui_polish.js?v=cancellation-safety-v1-20260720';
-import './page_lifecycle.js?v=history-card-v2-20260722';
+import './page_lifecycle.js?v=history-card-v1-20260721';
 
 function ensureResponsiveStylesheets() {
     const stylesheets = [

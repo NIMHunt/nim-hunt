@@ -1,19 +1,17 @@
 /*
  * Shared browser lifecycle repairs.
  *
- * Safari and embedded WKWebViews may restore a page with its previous DOM and
- * JavaScript memory intact. Some of them report unreliable `pageshow.persisted`
- * and navigation-timing values. Store a short per-page marker during pagehide
- * as well as in the cached DOM, hide open cards before the page is frozen, and
- * reload only the affected history entry when it is restored. This also clears
- * page-specific busy flags such as `creatingSpot` that cannot safely be reset
- * from this shared module.
+ * Safari and WKWebView may restore a page from the back-forward cache with its
+ * previous DOM and JavaScript memory intact. If a modal initiated navigation,
+ * that can revive both the card and page-specific "in progress" flags. Track a
+ * recently active card in the cached DOM, then reload only when browser history
+ * restores that marked page. Ordinary initial loads and normal Back navigation
+ * from pages that had no active card remain untouched.
  */
 
 const BACKDROP_SELECTOR = '.notice-backdrop';
 const OPEN_BACKDROP_SELECTOR = '.notice-backdrop:not([hidden])';
 const CARD_NAVIGATION_MARKER = 'data-nimhunt-card-navigation-pending';
-const STORAGE_KEY_PREFIX = 'nimhunt:card-navigation:';
 const MANUAL_CLOSE_GRACE_MILLISECONDS = 250;
 
 function navigationType(performanceObj) {
@@ -46,75 +44,15 @@ function clearCardNavigationMarker(documentObj) {
     documentMarkerElement(documentObj)?.removeAttribute?.(CARD_NAVIGATION_MARKER);
 }
 
-function allBackdrops(documentObj) {
-    return [...(documentObj?.querySelectorAll?.(BACKDROP_SELECTOR) || [])];
-}
-
 function openBackdrops(documentObj) {
     return [...(documentObj?.querySelectorAll?.(OPEN_BACKDROP_SELECTOR) || [])];
 }
 
-function storageKey(windowObj) {
-    const pathname = String(windowObj?.location?.pathname || '');
-    const search = String(windowObj?.location?.search || '');
-    return `${STORAGE_KEY_PREFIX}${pathname}${search}`;
-}
-
-function sessionStorageObject(windowObj) {
-    try {
-        return windowObj?.sessionStorage || null;
-    } catch (_err) {
-        return null;
-    }
-}
-
-function hasStoredNavigationMarker(windowObj) {
-    try {
-        return sessionStorageObject(windowObj)?.getItem(storageKey(windowObj)) === '1';
-    } catch (_err) {
-        return false;
-    }
-}
-
-function setStoredNavigationMarker(windowObj) {
-    try {
-        sessionStorageObject(windowObj)?.setItem(storageKey(windowObj), '1');
-    } catch (_err) {
-        // Private browsing or a restrictive WebView may block sessionStorage.
-    }
-}
-
-function clearStoredNavigationMarker(windowObj) {
-    try {
-        sessionStorageObject(windowObj)?.removeItem(storageKey(windowObj));
-    } catch (_err) {
-        // The DOM marker remains available when storage is unavailable.
-    }
-}
-
 export function isBackForwardRestore(event, performanceObj = globalThis.performance) {
+    if (!event?.persisted) return false;
     const type = navigationType(performanceObj);
-    // Either browser signal is useful when no durable page marker is available.
-    return type === 'back_forward' || Boolean(event?.persisted);
-}
-
-export function prepareCardsForPageHide({
-    windowObj = globalThis.window,
-    documentObj = globalThis.document,
-} = {}) {
-    if (!windowObj || !documentObj) return false;
-
-    const visibleBackdrops = openBackdrops(documentObj);
-    const cardActionPending = hasCardNavigationMarker(documentObj);
-    if (!cardActionPending && visibleBackdrops.length === 0) return false;
-
-    setCardNavigationMarker(documentObj);
-    setStoredNavigationMarker(windowObj);
-
-    // Hide before the browser snapshots/freezes the page. A reload on return is
-    // still required because page-specific in-progress variables may be stale.
-    for (const backdrop of visibleBackdrops) backdrop.hidden = true;
-    return true;
+    // `persisted` is the strongest signal available in older iOS WebViews.
+    return type === null || type === 'back_forward';
 }
 
 export function repairOpenCardsAfterHistoryRestore({
@@ -123,28 +61,18 @@ export function repairOpenCardsAfterHistoryRestore({
     documentObj = globalThis.document,
     performanceObj = globalThis.performance,
 } = {}) {
-    if (!windowObj || !documentObj) return false;
+    if (!windowObj || !documentObj || !isBackForwardRestore(event, performanceObj)) {
+        return false;
+    }
 
     const restoredBackdrops = openBackdrops(documentObj);
-    const marked = hasCardNavigationMarker(documentObj)
-        || hasStoredNavigationMarker(windowObj);
-
-    // A marker written during pagehide is direct evidence that this exact page
-    // left while a card action was active. Trust it even if an embedded browser
-    // reports both history signals incorrectly. Without a marker, only repair a
-    // visibly restored card when the browser supplies a history-return signal.
-    if (!marked && (
-        restoredBackdrops.length === 0
-        || !isBackForwardRestore(event, performanceObj)
-    )) {
+    if (!hasCardNavigationMarker(documentObj) && restoredBackdrops.length === 0) {
         return false;
     }
 
     clearCardNavigationMarker(documentObj);
-    clearStoredNavigationMarker(windowObj);
-
-    // Hide every card first so no stale overlay flashes while the fresh page loads.
-    for (const backdrop of allBackdrops(documentObj)) backdrop.hidden = true;
+    // Hide first so the stale card does not flash while the fresh page loads.
+    for (const backdrop of restoredBackdrops) backdrop.hidden = true;
     windowObj.location.reload();
     return true;
 }
@@ -170,8 +98,9 @@ export function installHistoryCardRestoreGuard({
         }
 
         // A successful card action often hides the backdrop and assigns a new
-        // location in the same task. Delay clearing so pagehide can persist the
-        // marker. A normal manual close remains on-page long enough to clear it.
+        // location in the same task. Delay clearing so that navigation preserves
+        // the marker in the old history entry. A normal manual close remains on
+        // the page long enough for this timer to remove it.
         clearScheduledMarker();
         clearTimer = windowObj.setTimeout(() => {
             clearTimer = null;
@@ -187,12 +116,7 @@ export function installHistoryCardRestoreGuard({
         documentObj,
         performanceObj,
     });
-    const pagehideHandler = () => prepareCardsForPageHide({
-        windowObj,
-        documentObj,
-    });
     windowObj.addEventListener('pageshow', pageshowHandler);
-    windowObj.addEventListener('pagehide', pagehideHandler);
 
     let observer = null;
     const root = documentObj.body || documentObj.documentElement;
@@ -210,7 +134,6 @@ export function installHistoryCardRestoreGuard({
         clearScheduledMarker();
         observer?.disconnect();
         windowObj.removeEventListener('pageshow', pageshowHandler);
-        windowObj.removeEventListener('pagehide', pagehideHandler);
     };
 }
 

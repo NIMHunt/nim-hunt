@@ -115,29 +115,24 @@ class PageLifecycleJavaScriptTest(unittest.TestCase):
             assert.equal(documentElement.hasAttribute(markerName), false);
             assert.equal(reloadCount, 2);
 
-            // WKWebView may report persisted=false even for browser-history
-            // restoration. PerformanceNavigationTiming must still trigger repair.
             openBackdrop.hidden = false;
             assert.equal(lifecycle.repairOpenCardsAfterHistoryRestore({{
                 event: {{ persisted: false }},
                 windowObj,
                 documentObj,
                 performanceObj: backForwardPerformance,
-            }}), true);
-            assert.equal(openBackdrop.hidden, true);
-            assert.equal(reloadCount, 3);
+            }}), false);
+            assert.equal(openBackdrop.hidden, false);
+            assert.equal(reloadCount, 2);
 
-            // A positive persisted signal is also sufficient when navigation
-            // timing is missing or misleading.
-            openBackdrop.hidden = false;
             assert.equal(lifecycle.repairOpenCardsAfterHistoryRestore({{
                 event: {{ persisted: true }},
                 windowObj,
                 documentObj,
                 performanceObj: {{ getEntriesByType: () => [{{ type: 'navigate' }}] }},
-            }}), true);
-            assert.equal(openBackdrop.hidden, true);
-            assert.equal(reloadCount, 4);
+            }}), false);
+            assert.equal(openBackdrop.hidden, false);
+            assert.equal(reloadCount, 2);
 
             const trackedBackdrop = {{ hidden: true }};
             const trackedAttributes = new Map();

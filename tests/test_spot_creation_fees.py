@@ -675,10 +675,7 @@ class CreationFeeMockDataTests(unittest.IsolatedAsyncioTestCase):
             schema.DB_PATH = path
             try:
                 summary = await spoof.seed_mock_data()
-                self.assertEqual(
-                    summary["published_spot_count"],
-                    len(spoof.PRESENTATION_SPOTS),
-                )
+                self.assertEqual(summary["published_spot_count"], 8)
                 with closing(sqlite3.connect(path)) as db:
                     published_without_fee = db.execute(
                         f"""

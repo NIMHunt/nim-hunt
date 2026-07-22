@@ -38,7 +38,7 @@ jobs:
         run: python .github/scripts/apply_map_list_hover_sync.py
 
       - name: Remove temporary machinery
-        run: rm .github/scripts/apply_map_list_hover_sync.py .github/workflows/apply_map_list_hover_sync.yml .github/MAP_LIST_HOVER_SYNC_WIP.md
+        run: rm .github/scripts/apply_map_list_hover_sync.py .github/workflows/apply_map_list_hover_sync.yml .github/MAP_LIST_HOVER_SYNC_WIP.md .github/OPEN_PR_TRIGGER.md
 
       - name: Install dependencies
         run: |

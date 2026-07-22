@@ -13,11 +13,11 @@ class FindSpotsMapInteractionTest(unittest.TestCase):
         cls.text = (cls.root / "static" / "interface_text.js").read_text(encoding="utf-8")
         cls.template = (cls.root / "templates" / "find_spots.html").read_text(encoding="utf-8")
 
-    def test_count_heading_is_plain_spot_count(self):
-        self.assertIn("listTitle: 'Spots'", self.text)
-        self.assertIn("`${n} ${n === 1 ? 'Spot' : 'Spots'}`", self.text)
+    def test_count_heading_names_the_users_area(self):
+        self.assertIn("listTitle: 'Spots in Your Area'", self.text)
+        self.assertIn("`${n} ${n === 1 ? 'Spot' : 'Spots'} in Your Area`", self.text)
         self.assertNotIn("Visible Spots (${n})", self.text)
-        self.assertIn('>Spots</h2>', self.template)
+        self.assertIn('>Spots in Your Area</h2>', self.template)
 
     def test_only_filtered_in_centres_are_clickable(self):
         map_start = self.source.index("function renderMapSpots(spots)")
@@ -41,7 +41,20 @@ class FindSpotsMapInteractionTest(unittest.TestCase):
         self.assertIn(".leaflet-tooltip.map-spot-title-tooltip", self.css)
         self.assertIn("background: rgba(255, 255, 255, 0.96);", self.css)
         self.assertIn("color: var(--nh-muted);", self.css)
-        self.assertIn("font-size: 1rem;", self.css)
+        self.assertIn("font-size: 1.6rem;", self.css)
+        self.assertIn("font-weight: 750;", self.css)
+        self.assertIn("line-height: 1.25;", self.css)
+
+    def test_expanded_find_spot_descriptions_sit_closer_to_meta(self):
+        self.assertIn(
+            '.find-shell .spot-list-item.is-expanded .spot-list-detail .spot-detail-description',
+            self.css,
+        )
+        self.assertIn('margin-top: -0.35em;', self.css)
+
+    def test_centre_markers_use_subtle_button_like_depth(self):
+        self.assertIn('.spot-centre-marker {', self.css)
+        self.assertIn('filter: drop-shadow(0 3px 4px rgba(31, 35, 72, 0.18));', self.css)
 
     def test_centre_diameter_is_doubled(self):
         self.assertRegex(self.source, r"L\.circleMarker\(latLng, \{\s*radius: 12,")

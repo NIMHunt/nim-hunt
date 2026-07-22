@@ -26,6 +26,9 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Apply patch
+        run: python tools/apply_minor_ui_refresh_fix.py
+
       - uses: actions/setup-node@v6
         with:
           node-version: '20'
@@ -35,9 +38,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-dev.txt
           npm ci --prefix helpers
-
-      - name: Apply patch
-        run: python tools/apply_minor_ui_refresh_fix.py
 
       - name: Remove temporary machinery
         run: |

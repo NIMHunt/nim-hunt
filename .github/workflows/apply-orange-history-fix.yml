@@ -1,0 +1,60 @@
+name: Apply orange disclaimer and history fix
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/orange-disclaimer-history-entry-fix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/orange-disclaimer-history-entry-fix
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          npm ci --prefix helpers
+
+      - name: Apply source changes
+        run: python .github/scripts/apply_orange_history_fix.py
+
+      - name: Remove temporary patch machinery
+        run: |
+          rm -f .github/scripts/apply_orange_history_fix.py
+          rm -f .github/workflows/apply-orange-history-fix.yml
+
+      - name: Validate focused changes
+        env:
+          NIMHUNT_DB_PATH: ${{ runner.temp }}/nimhunt-focused.db
+          NIMHUNT_DEPLOYMENT_MODE: development
+          NIMHUNT_NIMIQ_NETWORK: TestAlbatross
+          NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: '1'
+        run: |
+          python -m pytest -q tests/test_home_disclaimer.py tests/test_page_lifecycle.py
+          node --check --input-type=module < static/page_lifecycle.js
+          python -m py_compile public_html.py tests/test_home_disclaimer.py tests/test_page_lifecycle.py
+          git diff --check
+
+      - name: Commit final result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Style orange disclaimer and repair restored cards"
+          git push origin HEAD:agent/orange-disclaimer-history-entry-fix

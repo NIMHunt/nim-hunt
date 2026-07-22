@@ -1,0 +1,82 @@
+name: Apply description and blue fix
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/fix-description-spacing-and-blue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: helpers/package-lock.json
+
+      - name: Apply focused corrections
+        run: python .github/scripts/apply_description_blue_fix.py
+
+      - name: Remove temporary machinery
+        run: rm .github/scripts/apply_description_blue_fix.py .github/workflows/apply_description_blue_fix.yml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          npm ci --prefix helpers
+
+      - name: Verify complete project
+        env:
+          NIMHUNT_DB_PATH: ${{ runner.temp }}/nimhunt-ci.db
+          NIMHUNT_DEPLOYMENT_MODE: development
+          NIMHUNT_NIMIQ_NETWORK: TestAlbatross
+          NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: '1'
+        run: |
+          python -m pytest -q
+          npm test --prefix helpers
+          ruff check .
+          python -m compileall -q *.py tests
+          for file in static/*.js; do node --check --input-type=module < "$file"; done
+          for file in helpers/*.mjs; do node --check "$file"; done
+          for file in *.sh; do bash -n "$file"; done
+          python - <<'PY'
+          from pathlib import Path
+          from jinja2 import Environment, FileSystemLoader
+          templates = Path('templates')
+          environment = Environment(loader=FileSystemLoader(templates))
+          for path in sorted(templates.glob('*.html')):
+              environment.get_template(path.name)
+          PY
+          python spoof.py
+          python -m pip check
+          python -m pip_audit --progress-spinner off
+          npm audit --omit=dev --prefix helpers
+
+      - name: Commit final result
+        run: |
+          git config user.name 'NIMHunt'
+          git config user.email 'noreply@github.com'
+          git add -A
+          git commit -m 'Restore compact descriptions and use Nimiq blue'
+          git push origin HEAD:${{ github.head_ref }}

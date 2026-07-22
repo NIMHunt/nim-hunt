@@ -338,11 +338,35 @@ export function createPasswordRequiredIcon() {
     return wrap;
 }
 
-export function appendSpotTitleWithLock(titleEl, spot) {
+export function appendSpotTitleWithLock(
+    titleEl,
+    spot,
+    { truncate = false } = {},
+) {
     if (!titleEl) return;
-    titleEl.textContent = spot.title || SPOT_TEXT.fallbackTitle;
+
+    const fullTitle = String(spot.title || SPOT_TEXT.fallbackTitle);
+    const titleText = document.createElement('span');
+    titleText.className = 'spot-title-text';
+    titleText.textContent = fullTitle;
+
+    titleEl.replaceChildren();
+    titleEl.removeAttribute('title');
+    titleEl.removeAttribute('aria-label');
+    titleEl.classList.toggle('is-truncated-title', Boolean(truncate));
+
+    if (truncate) {
+        titleEl.title = fullTitle;
+        titleEl.setAttribute(
+            'aria-label',
+            `${fullTitle}${spot.use_password ? '. Requires a password.' : ''}`,
+        );
+    }
+
+    titleEl.append(titleText);
     if (spot.use_password) {
-        titleEl.append(document.createTextNode(' '), createPasswordRequiredIcon());
+        const lockIcon = createPasswordRequiredIcon();
+        titleEl.append(document.createTextNode(' '), lockIcon);
     }
 }
 
@@ -541,7 +565,7 @@ export function createSpotListItem({ spot, detailBuilder, expanded = false, onTo
 
     const title = document.createElement('span');
     title.className = 'spot-list-title';
-    appendSpotTitleWithLock(title, spot);
+    appendSpotTitleWithLock(title, spot, { truncate: true });
 
     const chevron = document.createElement('span');
     chevron.className = 'spot-list-chevron';

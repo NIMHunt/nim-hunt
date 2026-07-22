@@ -3495,3 +3495,27 @@ h2 {
     font-weight: 750;
     line-height: 1.38;
 }
+
+/* List rows keep longer Spot names to one line; detail pages remain uncut. */
+.spot-list-title.is-truncated-title {
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.spot-list-title.is-truncated-title .spot-title-text {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.spot-list-title.is-truncated-title .spot-title-lock-icon-wrap {
+    flex: 0 0 auto;
+}
+

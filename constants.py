@@ -145,9 +145,10 @@ DISPLAY_NAME_MIN_CHARS = 3
 DISPLAY_NAME_MAX_CHARS = 18
 
 # Spot title validation. A draft SPOT can be created with only a title;
-# the remaining fields are filled on the full Create Spot form.
+# the remaining fields are filled on the full Create Spot form. Keep this
+# independent from display names because useful location/event titles are longer.
 SPOT_TITLE_MIN_CHARS = 3
-SPOT_TITLE_MAX_CHARS = DISPLAY_NAME_MAX_CHARS
+SPOT_TITLE_MAX_CHARS = 27
 
 # Maximum number of editable draft SPOTs one user may have at once.
 # Once a draft is published, cancelled, or deleted, it no longer counts.

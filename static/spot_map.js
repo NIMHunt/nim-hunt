@@ -117,7 +117,7 @@ export function createReusableSpotMap({
     onSpotHover = null,
     onSpotCentreClick = null,
     radiusInteractive = true,
-    highlightColour = '#1f2348',
+    highlightColour = '#0582ca',
 }) {
     if (!mapEl || !window.L) return null;
 
@@ -176,7 +176,7 @@ export function renderSpotsOnMap({
     onSpotHover = null,
     onSpotCentreClick = null,
     radiusInteractive = true,
-    highlightColour = '#1f2348',
+    highlightColour = '#0582ca',
 }) {
     if (!map || !spotLayer || !window.L) return;
 

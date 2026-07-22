@@ -9,6 +9,7 @@
     --nh-danger: #d94444;
     --nh-warning: #e9a400;
     --nh-success: #21bca5;
+    --nh-highlight-blue: #0582ca;
 }
 
 * {
@@ -831,7 +832,7 @@ h2 {
 }
 
 .spot-list-item.is-map-highlighted {
-    outline: 2px solid var(--nimiq-blue, #1f2348);
+    outline: 2px solid var(--nh-highlight-blue);
     outline-offset: 1px;
 }
 
@@ -1016,13 +1017,17 @@ h2 {
     display: none;
 }
 
-/* Intentionally compact on every Spot and Claim detail card. */
 .spot-detail-description {
-    margin: -0.35em 0 0.75em;
     color: var(--nh-muted);
     font-style: italic;
     font-weight: 750;
     text-align: center;
+}
+
+/* Intentionally compact on every Spot and Claim detail card. The additional
+   selector strength overrides Nimiq Style's generic paragraph margins. */
+.nq-style .spot-list-detail > .spot-detail-description {
+    margin: -0.35em 0 0.75em;
 }
 
 

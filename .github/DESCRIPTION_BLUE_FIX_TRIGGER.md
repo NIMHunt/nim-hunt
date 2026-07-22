@@ -1,1 +1,0 @@
-Temporary trigger file for the focused description-spacing and Nimiq-blue correction.

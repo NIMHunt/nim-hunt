@@ -76,7 +76,7 @@ const MAP_COLOURS = {
     standard: '#21bca5',
     prizedraw: '#ffc435',
     muted: '#8c90a8',
-    highlight: '#1f2348',
+    highlight: '#0582ca',
 };
 
 const REPORT_TEXT = makeSpotDetailText({

@@ -45,16 +45,20 @@ class FindSpotsMapInteractionTest(unittest.TestCase):
         self.assertIn("font-weight: 750;", self.css)
         self.assertIn("line-height: 1.25;", self.css)
 
-    def test_expanded_find_spot_descriptions_sit_closer_to_meta(self):
+    def test_detail_descriptions_use_the_intentional_shared_compact_spacing(self):
         self.assertIn(
-            '.find-shell .spot-list-item.is-expanded .spot-list-detail .spot-detail-description',
+            "/* Intentionally compact on every Spot and Claim detail card. */",
             self.css,
         )
-        self.assertIn('margin-top: -0.35em;', self.css)
+        self.assertIn("margin: -0.35em 0 0.75em;", self.css)
+        self.assertNotIn(
+            ".find-shell .spot-list-item.is-expanded .spot-list-detail .spot-detail-description",
+            self.css,
+        )
 
     def test_centre_markers_use_subtle_button_like_depth(self):
-        self.assertIn('.spot-centre-marker {', self.css)
-        self.assertIn('filter: drop-shadow(0 3px 4px rgba(31, 35, 72, 0.18));', self.css)
+        self.assertIn(".spot-centre-marker {", self.css)
+        self.assertIn("filter: drop-shadow(0 3px 4px rgba(31, 35, 72, 0.18));", self.css)
 
     def test_centre_diameter_is_doubled(self):
         self.assertRegex(self.source, r"L\.circleMarker\(latLng, \{\s*radius: 12,")
@@ -63,7 +67,7 @@ class FindSpotsMapInteractionTest(unittest.TestCase):
         self.assertIn("expandedMapSearchBounds(visibleBounds)", self.source)
         self.assertIn("MAX_SPOT_RADIUS_METRES", self.source)
         self.assertIn("spotCentreWithinBounds(spot, visibleBounds)", self.source)
-        self.assertIn('data-max-spot-radius-metres=', self.template)
+        self.assertIn("data-max-spot-radius-metres=", self.template)
 
 
 if __name__ == "__main__":

@@ -43,20 +43,12 @@ jobs:
 
           path = Path('tests/test_page_lifecycle.py')
           text = path.read_text(encoding='utf-8')
-          old = """            const lifecycleCleanup = lifecycle.installHistoryCardRestoreGuard({{
-                windowObj: trackedWindow,
-                documentObj: trackedDocument,
-                performanceObj: backForwardPerformance,
-                MutationObserverClass: LifecycleMutationObserver,
-            }});"""
-          new = """            const lifecycleCleanup = lifecycle.installHistoryCardRestoreGuard({{
-                windowObj: trackedWindow,
-                documentObj: trackedDocument,
-                performanceObj: {{ getEntriesByType: () => [{{ type: 'navigate' }}] }},
-                MutationObserverClass: LifecycleMutationObserver,
-            }});"""
+          old = """                performanceObj: backForwardPerformance,
+                MutationObserverClass: LifecycleMutationObserver,"""
+          new = """                performanceObj: {{ getEntriesByType: () => [{{ type: 'navigate' }}] }},
+                MutationObserverClass: LifecycleMutationObserver,"""
           if text.count(old) != 1:
-              raise SystemExit('Expected one tracked lifecycle installation block')
+              raise SystemExit(f'Expected one tracked performance block, found {text.count(old)}')
           path.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
 

@@ -35,6 +35,31 @@ jobs:
         continue-on-error: true
         run: python tools/apply_minor_ui_refresh_fix.py > patch-output.txt 2>&1
 
+      - name: Correct initial pageshow simulation
+        if: steps.patch.outcome == 'success'
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/test_page_lifecycle.py')
+          text = path.read_text(encoding='utf-8')
+          old = """            const lifecycleCleanup = lifecycle.installHistoryCardRestoreGuard({{
+                windowObj: trackedWindow,
+                documentObj: trackedDocument,
+                performanceObj: backForwardPerformance,
+                MutationObserverClass: LifecycleMutationObserver,
+            }});"""
+          new = """            const lifecycleCleanup = lifecycle.installHistoryCardRestoreGuard({{
+                windowObj: trackedWindow,
+                documentObj: trackedDocument,
+                performanceObj: {{ getEntriesByType: () => [{{ type: 'navigate' }}] }},
+                MutationObserverClass: LifecycleMutationObserver,
+            }});"""
+          if text.count(old) != 1:
+              raise SystemExit('Expected one tracked lifecycle installation block')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
       - name: Upload patch diagnostics
         if: always()
         uses: actions/upload-artifact@v4

@@ -38,7 +38,12 @@ jobs:
         run: python .github/scripts/apply_description_blue_fix.py
 
       - name: Remove temporary machinery
-        run: rm .github/scripts/apply_description_blue_fix.py .github/workflows/apply_description_blue_fix.yml
+        run: |
+          rm .github/scripts/apply_description_blue_fix.py
+          rm .github/workflows/apply_description_blue_fix.yml
+          rm .github/workflows/diagnose_description_blue_fix.yml
+          rm .github/DESCRIPTION_BLUE_FIX_TRIGGER.md
+          rm .github/OPEN_DESCRIPTION_BLUE_FIX_PR.md
 
       - name: Install dependencies
         run: |

@@ -98,10 +98,7 @@ function setLayerEntryHighlighted(entry, highlighted, highlightColour) {
         color: colour,
         fillColor: colour,
     });
-    entry.marker?.setStyle({
-        color: highlighted ? colour : '#ffffff',
-        fillColor: colour,
-    });
+    entry.marker?.setStyle({ fillColor: colour });
     if (highlighted) entry.marker?.bringToFront?.();
     return true;
 }

@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="{{ nimiq_style_cdn }}">
     <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-polish-v2-20260704') }}">
     <link rel="stylesheet" href="/static/disclaimer_button.css?v=disclaimer-button-v3-20260722">
+    <link rel="stylesheet" href="/static/static_pages.css?v=static-pages-v1-20260724">
 </head>
 <body class="nq-style"
     data-app-name="{{ app_name | default('NimHunt') }}"
@@ -126,6 +127,13 @@
             <span class="home-metrics-separator" aria-hidden="true">–</span>
             <span id="home-daily-users" class="nq-label" data-i18n="home.dailyUsers">0 Daily Users</span>
         </div>
+        {% endif %}
+
+        {% if show_information_links | default(false) %}
+        <nav class="home-information-links" aria-label="Project information">
+            <a href="/static/about.html">About</a>
+            <a href="/static/roadmap.html">Roadmap</a>
+        </nav>
         {% endif %}
     </main>
 

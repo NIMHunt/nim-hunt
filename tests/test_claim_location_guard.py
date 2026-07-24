@@ -236,7 +236,7 @@ class ClaimLocationGuardTest(unittest.IsolatedAsyncioTestCase):
             75,
         )
 
-    async def test_commercial_flight_speed_is_allowed(self):
+    async def test_commercial_flight_speed_causes_cooldown_not_ban(self):
         async with schema.get_db() as db:
             user_id = await db_access.create_user(db, device_id_hash="b" * 64)
             london_id = await self._spot(
@@ -268,6 +268,24 @@ class ClaimLocationGuardTest(unittest.IsolatedAsyncioTestCase):
                 db,
                 user_id=user_id,
                 target_spot_id=new_york_id,
+            )
+            user = await db_access.get_user_by_id(db, user_id=user_id)
+
+        self.assertEqual(decision["action"], "cooldown", decision)
+        self.assertEqual(int(user[schema.USER_STATUS]), const.USER_STATUS_ACTIVE)
+
+    async def test_normal_ground_travel_is_allowed(self):
+        async with schema.get_db() as db:
+            user_id, _, target_id, _ = await self._scenario(
+                db,
+                suffix="l-ground",
+                target_long=0.2,
+                trusted_age=15 * 60,
+            )
+            decision = await claim_location_guard.get_claim_location_decision(
+                db,
+                user_id=user_id,
+                target_spot_id=target_id,
             )
         self.assertEqual(decision["action"], "allow", decision)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -45,7 +46,9 @@ class ClaimLocationGuardTest(unittest.IsolatedAsyncioTestCase):
     ) -> int:
         owner_id = await db_access.create_user(
             db,
-            device_id_hash=f"location-owner-{suffix}",
+            device_id_hash=hashlib.sha256(
+                f"location-owner-{suffix}".encode("utf-8")
+            ).hexdigest(),
         )
         max_claims = 10
         spot_id = await db_access.create_spot(
@@ -187,7 +190,7 @@ class ClaimLocationGuardTest(unittest.IsolatedAsyncioTestCase):
     ) -> tuple[int, int, int, dict]:
         user_id = await db_access.create_user(
             db,
-            device_id_hash=(suffix[0] * 64),
+            device_id_hash=hashlib.sha256(suffix.encode("utf-8")).hexdigest(),
         )
         trusted_id = await self._spot(
             db,
@@ -555,7 +558,7 @@ class ClaimLocationGuardTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision["elapsed_seconds"], 1)
 
     async def test_claim_api_commits_cooldown_without_creating_claim(self):
-        device_hash = "k" * 64
+        device_hash = "a" * 64
         async with schema.get_db() as db:
             user_id = await db_access.create_user(db, device_id_hash=device_hash)
             trusted_id = await self._spot(

@@ -45,7 +45,21 @@ jobs:
           npm ci --prefix helpers
 
       - name: Run Python tests
-        run: python -m pytest -q
+        run: |
+          set +e
+          python -m pytest -q > pytest-output.txt 2>&1
+          status=$?
+          cat pytest-output.txt
+          exit $status
+
+      - name: Upload Python test output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-output
+          path: pytest-output.txt
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Run Node tests
         run: npm test --prefix helpers

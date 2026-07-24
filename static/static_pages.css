@@ -1,0 +1,72 @@
+.home-information-links {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: center;
+}
+
+.home-information-links a {
+    color: var(--nh-text);
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-align: center;
+    text-decoration: none;
+    opacity: 0.72;
+}
+
+.home-information-links a:hover,
+.home-information-links a:focus-visible {
+    text-decoration: underline;
+    text-underline-offset: 0.18em;
+    opacity: 1;
+}
+
+.static-page-card {
+    padding: 18px;
+}
+
+.static-page-title {
+    margin: 0 0 1rem !important;
+    text-align: center;
+}
+
+.static-page-body,
+.roadmap-sections {
+    display: flex;
+    flex-direction: column;
+}
+
+.static-page-body {
+    gap: 0.85rem;
+}
+
+.static-page-copy {
+    margin: 0;
+    color: var(--nh-text);
+    font-size: 1rem;
+    font-weight: 800;
+    line-height: 1.45;
+    text-align: center;
+}
+
+.roadmap-sections {
+    gap: 1.35rem;
+}
+
+.roadmap-heading {
+    margin: 0 0 0.5rem !important;
+    text-align: center;
+}
+
+.nq-style .roadmap-items {
+    margin: 0 !important;
+    padding: 0 !important;
+    display: grid;
+    gap: 0.35rem;
+    list-style: none;
+}
+
+.nq-style .roadmap-items > li {
+    margin: 0 !important;
+}

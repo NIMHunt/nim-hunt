@@ -1,8 +1,9 @@
 {% set show_home_nav = true %}
 {% set show_debug = true %}
 {% set show_metrics = true %}
+{% set show_information_links = true %}
 {% set show_notice = true %}
 {% set show_lock_tooltip = true %}
 {% set show_project_disclaimer = project_disclaimer_enabled | default(false) %}
-{% set home_script_src = '/static/home_entry.js?v=' ~ (asset_version | default('claim-polish-v2-20260704')) ~ '-home-onboarding-v4-20260718' %}
+{% set home_script_src = '/static/home_entry.js?v=' ~ (asset_version | default('claim-polish-v2-20260704')) ~ '-home-static-pages-v1-20260724' %}
 {% include "_home_shell.html" %}

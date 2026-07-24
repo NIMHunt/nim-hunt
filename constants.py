@@ -401,6 +401,16 @@ CLAIM_LOCATION_SOFT_OUTSIDE_MARGIN_METRES = 25
 CLAIM_LOCATION_SOFT_PENALTY = 0.10
 CLAIM_LOCATION_HARD_PENALTY = 0.35
 
+# Claim-location spoof safeguards. All distances are measured after subtracting
+# both Spot radii, giving the claimant the shortest plausible journey. The hard
+# rule is reserved for extreme travel; the softer rule starts a global claim
+# cooldown and uses a calculated retry time instead of immediately banning.
+CLAIM_LOCATION_RECENT_CLAIM_LIMIT = 5
+CLAIM_LOCATION_HARD_BAN_MIN_DISTANCE_METRES = 3_000
+CLAIM_LOCATION_HARD_BAN_MAX_SPEED_METRES_PER_SECOND = 500
+CLAIM_LOCATION_SOFT_COOLDOWN_MIN_DISTANCE_METRES = 1_000
+CLAIM_LOCATION_SOFT_COOLDOWN_MAX_SPEED_METRES_PER_SECOND = 75
+
 
 # -----------------------------
 # USER Statuses

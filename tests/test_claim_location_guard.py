@@ -314,7 +314,7 @@ class ClaimLocationGuardTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_soft_jump_starts_durable_calculated_global_cooldown(self):
         async with schema.get_db() as db:
-            user_id, _, target_id, _ = await self._scenario(
+            user_id, _, target_id, trusted_claim = await self._scenario(
                 db,
                 suffix="d-soft",
             )
@@ -328,6 +328,10 @@ class ClaimLocationGuardTest(unittest.IsolatedAsyncioTestCase):
             marker = await self._marker(db, user_id=user_id)
             user = await db_access.get_user_by_id(db, user_id=user_id)
             count = await self._claim_count(db, user_id=user_id)
+            trusted = await db_access.get_claim(
+                db,
+                claim_id=int(trusted_claim[schema.CLAIM_ID]),
+            )
 
         self.assertIsInstance(exc, claim_location_guard.ClaimLocationCooldownError)
         self.assertIn("cannot claim any Spot", str(exc))
@@ -335,7 +339,7 @@ class ClaimLocationGuardTest(unittest.IsolatedAsyncioTestCase):
             0.0,
             db_access.distance_metres(0.0, 0.0, 0.0, 0.022) - 400.0,
         )
-        expected_retry_at = marker["attempted_at"] + math.ceil(
+        expected_retry_at = int(trusted[schema.CLAIM_CLAIMED_AT]) + math.ceil(
             minimum_distance
             / const.CLAIM_LOCATION_SOFT_COOLDOWN_MAX_SPEED_METRES_PER_SECOND
         ) + 1

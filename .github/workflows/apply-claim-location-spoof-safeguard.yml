@@ -1,0 +1,141 @@
+name: Apply claim location spoof safeguard
+
+on:
+  push:
+    branches:
+      - agent/claim-location-spoof-safeguard
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/claim-location-spoof-safeguard
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: helpers/package-lock.json
+
+      - name: Apply focused production and test changes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file_path = Path(path)
+              text = file_path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"Expected one anchor in {path}, found {count}")
+              file_path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace_once(
+              "constants.py",
+              """CLAIM_LOCATION_HARD_PENALTY = 0.35\n\n\n# -----------------------------\n# USER Statuses\n""",
+              """CLAIM_LOCATION_HARD_PENALTY = 0.35\n\n# Claim-time impossible-travel safeguard. These deliberately high thresholds\n# target only extreme, claim-validated jumps while leaving ordinary travel,\n# commercial flights and GPS noise alone.\nCLAIM_IMPOSSIBLE_TRAVEL_MIN_DISTANCE_METRES = 160_934  # 100 miles\nCLAIM_IMPOSSIBLE_TRAVEL_MAX_SPEED_METRES_PER_SECOND = 500  # about 1,118 mph\nCLAIM_IMPOSSIBLE_TRAVEL_HISTORY_LIMIT = 5\n\n\n# -----------------------------\n# USER Statuses\n""",
+          )
+
+          replace_once(
+              "db_access.py",
+              """RowDict = dict[str, Any]\nPlaceResolver = Callable[[float, float], Awaitable[tuple[str | None, str | None]]]\n""",
+              """RowDict = dict[str, Any]\nPlaceResolver = Callable[[float, float], Awaitable[tuple[str | None, str | None]]]\n\n\nclass ImpossibleClaimTravelError(ValueError):\n    \"\"\"Raised before a claim write when recent accepted claims require impossible travel.\"\"\"\n\n    def __init__(self, details: RowDict):\n        self.details = dict(details)\n        super().__init__(\n            \"This device account has been banned because its recent claim locations \"\n            \"could not have been reached in the time available.\"\n        )\n""",
+          )
+
+          replace_once(
+              "db_access.py",
+              """\n\n\ndef _normalise_location_accuracy_score(*, reading_accuracy_metres: float | None, radius_metres: int) -> float:\n""",
+              """\n\n\nasync def get_claim_impossible_travel_check(\n    db,\n    *,\n    user_id: int,\n    target_spot_id: int,\n) -> RowDict:\n    \"\"\"Return whether recent accepted claim locations require impossible travel.\n\n    Only claim-created locations are considered. Browsing locations never enter\n    this check. Spot radii are subtracted from centre-to-centre distance, giving\n    the user the most merciful plausible route between the two claim areas.\n    \"\"\"\n    target_spot = await get_spot(db, spot_id=int(target_spot_id))\n    if (\n        target_spot is None\n        or target_spot.get(schema.SPOT_LAT) is None\n        or target_spot.get(schema.SPOT_LONG) is None\n    ):\n        return {\"detected\": False, \"current_spot_id\": int(target_spot_id)}\n\n    history_limit = max(\n        1,\n        min(\n            int(getattr(const, \"CLAIM_IMPOSSIBLE_TRAVEL_HISTORY_LIMIT\", 5)),\n            20,\n        ),\n    )\n    rows = await db.execute_fetchall(\n        f\"\"\"\n        SELECT\n            c.{schema.CLAIM_ID} AS claim_id,\n            c.{schema.CLAIM_SPOT_ID} AS spot_id,\n            c.{schema.CLAIM_STATUS} AS claim_status,\n            c.{schema.CLAIM_CLAIMED_AT} AS claimed_at,\n            c.{schema.CLAIM_UPDATED_AT} AS updated_at,\n            s.{schema.SPOT_LAT} AS spot_lat,\n            s.{schema.SPOT_LONG} AS spot_long,\n            s.{schema.SPOT_RADIUS} AS spot_radius,\n            s.{schema.SPOT_CLAIM_DURATION} AS claim_duration\n        FROM {schema.CLAIM_TABLE_NAME} c\n        JOIN {schema.SPOT_TABLE_NAME} s\n          ON s.{schema.SPOT_ID} = c.{schema.CLAIM_SPOT_ID}\n        WHERE c.{schema.CLAIM_RECIPIENT} = ?\n          AND s.{schema.SPOT_LAT} IS NOT NULL\n          AND s.{schema.SPOT_LONG} IS NOT NULL\n        ORDER BY c.{schema.CLAIM_CLAIMED_AT} DESC, c.{schema.CLAIM_ID} DESC\n        LIMIT ?;\n        \"\"\",\n        (int(user_id), history_limit),\n    )\n\n    now = await get_unixepoch(db)\n    minimum_distance = max(\n        1.0,\n        float(getattr(const, \"CLAIM_IMPOSSIBLE_TRAVEL_MIN_DISTANCE_METRES\", 160_934)),\n    )\n    speed_threshold = max(\n        1.0,\n        float(\n            getattr(\n                const,\n                \"CLAIM_IMPOSSIBLE_TRAVEL_MAX_SPEED_METRES_PER_SECOND\",\n                500,\n            )\n        ),\n    )\n    target_radius = max(0.0, float(target_spot.get(schema.SPOT_RADIUS) or 0))\n    strongest: RowDict | None = None\n\n    for row in rows:\n        claimed_at = int(row[\"claimed_at\"] or now)\n        observed_at = claimed_at\n        if (\n            int(row[\"claim_status\"]) == const.CLAIM_STATUS_PENDING\n            and int(row[\"claim_duration\"] or 0) > 0\n        ):\n            # A still-pending duration claim's updated_at is driven by its latest\n            # location heartbeat. Terminal status updates are deliberately ignored.\n            observed_at = max(claimed_at, int(row[\"updated_at\"] or claimed_at))\n\n        elapsed_seconds = max(0, int(now) - observed_at)\n        centre_distance = distance_metres(\n            float(row[\"spot_lat\"]),\n            float(row[\"spot_long\"]),\n            float(target_spot[schema.SPOT_LAT]),\n            float(target_spot[schema.SPOT_LONG]),\n        )\n        plausible_distance = max(\n            0.0,\n            float(centre_distance)\n            - max(0.0, float(row[\"spot_radius\"] or 0))\n            - target_radius,\n        )\n        implied_speed = plausible_distance / max(1, elapsed_seconds)\n        detected = plausible_distance >= minimum_distance and implied_speed > speed_threshold\n        candidate = {\n            \"detected\": bool(detected),\n            \"previous_claim_id\": int(row[\"claim_id\"]),\n            \"previous_spot_id\": int(row[\"spot_id\"]),\n            \"current_spot_id\": int(target_spot_id),\n            \"observed_at\": observed_at,\n            \"checked_at\": int(now),\n            \"elapsed_seconds\": elapsed_seconds,\n            \"centre_distance_metres\": float(centre_distance),\n            \"minimum_travel_distance_metres\": plausible_distance,\n            \"implied_speed_metres_per_second\": implied_speed,\n            \"minimum_distance_threshold_metres\": minimum_distance,\n            \"speed_threshold_metres_per_second\": speed_threshold,\n        }\n        if detected and (\n            strongest is None\n            or implied_speed > float(strongest[\"implied_speed_metres_per_second\"])\n        ):\n            strongest = candidate\n\n    return strongest or {\n        \"detected\": False,\n        \"current_spot_id\": int(target_spot_id),\n        \"minimum_distance_threshold_metres\": minimum_distance,\n        \"speed_threshold_metres_per_second\": speed_threshold,\n    }\n\n\ndef _normalise_location_accuracy_score(*, reading_accuracy_metres: float | None, radius_metres: int) -> float:\n""",
+          )
+
+          replace_once(
+              "db_access.py",
+              """    if await has_spot_cancellation_started(db, spot_id=spot_id):\n        raise ValueError(\"This spot is being cancelled and can no longer be claimed.\")\n\n    try:\n        claim_id = await create_claim(\n            db,\n            spot_id=spot_id,\n            user_id=user_id,\n            lat=lat,\n            long=long,\n            accuracy=accuracy_score,\n            payout_address=payout_address,\n        )\n""",
+              """    if await has_spot_cancellation_started(db, spot_id=spot_id):\n        raise ValueError(\"This spot is being cancelled and can no longer be claimed.\")\n\n    clean_payout_address = _clean_optional_nimiq_address(payout_address)\n    travel_check = await get_claim_impossible_travel_check(\n        db,\n        user_id=int(user_id),\n        target_spot_id=int(spot_id),\n    )\n    if travel_check.get(\"detected\"):\n        raise ImpossibleClaimTravelError(travel_check)\n\n    try:\n        claim_id = await create_claim(\n            db,\n            spot_id=spot_id,\n            user_id=user_id,\n            lat=lat,\n            long=long,\n            accuracy=accuracy_score,\n            payout_address=clean_payout_address,\n        )\n""",
+          )
+
+          replace_once(
+              "public_html.py",
+              """    \"\"\"Start a CLAIM or Prizedraw entry for the current user.\"\"\"\n    async with get_db() as db:\n        async with db_access.transaction(db):\n""",
+              """    \"\"\"Start a CLAIM or Prizedraw entry for the current user.\"\"\"\n    async with get_db() as db:\n        spoofing_details: dict[str, Any] | None = None\n        async with db_access.transaction(db):\n""",
+          )
+
+          replace_once(
+              "public_html.py",
+              """                    claim_code=payload.claim_code,\n                    payout_address=payload.payout_address,\n                )\n            except ValueError as exc:\n""",
+              """                    claim_code=payload.claim_code,\n                    payout_address=payload.payout_address,\n                )\n            except db_access.ImpossibleClaimTravelError as exc:\n                spoofing_details = exc.details\n                await db_access.set_user_status_to_banned(\n                    db,\n                    user_id=int(user[schema.USER_ID]),\n                )\n                logger.warning(\n                    \"Banned user %s for impossible claim travel: previous_claim=%s \"\n                    \"previous_spot=%s current_spot=%s distance=%.0fm elapsed=%ss speed=%.1fm/s\",\n                    int(user[schema.USER_ID]),\n                    spoofing_details.get(\"previous_claim_id\"),\n                    spoofing_details.get(\"previous_spot_id\"),\n                    spoofing_details.get(\"current_spot_id\"),\n                    float(spoofing_details.get(\"minimum_travel_distance_metres\") or 0),\n                    int(spoofing_details.get(\"elapsed_seconds\") or 0),\n                    float(spoofing_details.get(\"implied_speed_metres_per_second\") or 0),\n                )\n            except ValueError as exc:\n""",
+          )
+
+          replace_once(
+              "public_html.py",
+              """                return JSONResponse({**meta, \"ok\": False, \"code\": code, \"message\": message}, status_code=status.HTTP_409_CONFLICT)\n\n        await _notify_all_cache_for_spot_owner_change(\n""",
+              """                return JSONResponse({**meta, \"ok\": False, \"code\": code, \"message\": message}, status_code=status.HTTP_409_CONFLICT)\n\n        if spoofing_details is not None:\n            await _notify_user_cache(db, user_id=int(user[schema.USER_ID]))\n            banned_user = await db_access.get_user_by_id(\n                db,\n                user_id=int(user[schema.USER_ID]),\n            )\n            return JSONResponse(\n                {\n                    **meta,\n                    \"ok\": False,\n                    \"code\": \"location_spoofing_detected\",\n                    \"message\": (\n                        \"This device account has been banned because two recent claim \"\n                        \"locations could not have been reached in the time available.\"\n                    ),\n                    \"user\": _public_user(banned_user or user),\n                },\n                status_code=status.HTTP_403_FORBIDDEN,\n            )\n\n        await _notify_all_cache_for_spot_owner_change(\n""",
+          )
+
+          Path("tests/test_claim_location_spoofing.py").write_text(
+              '''from __future__ import annotations\n\nimport json\nimport tempfile\nimport time\nimport unittest\n\nfrom fastapi import BackgroundTasks\n\nimport cache\nimport constants as const\nimport database as schema\nimport db_access\nimport public_html\n\n\nclass ClaimLocationSpoofingTest(unittest.IsolatedAsyncioTestCase):\n    async def asyncSetUp(self):\n        self._tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=True)\n        self._old_path = schema.DB_PATH\n        schema.DB_PATH = self._tmp.name\n        await cache.force_all_cache_clear()\n        await schema.init_db()\n\n    async def asyncTearDown(self):\n        await cache.force_all_cache_clear()\n        schema.DB_PATH = self._old_path\n        self._tmp.close()\n\n    async def _create_published_spot(\n        self,\n        db,\n        *,\n        owner_suffix: str,\n        title: str,\n        lat: float,\n        long: float,\n        radius: int = 200,\n        claim_duration: int = 0,\n    ) -> int:\n        owner_id = await db_access.create_user(\n            db,\n            device_id_hash=f"location-owner-{owner_suffix}",\n        )\n        max_claims = 10\n        spot_id = await db_access.create_spot(\n            db,\n            created_by=owner_id,\n            title=title,\n            lat=lat,\n            long=long,\n            radius=radius,\n            claim_duration=claim_duration,\n            max_claims_per_user=1,\n            max_total_claims=max_claims,\n            total_value=max_claims * const.MIN_STANDARD_CLAIM_PAYOUT,\n            starts_at=int(time.time()) - 60,\n            ends_at=24 * 60 * 60,\n            auto_reverse_geocode=False,\n        )\n        await db.execute(\n            f"""\n            UPDATE {schema.SPOT_TABLE_NAME}\n            SET {schema.SPOT_STATUS} = ?\n            WHERE {schema.SPOT_ID} = ?;\n            """,\n            (const.SPOT_STATUS_PUBLISHED, spot_id),\n        )\n        return spot_id\n\n    async def _create_user_claim(\n        self,\n        db,\n        *,\n        user_id: int,\n        spot_id: int,\n        lat: float,\n        long: float,\n    ) -> dict:\n        return await db_access.create_claim_attempt(\n            db,\n            spot_id=spot_id,\n            user_id=user_id,\n            lat=lat,\n            long=long,\n            location_accuracy_metres=5.0,\n            payout_address=const.DEV_PLATFORM_FEE_ADDRESS,\n        )\n\n    async def test_commercial_flight_speed_is_not_flagged(self):\n        async with schema.get_db() as db:\n            user_id = await db_access.create_user(db, device_id_hash="b" * 64)\n            london_id = await self._create_published_spot(\n                db, owner_suffix="london", title="London", lat=51.5074, long=-0.1278\n            )\n            new_york_id = await self._create_published_spot(\n                db, owner_suffix="new-york", title="New York", lat=40.7128, long=-74.0060\n            )\n            claim = await self._create_user_claim(\n                db, user_id=user_id, spot_id=london_id, lat=51.5074, long=-0.1278\n            )\n            now = await db_access.get_unixepoch(db)\n            await db.execute(\n                f"""\n                UPDATE {schema.CLAIM_TABLE_NAME}\n                SET {schema.CLAIM_CLAIMED_AT} = ?, {schema.CLAIM_UPDATED_AT} = ?\n                WHERE {schema.CLAIM_ID} = ?;\n                """,\n                (now - (8 * 60 * 60), now - (8 * 60 * 60), int(claim[schema.CLAIM_ID])),\n            )\n\n            check = await db_access.get_claim_impossible_travel_check(\n                db, user_id=user_id, target_spot_id=new_york_id\n            )\n\n        self.assertFalse(check["detected"], check)\n\n    async def test_pending_duration_heartbeat_is_a_recent_location_anchor(self):\n        async with schema.get_db() as db:\n            user_id = await db_access.create_user(db, device_id_hash="c" * 64)\n            london_id = await self._create_published_spot(\n                db,\n                owner_suffix="duration-london",\n                title="Duration London",\n                lat=51.5074,\n                long=-0.1278,\n                claim_duration=60 * 60,\n            )\n            paris_id = await self._create_published_spot(\n                db, owner_suffix="duration-paris", title="Duration Paris", lat=48.8566, long=2.3522\n            )\n            claim = await self._create_user_claim(\n                db, user_id=user_id, spot_id=london_id, lat=51.5074, long=-0.1278\n            )\n            self.assertEqual(int(claim[schema.CLAIM_STATUS]), const.CLAIM_STATUS_PENDING)\n            now = await db_access.get_unixepoch(db)\n            await db.execute(\n                f"""\n                UPDATE {schema.CLAIM_TABLE_NAME}\n                SET {schema.CLAIM_CLAIMED_AT} = ?, {schema.CLAIM_UPDATED_AT} = ?\n                WHERE {schema.CLAIM_ID} = ?;\n                """,\n                (now - (2 * 60 * 60), now - 60, int(claim[schema.CLAIM_ID])),\n            )\n\n            check = await db_access.get_claim_impossible_travel_check(\n                db, user_id=user_id, target_spot_id=paris_id\n            )\n\n        self.assertTrue(check["detected"], check)\n        self.assertEqual(check["elapsed_seconds"], 60)\n\n    async def test_claim_api_bans_and_does_not_create_the_impossible_claim(self):\n        device_hash = "a" * 64\n        async with schema.get_db() as db:\n            user_id = await db_access.create_user(db, device_id_hash=device_hash)\n            london_id = await self._create_published_spot(\n                db, owner_suffix="api-london", title="API London", lat=51.5074, long=-0.1278\n            )\n            paris_id = await self._create_published_spot(\n                db, owner_suffix="api-paris", title="API Paris", lat=48.8566, long=2.3522\n            )\n            claim = await self._create_user_claim(\n                db, user_id=user_id, spot_id=london_id, lat=51.5074, long=-0.1278\n            )\n            now = await db_access.get_unixepoch(db)\n            await db.execute(\n                f"""\n                UPDATE {schema.CLAIM_TABLE_NAME}\n                SET {schema.CLAIM_CLAIMED_AT} = ?, {schema.CLAIM_UPDATED_AT} = ?\n                WHERE {schema.CLAIM_ID} = ?;\n                """,\n                (now - 5 * 60, now - 5 * 60, int(claim[schema.CLAIM_ID])),\n            )\n            await db.commit()\n\n        payload = public_html.ClaimSpotRequest(\n            device_id_hash=device_hash,\n            wallet_available=True,\n            location_available=True,\n            lat=48.8566,\n            long=2.3522,\n            accuracy=5.0,\n            payout_address=const.DEV_PLATFORM_FEE_ADDRESS,\n        )\n        response = await public_html.claim_spot_api(\n            paris_id,\n            payload,\n            BackgroundTasks(),\n        )\n        body = json.loads(response.body)\n\n        self.assertEqual(response.status_code, 403)\n        self.assertEqual(body["code"], "location_spoofing_detected")\n        self.assertTrue(body["user"]["is_banned"])\n\n        async with schema.get_db() as db:\n            user = await db_access.get_user_by_id(db, user_id=user_id)\n            claim_count = await db_access.count_claims_by_user(db, user_id=user_id)\n\n        self.assertIsNotNone(user)\n        self.assertEqual(int(user[schema.USER_STATUS]), const.USER_STATUS_BANNED)\n        self.assertEqual(claim_count, 1)\n\n\nif __name__ == "__main__":\n    unittest.main()\n''',
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          npm ci --prefix helpers
+
+      - name: Run complete repository verification
+        env:
+          NIMHUNT_DB_PATH: ${{ runner.temp }}/nimhunt-ci.db
+          NIMHUNT_DEPLOYMENT_MODE: development
+          NIMHUNT_NIMIQ_NETWORK: TestAlbatross
+          NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: "1"
+        run: |
+          python -m pytest -q
+          npm test --prefix helpers
+          ruff check .
+          python -m compileall -q *.py tests
+          for file in static/*.js; do node --check --input-type=module < "$file"; done
+          for file in helpers/*.mjs; do node --check "$file"; done
+          for file in *.sh; do bash -n "$file"; done
+          python - <<'PY'
+          from pathlib import Path
+          from jinja2 import Environment, FileSystemLoader
+
+          templates = Path("templates")
+          environment = Environment(loader=FileSystemLoader(templates))
+          for path in sorted(templates.glob("*.html")):
+              environment.get_template(path.name)
+          PY
+          rm -f "$NIMHUNT_DB_PATH"
+          python spoof.py
+          python -m pip check
+          python -m pip_audit --progress-spinner off
+          npm audit --omit=dev --prefix helpers
+
+      - name: Commit verified changes and remove temporary workflow
+        run: |
+          git config user.name "NimHunt Agent"
+          git config user.email "actions@users.noreply.github.com"
+          git add constants.py db_access.py public_html.py tests/test_claim_location_spoofing.py
+          git rm .github/workflows/apply-claim-location-spoof-safeguard.yml
+          git commit -m "Add conservative claim location spoof safeguard"
+          git push origin HEAD:agent/claim-location-spoof-safeguard

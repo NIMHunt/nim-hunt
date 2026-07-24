@@ -44,17 +44,6 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-dev.txt
           npm ci --prefix helpers
 
-      - name: Apply Ruff diagnostic fix
-        run: |
-          ruff check --fix tests/test_static_pages.py
-          cp tests/test_static_pages.py ruff-fixed.py
-
-      - name: Upload Ruff diagnostic fix
-        uses: actions/upload-artifact@v4
-        with:
-          name: ruff-diagnostic-fix
-          path: ruff-fixed.py
-
       - name: Run Python tests
         run: python -m pytest -q
 

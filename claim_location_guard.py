@@ -142,8 +142,10 @@ async def get_claim_location_suspicion(db, *, user_id: int) -> RowDict | None:
 
 def _claim_observed_at(row: RowDict, *, now: int) -> int:
     claimed_at = int(row.get("claimed_at") or now)
+    claim_status = row.get("claim_status")
     if (
-        int(row.get("claim_status") or -1) == const.CLAIM_STATUS_PENDING
+        claim_status is not None
+        and int(claim_status) == const.CLAIM_STATUS_PENDING
         and int(row.get("claim_duration") or 0) > 0
     ):
         return max(claimed_at, int(row.get("updated_at") or claimed_at))

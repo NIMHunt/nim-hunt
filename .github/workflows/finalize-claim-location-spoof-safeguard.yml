@@ -1,0 +1,111 @@
+name: Finalize claim location safeguard
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.head_ref == 'agent/claim-location-spoof-safeguard'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: helpers/package-lock.json
+
+      - name: Apply production changes and corrected tests
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_workflow = Path('.github/workflows/apply-claim-location-spoof-safeguard.yml')
+          lines = source_workflow.read_text(encoding='utf-8').splitlines()
+          start = next(i for i, line in enumerate(lines) if line.strip() == "python - <<'PY'") + 1
+          end = next(i for i in range(start, len(lines)) if lines[i].strip() == 'PY')
+          source = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines[start:end])
+          exec(compile(source, str(source_workflow), 'exec'))
+
+          test_path = Path('tests/test_claim_location_spoofing.py')
+          test_source = test_path.read_text(encoding='utf-8')
+          old = '            claim_count = await db_access.count_claims_by_user(db, user_id=user_id)\n'
+          new = '''            claim_rows = await db.execute_fetchall(
+                f"SELECT {schema.CLAIM_ID} FROM {schema.CLAIM_TABLE_NAME} "
+                f"WHERE {schema.CLAIM_RECIPIENT} = ?;",
+                (user_id,),
+            )
+            claim_count = len(claim_rows)
+'''
+          if test_source.count(old) != 1:
+              raise RuntimeError('Expected one obsolete claim-count assertion')
+          test_path.write_text(test_source.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          npm ci --prefix helpers
+
+      - name: Run complete repository verification
+        env:
+          NIMHUNT_DB_PATH: ${{ runner.temp }}/nimhunt-ci.db
+          NIMHUNT_DEPLOYMENT_MODE: development
+          NIMHUNT_NIMIQ_NETWORK: TestAlbatross
+          NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: "1"
+        run: |
+          python -m pytest -q
+          npm test --prefix helpers
+          ruff check .
+          python -m compileall -q *.py tests
+          for file in static/*.js; do node --check --input-type=module < "$file"; done
+          for file in helpers/*.mjs; do node --check "$file"; done
+          for file in *.sh; do bash -n "$file"; done
+          python - <<'PY'
+          from pathlib import Path
+          from jinja2 import Environment, FileSystemLoader
+
+          templates = Path('templates')
+          environment = Environment(loader=FileSystemLoader(templates))
+          for path in sorted(templates.glob('*.html')):
+              environment.get_template(path.name)
+          PY
+          rm -f "$NIMHUNT_DB_PATH"
+          python spoof.py
+          python -m pip check
+          python -m pip_audit --progress-spinner off
+          npm audit --omit=dev --prefix helpers
+
+      - name: Commit verified change and remove temporary files
+        run: |
+          git config user.name "NimHunt Agent"
+          git config user.email "actions@users.noreply.github.com"
+          git add constants.py db_access.py public_html.py tests/test_claim_location_spoofing.py
+          git rm .github/workflows/apply-claim-location-spoof-safeguard.yml
+          git rm .github/workflows/apply-claim-location-spoof-safeguard-pr.yml
+          git rm .github/workflows/finalize-claim-location-spoof-safeguard.yml
+          git rm -f claim_location_ci_diagnostic.txt
+          git commit -m "Add conservative claim location spoof safeguard"
+          git push origin HEAD:${{ github.head_ref }}

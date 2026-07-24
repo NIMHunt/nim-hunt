@@ -47,6 +47,23 @@ jobs:
           end = next(i for i in range(start, len(lines)) if lines[i].strip() == 'PY')
           source = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines[start:end])
           exec(compile(source, str(workflow), 'exec'))
+
+          test_path = Path('tests/test_claim_location_spoofing.py')
+          test_source = test_path.read_text(encoding='utf-8')
+          old = '            claim_count = await db_access.count_claims_by_user(db, user_id=user_id)\n'
+          new = '''            cursor = await db.execute(
+                f"""
+                SELECT COUNT(*) AS claim_count
+                FROM {schema.CLAIM_TABLE_NAME}
+                WHERE {schema.CLAIM_RECIPIENT} = ?;
+                """,
+                (user_id,),
+            )
+            claim_count = int((await cursor.fetchone())["claim_count"])
+'''
+          if test_source.count(old) != 1:
+              raise RuntimeError('Expected one obsolete claim-count assertion')
+          test_path.write_text(test_source.replace(old, new, 1), encoding='utf-8')
           PY
 
       - name: Install dependencies
@@ -84,12 +101,14 @@ jobs:
           python -m pip_audit --progress-spinner off
           npm audit --omit=dev --prefix helpers
 
-      - name: Commit verified changes and remove temporary workflows
+      - name: Commit verified changes and remove temporary files
         run: |
           git config user.name "NimHunt Agent"
           git config user.email "actions@users.noreply.github.com"
           git add constants.py db_access.py public_html.py tests/test_claim_location_spoofing.py
           git rm .github/workflows/apply-claim-location-spoof-safeguard.yml
           git rm .github/workflows/apply-claim-location-spoof-safeguard-pr.yml
+          git rm .github/workflows/diagnose-claim-location-spoof-safeguard.yml
+          git rm -f claim_location_ci_diagnostic.txt
           git commit -m "Add conservative claim location spoof safeguard"
           git push origin HEAD:${{ github.head_ref }}

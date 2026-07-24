@@ -1,0 +1,65 @@
+...............................F........................................ [ 26%]
+........................................................................ [ 52%]
+.................................................................. [ 77%]
+..............................................................           [100%]
+=================================== FAILURES ===================================
+_ ClaimLocationSpoofingTest.test_claim_api_bans_and_does_not_create_the_impossible_claim _
+
+self = <test_claim_location_spoofing.ClaimLocationSpoofingTest testMethod=test_claim_api_bans_and_does_not_create_the_impossible_claim>
+
+    async def test_claim_api_bans_and_does_not_create_the_impossible_claim(self):
+        device_hash = "a" * 64
+        async with schema.get_db() as db:
+            user_id = await db_access.create_user(db, device_id_hash=device_hash)
+            london_id = await self._create_published_spot(
+                db, owner_suffix="api-london", title="API London", lat=51.5074, long=-0.1278
+            )
+            paris_id = await self._create_published_spot(
+                db, owner_suffix="api-paris", title="API Paris", lat=48.8566, long=2.3522
+            )
+            claim = await self._create_user_claim(
+                db, user_id=user_id, spot_id=london_id, lat=51.5074, long=-0.1278
+            )
+            now = await db_access.get_unixepoch(db)
+            await db.execute(
+                f"""
+                UPDATE {schema.CLAIM_TABLE_NAME}
+                SET {schema.CLAIM_CLAIMED_AT} = ?, {schema.CLAIM_UPDATED_AT} = ?
+                WHERE {schema.CLAIM_ID} = ?;
+                """,
+                (now - 5 * 60, now - 5 * 60, int(claim[schema.CLAIM_ID])),
+            )
+            await db.commit()
+    
+        payload = public_html.ClaimSpotRequest(
+            device_id_hash=device_hash,
+            wallet_available=True,
+            location_available=True,
+            lat=48.8566,
+            long=2.3522,
+            accuracy=5.0,
+            payout_address=const.DEV_PLATFORM_FEE_ADDRESS,
+        )
+        response = await public_html.claim_spot_api(
+            paris_id,
+            payload,
+            BackgroundTasks(),
+        )
+        body = json.loads(response.body)
+    
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(body["code"], "location_spoofing_detected")
+        self.assertTrue(body["user"]["is_banned"])
+    
+        async with schema.get_db() as db:
+            user = await db_access.get_user_by_id(db, user_id=user_id)
+>           claim_count = await db_access.count_claims_by_user(db, user_id=user_id)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'db_access' has no attribute 'count_claims_by_user'
+
+tests/test_claim_location_spoofing.py:199: AttributeError
+------------------------------ Captured log call -------------------------------
+WARNING  public_html:public_html.py:1817 Banned user 1 for impossible claim travel: previous_claim=1 previous_spot=1 current_spot=2 distance=343156m elapsed=300s speed=1143.9m/s
+=========================== short test summary info ============================
+FAILED tests/test_claim_location_spoofing.py::ClaimLocationSpoofingTest::test_claim_api_bans_and_does_not_create_the_impossible_claim - AttributeError: module 'db_access' has no attribute 'count_claims_by_user'
+1 failed, 271 passed, 6 subtests passed in 13.32s

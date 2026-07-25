@@ -50,7 +50,7 @@ function makeRoadmapSection(section) {
 
     for (const itemText of section.items) {
         const item = document.createElement('li');
-        item.className = 'static-page-copy roadmap-item';
+        item.className = 'nq-text roadmap-item';
         item.textContent = itemText;
         list.append(item);
     }

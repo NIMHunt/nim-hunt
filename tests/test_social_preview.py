@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import io
 from pathlib import Path
 
@@ -83,17 +84,42 @@ def test_site_card_is_large_png() -> None:
         assert image.size == (1200, 630)
 
 
-def test_spot_card_avoids_live_network_in_tests() -> None:
-    def blank_tile(_z: int, _x: int, _y: int) -> Image.Image:
-        return Image.new("RGB", (256, 256), (235, 241, 244))
+def blank_map_tile(_z: int, _x: int, _y: int) -> Image.Image:
+    return Image.new("RGB", (256, 256), (235, 241, 244))
 
+
+def render_test_spot_card(*, is_prizedraw: bool = False) -> Image.Image:
     data = social_card_images.render_spot_card(
         spot_fixture(),
-        tile_loader=blank_tile,
+        is_prizedraw=is_prizedraw,
+        tile_loader=blank_map_tile,
     )
-    with Image.open(io.BytesIO(data)) as image:
-        assert image.format == "PNG"
-        assert image.size == (1200, 630)
+    image = Image.open(io.BytesIO(data))
+    image.load()
+    return image.convert("RGB")
+
+
+def test_standard_spot_card_uses_only_green_radius_and_marker() -> None:
+    image = render_test_spot_card()
+    assert image.size == (1200, 630)
+    assert image.getpixel((600, 315)) == social_card_images.STANDARD_SPOT_COLOUR
+    assert image.getpixel((624, 315)) == (255, 255, 255)
+    assert image.getpixel((700, 315)) == (191, 229, 227)
+    assert image.getpixel((0, 0)) == (235, 241, 244)
+
+
+def test_prizedraw_spot_card_uses_nimiq_yellow() -> None:
+    image = render_test_spot_card(is_prizedraw=True)
+    assert image.getpixel((600, 315)) == social_card_images.PRIZEDRAW_SPOT_COLOUR
+    assert image.getpixel((624, 315)) == (255, 255, 255)
+    assert image.getpixel((700, 315)) == (239, 231, 202)
+
+
+def test_spot_card_renderer_contains_no_decorative_clutter() -> None:
+    source = inspect.getsource(social_card_images.render_spot_card)
+    for unwanted in ("rounded_rectangle", "diamond(", "draw.text", "title", "city", "badge"):
+        assert unwanted not in source
+    assert "_draw_osm_attribution(image)" in source
 
 
 def test_middleware_injects_about_metadata() -> None:

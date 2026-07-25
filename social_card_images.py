@@ -32,7 +32,11 @@ MAP_SIZE = (600, 315)
 TILE_SIZE = 256
 TILE_FALLBACK_TTL = 7 * 24 * 60 * 60
 CARD_TTL = 24 * 60 * 60
-CARD_VERSION = "social-cards-v1"
+CARD_VERSION = "social-cards-v2"
+STANDARD_SPOT_COLOUR = (33, 188, 165)
+PRIZEDRAW_SPOT_COLOUR = (255, 196, 53)
+RADIUS_FILL_ALPHA = round(255 * 0.22)
+RADIUS_STROKE_ALPHA = round(255 * 0.95)
 TILE_USER_AGENT = "NimHuntSocialCards/1.0 (+https://nimhunt.app)"
 MAX_AGE_RE = re.compile(r"(?:^|,)\s*max-age=(\d+)", re.I)
 
@@ -241,60 +245,67 @@ def render_site_card(key: str) -> bytes:
     return output.getvalue()
 
 
-def compact(value: object, fallback: str) -> str:
-    return " ".join(str(value or "").split()) or fallback
-
-
-def render_spot_card(
-    spot: dict[str, Any],
-    badge: str | None = None,
-    tile_loader: Callable[[int, int, int], Image.Image] | None = None,
-) -> bytes:
-    lat, long = float(spot[schema.SPOT_LAT]), float(spot[schema.SPOT_LONG])
-    radius = max(1, int(spot.get(schema.SPOT_RADIUS) or 25))
-    title = str(spot.get(schema.SPOT_TITLE) or "NimHunt Spot")
-    country = compact(spot.get(schema.SPOT_COUNTRY), "")
-    city = compact(spot.get(schema.SPOT_CITY), country)
-    map_image, radius_pixels = render_map(lat, long, radius, tile_loader)
-    image = map_image.resize(CARD_SIZE, Image.Resampling.LANCZOS).convert("RGBA")
+def _draw_osm_attribution(image: Image.Image) -> None:
+    """Keep the map provider credit visible without adding decorative UI."""
     draw = ImageDraw.Draw(image, "RGBA")
-    cx, cy, rr = 600, 315, radius_pixels * 2
-    draw.ellipse(
-        (cx - rr, cy - rr, cx + rr, cy + rr),
-        fill=(33, 188, 165, 54),
-        outline=(33, 188, 165, 235),
-        width=7,
-    )
-    diamond(draw, cx, cy, 24)
-    draw.rounded_rectangle((36, 34, 480, 126), 28, fill=(255, 255, 255, 238))
-    draw.text((72, 55), "NimHunt", font=font(44, True), fill=(31, 35, 72))
-    diamond(draw, 410, 80, 18)
-    if badge:
-        badge_font = font(27, True)
-        badge_width = draw.textbbox((0, 0), badge, font=badge_font)[2]
-        left = 1200 - badge_width - 104
-        draw.rounded_rectangle((left, 44, 1162, 112), 26, fill=(255, 196, 53, 238))
-        draw.text((left + 33, 60), badge, font=badge_font, fill=(31, 35, 72))
-    draw.rectangle((0, 475, 1200, 630), fill=(255, 255, 255, 240))
-    draw.text(
-        (58, 499),
-        title,
-        font=fit_font(draw, title, 1040, 52),
-        fill=(31, 35, 72),
-    )
-    details = f"{city + ' · ' if city else ''}{radius} m radius"
-    draw.text((60, 567), details, font=font(27), fill=(31, 35, 72, 178))
     attribution = "© OpenStreetMap contributors"
     attribution_font = font(20)
     width = draw.textbbox((0, 0), attribution, font=attribution_font)[2]
     draw.text(
-        (1176 - width, 443),
+        (1176 - width, 596),
         attribution,
         font=attribution_font,
-        fill=(31, 35, 72),
+        fill=(31, 35, 72, 220),
         stroke_width=2,
-        stroke_fill="white",
+        stroke_fill=(255, 255, 255, 235),
     )
+
+
+def render_spot_card(
+    spot: dict[str, Any],
+    is_prizedraw: bool = False,
+    tile_loader: Callable[[int, int, int], Image.Image] | None = None,
+) -> bytes:
+    lat = float(spot[schema.SPOT_LAT])
+    long = float(spot[schema.SPOT_LONG])
+    radius = max(1, int(spot.get(schema.SPOT_RADIUS) or 25))
+    map_image, radius_pixels = render_map(lat, long, radius, tile_loader)
+    image = map_image.resize(CARD_SIZE, Image.Resampling.LANCZOS).convert("RGBA")
+
+    colour = PRIZEDRAW_SPOT_COLOUR if is_prizedraw else STANDARD_SPOT_COLOUR
+    centre_x, centre_y = CARD_SIZE[0] // 2, CARD_SIZE[1] // 2
+    radius_pixels *= CARD_SIZE[0] / MAP_SIZE[0]
+
+    radius_overlay = Image.new("RGBA", CARD_SIZE, (0, 0, 0, 0))
+    radius_draw = ImageDraw.Draw(radius_overlay, "RGBA")
+    radius_draw.ellipse(
+        (
+            centre_x - radius_pixels,
+            centre_y - radius_pixels,
+            centre_x + radius_pixels,
+            centre_y + radius_pixels,
+        ),
+        fill=(*colour, RADIUS_FILL_ALPHA),
+        outline=(*colour, RADIUS_STROKE_ALPHA),
+        width=5,
+    )
+    image = Image.alpha_composite(image, radius_overlay)
+
+    marker_radius = 24
+    marker_draw = ImageDraw.Draw(image, "RGBA")
+    marker_draw.ellipse(
+        (
+            centre_x - marker_radius,
+            centre_y - marker_radius,
+            centre_x + marker_radius,
+            centre_y + marker_radius,
+        ),
+        fill=(*colour, 255),
+        outline=(255, 255, 255, 255),
+        width=4,
+    )
+
+    _draw_osm_attribution(image)
     output = io.BytesIO()
     image.convert("RGB").save(output, "PNG", optimize=True)
     return output.getvalue()
@@ -360,10 +371,10 @@ async def spot_card(request: Request, ref: str) -> Response:
     if spot is None or not spot_is_public(spot, now):
         raise HTTPException(status_code=404)
     ref = public_spot_ref(spot)
-    badge = "Prizedraw" if spot.get(schema.PRIZEDRAW_PRIZE_COUNT) is not None else None
+    is_prizedraw = spot.get(schema.PRIZEDRAW_PRIZE_COUNT) is not None
     data = await asyncio.to_thread(
         cached_card,
         f"spot:{ref}",
-        lambda: render_spot_card(spot, badge),
+        lambda: render_spot_card(spot, is_prizedraw),
     )
     return png_response(request, data)

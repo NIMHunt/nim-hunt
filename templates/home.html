@@ -1,3 +1,15 @@
+{% set information_view = request.query_params.get('view', '') %}
+{% if information_view == 'about' %}
+{% set page_title = 'About · ' ~ app_name %}
+{% set hero_href = '/' %}
+{% set hero_aria_label = 'Back to Home' %}
+{% set hero_screenreader_text = 'Return to Home' %}
+{% elif information_view == 'roadmap' %}
+{% set page_title = 'Roadmap · ' ~ app_name %}
+{% set hero_href = '/' %}
+{% set hero_aria_label = 'Back to Home' %}
+{% set hero_screenreader_text = 'Return to Home' %}
+{% endif %}
 {% set show_home_nav = true %}
 {% set show_debug = true %}
 {% set show_metrics = true %}
@@ -5,5 +17,5 @@
 {% set show_notice = true %}
 {% set show_lock_tooltip = true %}
 {% set show_project_disclaimer = project_disclaimer_enabled | default(false) %}
-{% set home_script_src = '/static/home_entry.js?v=' ~ (asset_version | default('claim-polish-v2-20260704')) ~ '-home-static-pages-v1-20260724' %}
+{% set home_script_src = '/static/home_entry.js?v=' ~ (asset_version | default('claim-polish-v2-20260704')) ~ '-home-information-v2-20260725' %}
 {% include "_home_shell.html" %}

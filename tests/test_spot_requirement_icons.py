@@ -12,9 +12,11 @@ def read(relative: str) -> str:
 def test_shared_title_helper_renders_password_and_duration_requirements() -> None:
     spot_ui = read("static/spot_ui.js")
     interface_text = read("static/interface_text.js")
+    icon_sprite = read("static/nimiq-style.icons.svg")
 
     assert "iconName: 'nq-lock-locked'" in spot_ui
     assert "iconName: 'nq-stopwatch'" in spot_ui
+    assert 'id="nq-stopwatch"' in icon_sprite
     assert "Number(spot?.claim_duration || 0) > 0" in spot_ui
     assert "appendSpotRequirementIcons(titleEl, spot);" in spot_ui
     assert "durationRequiredTooltip" in interface_text

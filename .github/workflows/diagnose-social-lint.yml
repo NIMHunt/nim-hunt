@@ -1,0 +1,26 @@
+name: Diagnose social preview lint
+
+on:
+  push:
+    branches:
+      - agent/social-preview-cards
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: python -m pip install ruff==0.15.22
+      - name: Capture Ruff diagnostics
+        run: ruff check . --output-format=concise > ruff-diagnostics.txt || true
+      - uses: actions/upload-artifact@v6
+        with:
+          name: social-preview-ruff-diagnostics
+          path: ruff-diagnostics.txt

@@ -1,9 +1,10 @@
 """Durable, disabled-by-default automatic X posting for newly active Spots.
 
-The worker intentionally uses the existing app_metadata table rather than changing
-NimHunt's live schema. External posting cannot be made perfectly atomic with a
-SQLite commit, so ambiguous network outcomes are never retried automatically:
-that favours one missed Post over duplicate public Posts.
+Posting to an external service cannot be committed atomically with SQLite. NimHunt
+therefore retries only outcomes that X clearly rejected before creating a Post
+(such as rate limiting). Network failures and server errors are recorded as
+uncertain and are not retried automatically, preferring one missed Post over a
+duplicate public Post.
 """
 
 from __future__ import annotations
@@ -36,8 +37,11 @@ logger = logging.getLogger(__name__)
 
 X_CREATE_POST_URL = "https://api.x.com/2/tweets"
 X_AUTHENTICATED_USER_URL = "https://api.x.com/2/users/me"
+MODE_METADATA_KEY = "x_auto_post:mode"
 CURSOR_METADATA_KEY = "x_auto_post:activation_cursor"
 SPOT_METADATA_PREFIX = "x_auto_post:spot:"
+MODE_ENABLED = "enabled"
+MODE_DISABLED = "disabled"
 _USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 
 _X_POST_TASK: asyncio.Task | None = None
@@ -52,7 +56,7 @@ class XConfigurationError(RuntimeError):
 
 
 class XTransportError(RuntimeError):
-    """The request outcome is ambiguous because no authoritative response arrived."""
+    """No authoritative response arrived, so the posting outcome is ambiguous."""
 
 
 @dataclass(frozen=True)
@@ -70,8 +74,14 @@ class XResponse:
     headers: dict[str, str]
 
 
+@dataclass(frozen=True, order=True)
+class ActivationCursor:
+    timestamp: int
+    spot_id: int = 0
+
+
 def normalise_account_handle(value: object) -> str:
-    """Return an X username without @, rejecting values that cannot be usernames."""
+    """Return an X username without @, rejecting invalid account handles."""
     handle = str(value or "").strip().lstrip("@").strip()
     if not _USERNAME_PATTERN.fullmatch(handle):
         raise XConfigurationError(
@@ -83,11 +93,14 @@ def normalise_account_handle(value: object) -> str:
 def _required_secret(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
-        raise XConfigurationError(f"{name} must be configured when automatic X posting is enabled")
+        raise XConfigurationError(
+            f"{name} must be configured when automatic X posting is enabled"
+        )
     return value
 
 
 def load_credentials() -> XCredentials:
+    """Load user-context OAuth 1.0a credentials without ever logging them."""
     return XCredentials(
         api_key=_required_secret(const.NIMHUNT_X_API_KEY_ENV),
         api_secret=_required_secret(const.NIMHUNT_X_API_SECRET_ENV),
@@ -97,11 +110,19 @@ def load_credentials() -> XCredentials:
 
 
 def validate_configuration() -> None:
-    """Fail clearly when the opt-in flag is enabled without posting credentials."""
+    """Fail clearly when the opt-in flag is enabled without safe settings."""
     if not const.X_AUTO_POST_ENABLED:
         return
     normalise_account_handle(const.X_ACCOUNT_HANDLE)
     load_credentials()
+    for name, value in (
+        ("NIMHUNT_X_POST_INTERVAL_SECONDS", const.X_POST_INTERVAL_SECONDS),
+        ("NIMHUNT_X_HTTP_TIMEOUT_SECONDS", const.X_HTTP_TIMEOUT_SECONDS),
+        ("NIMHUNT_X_RETRY_AFTER_SECONDS", const.X_RETRY_AFTER_SECONDS),
+        ("NIMHUNT_X_MAX_SPOTS_PER_RUN", const.X_MAX_SPOTS_PER_RUN),
+    ):
+        if int(value) <= 0:
+            raise XConfigurationError(f"{name} must be greater than zero")
 
 
 def _oauth_encode(value: object) -> str:
@@ -118,29 +139,38 @@ def oauth_authorization_header(
 ) -> str:
     """Create an OAuth 1.0a HMAC-SHA1 Authorization header for one request."""
     parsed = urllib.parse.urlsplit(url)
-    base_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+    base_url = urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc, parsed.path, "", "")
+    )
     oauth_params = {
         "oauth_consumer_key": credentials.api_key,
         "oauth_nonce": nonce or secrets.token_urlsafe(24),
         "oauth_signature_method": "HMAC-SHA1",
-        "oauth_timestamp": str(int(timestamp if timestamp is not None else time.time())),
+        "oauth_timestamp": str(
+            int(timestamp if timestamp is not None else time.time())
+        ),
         "oauth_token": credentials.access_token,
         "oauth_version": "1.0",
     }
-    signature_params = list(urllib.parse.parse_qsl(parsed.query, keep_blank_values=True))
+    signature_params = list(
+        urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    )
     signature_params.extend(oauth_params.items())
+    sorted_params = sorted(
+        signature_params,
+        key=lambda item: (_oauth_encode(item[0]), _oauth_encode(item[1])),
+    )
     normalised = "&".join(
         f"{_oauth_encode(key)}={_oauth_encode(value)}"
-        for key, value in sorted(signature_params, key=lambda item: (_oauth_encode(item[0]), _oauth_encode(item[1])))
+        for key, value in sorted_params
     )
     signature_base = "&".join(
-        (
-            method.upper(),
-            _oauth_encode(base_url),
-            _oauth_encode(normalised),
-        )
+        (method.upper(), _oauth_encode(base_url), _oauth_encode(normalised))
     )
-    signing_key = f"{_oauth_encode(credentials.api_secret)}&{_oauth_encode(credentials.access_token_secret)}"
+    signing_key = (
+        f"{_oauth_encode(credentials.api_secret)}&"
+        f"{_oauth_encode(credentials.access_token_secret)}"
+    )
     digest = hmac.new(
         signing_key.encode("utf-8"),
         signature_base.encode("utf-8"),
@@ -168,20 +198,40 @@ def _request_json_sync(
         "User-Agent": "NimHuntXAutoPoster/1.0 (+https://nimhunt.app)",
     }
     if payload is not None:
-        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        body = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
         headers["Content-Type"] = "application/json"
-    request = urllib.request.Request(url, data=body, headers=headers, method=method.upper())
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers=headers,
+        method=method.upper(),
+    )
     try:
-        with urllib.request.urlopen(request, timeout=max(1, const.X_HTTP_TIMEOUT_SECONDS)) as response:
+        with urllib.request.urlopen(
+            request,
+            timeout=max(1, int(const.X_HTTP_TIMEOUT_SECONDS)),
+        ) as response:
             raw = response.read()
             status = int(response.status)
-            response_headers = {str(key).lower(): str(value) for key, value in response.headers.items()}
+            response_headers = {
+                str(key).lower(): str(value)
+                for key, value in response.headers.items()
+            }
     except urllib.error.HTTPError as exc:
         raw = exc.read()
         status = int(exc.code)
-        response_headers = {str(key).lower(): str(value) for key, value in exc.headers.items()}
+        response_headers = {
+            str(key).lower(): str(value)
+            for key, value in (exc.headers.items() if exc.headers else ())
+        }
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise XTransportError(f"X request did not return an authoritative response: {exc}") from exc
+        raise XTransportError(
+            f"X request did not return an authoritative response: {type(exc).__name__}"
+        ) from exc
 
     try:
         parsed = json.loads(raw.decode("utf-8")) if raw else {}
@@ -209,16 +259,21 @@ async def request_json(
 
 
 async def verify_posting_account(credentials: XCredentials) -> str:
-    """Verify that the user credentials really belong to the configured handle."""
+    """Prove the credentials belong to the configured account handle."""
     response = await request_json("GET", X_AUTHENTICATED_USER_URL, credentials)
     if response.status != 200:
         raise XConfigurationError(
-            f"X account verification failed with HTTP {response.status}; check App permissions and tokens"
+            "X account verification failed with HTTP "
+            f"{response.status}; check App permissions and tokens"
         )
     data = response.data.get("data")
-    username = str(data.get("username") if isinstance(data, dict) else "").strip()
+    username = str(
+        data.get("username") if isinstance(data, dict) else ""
+    ).strip()
     if not username:
-        raise XConfigurationError("X account verification response did not include a username")
+        raise XConfigurationError(
+            "X account verification response did not include a username"
+        )
     expected = normalise_account_handle(const.X_ACCOUNT_HANDLE)
     if username.lower() != expected.lower():
         raise XConfigurationError(
@@ -228,11 +283,17 @@ async def verify_posting_account(credentials: XCredentials) -> str:
 
 
 def build_spot_post_text(spot: dict[str, Any]) -> str:
-    """Build the short public Post whose URL supplies the existing social card."""
-    title = " ".join(str(spot.get(schema.SPOT_TITLE) or "NimHunt Spot").split())
+    """Build the public Post whose URL supplies NimHunt's existing social card."""
+    title = " ".join(
+        str(spot.get(schema.SPOT_TITLE) or "NimHunt Spot").split()
+    )
     ref = str(spot.get(schema.SPOT_LINK) or spot[schema.SPOT_ID])
     url = social_preview.public_url(f"{const.SPOT_PAGE_URL_PREFIX}/{ref}")
-    kind = "Prizedraw" if spot.get(schema.PRIZEDRAW_PRIZE_COUNT) is not None else "Spot"
+    kind = (
+        "Prizedraw"
+        if spot.get(schema.PRIZEDRAW_PRIZE_COUNT) is not None
+        else "Spot"
+    )
     return f"A new NimHunt {kind} is now active!\n\n{title}\n\n{url}"
 
 
@@ -242,7 +303,8 @@ def _spot_state_key(spot_id: int) -> str:
 
 async def _get_metadata(db, key: str) -> str | None:
     cur = await db.execute(
-        f"SELECT {schema.APP_METADATA_VALUE} FROM {schema.APP_METADATA_TABLE_NAME} "
+        f"SELECT {schema.APP_METADATA_VALUE} "
+        f"FROM {schema.APP_METADATA_TABLE_NAME} "
         f"WHERE {schema.APP_METADATA_KEY} = ?;",
         (key,),
     )
@@ -263,16 +325,41 @@ async def _set_metadata(db, key: str, value: str) -> None:
     )
 
 
-async def _get_cursor(db, *, now: int) -> int:
-    raw = await _get_metadata(db, CURSOR_METADATA_KEY)
+def _decode_cursor(raw: str | None, *, fallback: int) -> ActivationCursor:
+    if raw is None:
+        return ActivationCursor(max(0, int(fallback)), 0)
     try:
-        return max(0, int(raw)) if raw is not None else int(now)
-    except ValueError:
-        return int(now)
+        decoded = json.loads(raw)
+        if isinstance(decoded, dict):
+            return ActivationCursor(
+                max(0, int(decoded.get("timestamp") or 0)),
+                max(0, int(decoded.get("spot_id") or 0)),
+            )
+        return ActivationCursor(max(0, int(decoded)), 0)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ActivationCursor(max(0, int(fallback)), 0)
 
 
-async def _set_cursor(db, value: int) -> None:
-    await _set_metadata(db, CURSOR_METADATA_KEY, str(max(0, int(value))))
+async def _get_cursor(db, *, now: int) -> ActivationCursor:
+    return _decode_cursor(
+        await _get_metadata(db, CURSOR_METADATA_KEY),
+        fallback=now,
+    )
+
+
+async def _set_cursor(db, cursor: ActivationCursor) -> None:
+    await _set_metadata(
+        db,
+        CURSOR_METADATA_KEY,
+        json.dumps(
+            {
+                "timestamp": max(0, int(cursor.timestamp)),
+                "spot_id": max(0, int(cursor.spot_id)),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
 
 
 def _decode_state(raw: str | None) -> dict[str, Any] | None:
@@ -282,10 +369,16 @@ def _decode_state(raw: str | None) -> dict[str, Any] | None:
         value = json.loads(raw)
     except json.JSONDecodeError:
         return {"state": "uncertain", "reason": "invalid_persisted_state"}
-    return value if isinstance(value, dict) else {"state": "uncertain", "reason": "invalid_persisted_state"}
+    if isinstance(value, dict):
+        return value
+    return {"state": "uncertain", "reason": "invalid_persisted_state"}
 
 
-async def _set_spot_state(db, spot_id: int, state: dict[str, Any]) -> None:
+async def _set_spot_state(
+    db,
+    spot_id: int,
+    state: dict[str, Any],
+) -> None:
     await _set_metadata(
         db,
         _spot_state_key(spot_id),
@@ -293,49 +386,92 @@ async def _set_spot_state(db, spot_id: int, state: dict[str, Any]) -> None:
     )
 
 
-async def advance_disabled_cursor() -> int:
-    """Skip historical activations while the operator's opt-in flag is disabled."""
+async def _prepare_mode(
+    db,
+    *,
+    enabled: bool,
+    now: int,
+) -> tuple[bool, ActivationCursor]:
+    """Persist opt-in transitions and prevent an old disabled-period backlog."""
+    desired_mode = MODE_ENABLED if enabled else MODE_DISABLED
+    stored_mode = await _get_metadata(db, MODE_METADATA_KEY)
+    raw_cursor = await _get_metadata(db, CURSOR_METADATA_KEY)
+    transitioned = stored_mode != desired_mode or raw_cursor is None
+    if transitioned:
+        cursor = ActivationCursor(int(now), 0)
+        await _set_metadata(db, MODE_METADATA_KEY, desired_mode)
+        await _set_cursor(db, cursor)
+        return True, cursor
+    return False, _decode_cursor(raw_cursor, fallback=now)
+
+
+async def prepare_disabled_mode() -> ActivationCursor:
+    """Record that no activations from the disabled period should be backfilled."""
     async with get_db() as db:
         now = await db_access.get_unixepoch(db)
-        await _set_cursor(db, now)
+        _transitioned, cursor = await _prepare_mode(
+            db,
+            enabled=False,
+            now=now,
+        )
+        # Refresh the cursor at every disabled startup. If the flag is later
+        # enabled, the mode transition resets it again to that enable-time.
+        cursor = ActivationCursor(now, 0)
+        await _set_cursor(db, cursor)
         await db.commit()
-    return now
+    return cursor
 
 
-async def _candidate_spots(db, *, cursor: int, now: int) -> list[dict[str, Any]]:
+async def _candidate_spots(
+    db,
+    *,
+    cursor: ActivationCursor,
+    now: int,
+    limit: int,
+) -> list[dict[str, Any]]:
     rows = await db.execute_fetchall(
         f"""
-        SELECT s.*, pd.{schema.PRIZEDRAW_PRIZE_COUNT}
-        FROM {schema.SPOT_TABLE_NAME} s
-        LEFT JOIN {schema.PRIZEDRAW_TABLE_NAME} pd
-            ON pd.{schema.PRIZEDRAW_SPOT_ID} = s.{schema.SPOT_ID}
-        WHERE s.{schema.SPOT_STATUS} = ?
-          AND s.{schema.SPOT_CANCELLATION_STARTED_AT} IS NULL
-          AND s.{schema.SPOT_STARTS_AT} IS NOT NULL
-          AND s.{schema.SPOT_STARTS_AT} <= ?
-          AND (s.{schema.SPOT_STARTS_AT} + s.{schema.SPOT_ENDS_AT}) > ?
-          AND (
-                s.{schema.SPOT_STARTS_AT} > ?
-                OR s.{schema.SPOT_UPDATED_AT} > ?
-          )
-        ORDER BY
-            MAX(s.{schema.SPOT_STARTS_AT}, s.{schema.SPOT_UPDATED_AT}) ASC,
-            s.{schema.SPOT_ID} ASC
+        WITH eligible AS (
+            SELECT
+                s.*,
+                pd.{schema.PRIZEDRAW_PRIZE_COUNT},
+                MAX(s.{schema.SPOT_STARTS_AT}, s.{schema.SPOT_UPDATED_AT})
+                    AS activation_at
+            FROM {schema.SPOT_TABLE_NAME} s
+            LEFT JOIN {schema.PRIZEDRAW_TABLE_NAME} pd
+                ON pd.{schema.PRIZEDRAW_SPOT_ID} = s.{schema.SPOT_ID}
+            WHERE s.{schema.SPOT_STATUS} = ?
+              AND s.{schema.SPOT_CANCELLATION_STARTED_AT} IS NULL
+              AND s.{schema.SPOT_STARTS_AT} IS NOT NULL
+              AND s.{schema.SPOT_STARTS_AT} <= ?
+              AND (s.{schema.SPOT_STARTS_AT} + s.{schema.SPOT_ENDS_AT}) > ?
+        )
+        SELECT *
+        FROM eligible
+        WHERE activation_at > ?
+           OR (activation_at = ? AND {schema.SPOT_ID} > ?)
+        ORDER BY activation_at ASC, {schema.SPOT_ID} ASC
         LIMIT ?;
         """,
         (
             const.SPOT_STATUS_PUBLISHED,
             int(now),
             int(now),
-            int(cursor),
-            int(cursor),
-            max(1, const.X_MAX_SPOTS_PER_RUN),
+            int(cursor.timestamp),
+            int(cursor.timestamp),
+            int(cursor.spot_id),
+            max(1, int(limit)),
         ),
     )
     return [dict(row) for row in rows]
 
 
-async def _due_retry_spots(db, *, now: int) -> list[dict[str, Any]]:
+async def _due_retry_spots(
+    db,
+    *,
+    now: int,
+    limit: int,
+) -> list[dict[str, Any]]:
     rows = await db.execute_fetchall(
         f"""
         SELECT {schema.APP_METADATA_KEY}, {schema.APP_METADATA_VALUE}
@@ -352,33 +488,41 @@ async def _due_retry_spots(db, *, now: int) -> list[dict[str, Any]]:
         if int(state.get("retry_at") or 0) > int(now):
             continue
         try:
-            spot_ids.append(int(str(row[schema.APP_METADATA_KEY]).removeprefix(SPOT_METADATA_PREFIX)))
+            spot_ids.append(
+                int(
+                    str(row[schema.APP_METADATA_KEY]).removeprefix(
+                        SPOT_METADATA_PREFIX
+                    )
+                )
+            )
         except ValueError:
             continue
     if not spot_ids:
         return []
+
+    spot_ids = spot_ids[: max(1, int(limit))]
     placeholders = ",".join("?" for _ in spot_ids)
     result = await db.execute_fetchall(
         f"""
         SELECT s.*, pd.{schema.PRIZEDRAW_PRIZE_COUNT}
         FROM {schema.SPOT_TABLE_NAME} s
         LEFT JOIN {schema.PRIZEDRAW_TABLE_NAME} pd
-            ON pd.{schema.PRIZEDDRAW_SPOT_ID if hasattr(schema, 'PRIZEDDRAW_SPOT_ID') else schema.PRIZEDRAW_SPOT_ID} = s.{schema.SPOT_ID}
+            ON pd.{schema.PRIZEDRAW_SPOT_ID} = s.{schema.SPOT_ID}
         WHERE s.{schema.SPOT_ID} IN ({placeholders})
           AND s.{schema.SPOT_STATUS} = ?
           AND s.{schema.SPOT_CANCELLATION_STARTED_AT} IS NULL
           AND s.{schema.SPOT_STARTS_AT} IS NOT NULL
           AND s.{schema.SPOT_STARTS_AT} <= ?
           AND (s.{schema.SPOT_STARTS_AT} + s.{schema.SPOT_ENDS_AT}) > ?
-        ORDER BY s.{schema.SPOT_ID} ASC
-        LIMIT ?;
+        ORDER BY s.{schema.SPOT_ID} ASC;
         """,
-        (*spot_ids, const.SPOT_STATUS_PUBLISHED, int(now), int(now), max(1, const.X_MAX_SPOTS_PER_RUN)),
+        (*spot_ids, const.SPOT_STATUS_PUBLISHED, int(now), int(now)),
     )
     return [dict(row) for row in result]
 
 
 async def prewarm_spot_card(spot: dict[str, Any]) -> None:
+    """Generate/cache the social image before X crawls the shared Spot URL."""
     ref = str(spot.get(schema.SPOT_LINK) or spot[schema.SPOT_ID])
     is_prizedraw = spot.get(schema.PRIZEDRAW_PRIZE_COUNT) is not None
     await asyncio.to_thread(
@@ -389,21 +533,45 @@ async def prewarm_spot_card(spot: dict[str, Any]) -> None:
 
 
 def _retry_at(response: XResponse, *, now: int) -> int:
+    candidates = [int(now) + int(const.X_RETRY_AFTER_SECONDS)]
     try:
-        reset = int(response.headers.get("x-rate-limit-reset", "0"))
+        candidates.append(int(response.headers.get("x-rate-limit-reset", "0")) + 1)
     except ValueError:
-        reset = 0
-    return max(int(now) + const.X_RETRY_AFTER_SECONDS, reset + 1)
+        pass
+    try:
+        retry_after = int(response.headers.get("retry-after", "0"))
+        candidates.append(int(now) + retry_after)
+    except ValueError:
+        pass
+    return max(candidates)
 
 
-async def post_spot_once(spot: dict[str, Any], credentials: XCredentials, *, now: int) -> dict[str, Any]:
-    """Attempt one durable public Post without automatically repeating ambiguity."""
+async def post_spot_once(
+    spot: dict[str, Any],
+    credentials: XCredentials,
+    *,
+    now: int,
+) -> dict[str, Any]:
+    """Attempt one durable public Post without retrying ambiguous outcomes."""
     spot_id = int(spot[schema.SPOT_ID])
     state_key = _spot_state_key(spot_id)
     async with get_db() as db:
         existing = _decode_state(await _get_metadata(db, state_key))
-        if existing and existing.get("state") not in {"retry"}:
-            return {"spot_id": spot_id, "posted": False, "reason": f"already_{existing.get('state', 'recorded')}"}
+        if existing:
+            state_name = str(existing.get("state") or "recorded")
+            if state_name != "retry":
+                return {
+                    "spot_id": spot_id,
+                    "posted": False,
+                    "reason": f"already_{state_name}",
+                }
+            if int(existing.get("retry_at") or 0) > int(now):
+                return {
+                    "spot_id": spot_id,
+                    "posted": False,
+                    "waiting": True,
+                    "reason": "retry_not_due",
+                }
 
     try:
         await prewarm_spot_card(spot)
@@ -414,13 +582,18 @@ async def post_spot_once(spot: dict[str, Any], credentials: XCredentials, *, now
                 spot_id,
                 {
                     "state": "retry",
-                    "retry_at": int(now) + const.X_RETRY_AFTER_SECONDS,
+                    "retry_at": int(now) + int(const.X_RETRY_AFTER_SECONDS),
                     "reason": "card_prewarm_failed",
                     "detail": type(exc).__name__,
                 },
             )
             await db.commit()
-        return {"spot_id": spot_id, "posted": False, "retry": True, "reason": "card_prewarm_failed"}
+        return {
+            "spot_id": spot_id,
+            "posted": False,
+            "retry": True,
+            "reason": "card_prewarm_failed",
+        }
 
     async with get_db() as db:
         await _set_spot_state(
@@ -436,61 +609,31 @@ async def post_spot_once(spot: dict[str, Any], credentials: XCredentials, *, now
 
     text = build_spot_post_text(spot)
     try:
-        response = await request_json("POST", X_CREATE_POST_URL, credentials, payload={"text": text})
+        response = await request_json(
+            "POST",
+            X_CREATE_POST_URL,
+            credentials,
+            payload={"text": text},
+        )
     except XTransportError as exc:
-        async with get_db() as db:
-            await _set_spot_state(
-                db,
-                spot_id,
-                {
-                    "state": "uncertain",
-                    "uncertain_at": int(now),
-                    "reason": "ambiguous_transport_failure",
-                    "detail": type(exc).__name__,
-                },
-            )
-            await db.commit()
-        return {"spot_id": spot_id, "posted": False, "uncertain": True, "reason": "ambiguous_transport_failure"}
-
-    if response.status == 201:
-        data = response.data.get("data")
-        post_id = str(data.get("id") if isinstance(data, dict) else "").strip()
-        if not post_id:
-            final_state = {
-                "state": "uncertain",
-                "uncertain_at": int(now),
-                "reason": "success_response_missing_post_id",
-            }
-            result = {"spot_id": spot_id, "posted": False, "uncertain": True, "reason": "missing_post_id"}
-        else:
-            final_state = {
-                "state": "posted",
-                "post_id": post_id,
-                "posted_at": int(now),
-                "account": normalise_account_handle(const.X_ACCOUNT_HANDLE),
-            }
-            result = {"spot_id": spot_id, "posted": True, "post_id": post_id}
-    elif response.status == 429:
-        final_state = {
-            "state": "retry",
-            "retry_at": _retry_at(response, now=now),
-            "reason": "rate_limited",
-        }
-        result = {"spot_id": spot_id, "posted": False, "retry": True, "reason": "rate_limited"}
-    elif 500 <= response.status <= 599:
         final_state = {
             "state": "uncertain",
             "uncertain_at": int(now),
-            "reason": f"x_http_{response.status}",
+            "reason": "ambiguous_transport_failure",
+            "detail": type(exc).__name__,
         }
-        result = {"spot_id": spot_id, "posted": False, "uncertain": True, "reason": f"x_http_{response.status}"}
+        result = {
+            "spot_id": spot_id,
+            "posted": False,
+            "uncertain": True,
+            "reason": "ambiguous_transport_failure",
+        }
     else:
-        final_state = {
-            "state": "failed",
-            "failed_at": int(now),
-            "reason": f"x_http_{response.status}",
-        }
-        result = {"spot_id": spot_id, "posted": False, "failed": True, "reason": f"x_http_{response.status}"}
+        final_state, result = _classify_post_response(
+            response,
+            spot_id=spot_id,
+            now=now,
+        )
 
     async with get_db() as db:
         await _set_spot_state(db, spot_id, final_state)
@@ -498,13 +641,102 @@ async def post_spot_once(spot: dict[str, Any], credentials: XCredentials, *, now
     return result
 
 
+def _classify_post_response(
+    response: XResponse,
+    *,
+    spot_id: int,
+    now: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if response.status == 201:
+        data = response.data.get("data")
+        post_id = str(
+            data.get("id") if isinstance(data, dict) else ""
+        ).strip()
+        if post_id:
+            return (
+                {
+                    "state": "posted",
+                    "post_id": post_id,
+                    "posted_at": int(now),
+                    "account": normalise_account_handle(const.X_ACCOUNT_HANDLE),
+                },
+                {"spot_id": spot_id, "posted": True, "post_id": post_id},
+            )
+        return (
+            {
+                "state": "uncertain",
+                "uncertain_at": int(now),
+                "reason": "success_response_missing_post_id",
+            },
+            {
+                "spot_id": spot_id,
+                "posted": False,
+                "uncertain": True,
+                "reason": "missing_post_id",
+            },
+        )
+
+    # These responses authoritatively reject the request before a Post exists,
+    # so retrying later cannot create a duplicate.
+    if response.status in {401, 403, 429}:
+        return (
+            {
+                "state": "retry",
+                "retry_at": _retry_at(response, now=now),
+                "reason": f"x_http_{response.status}",
+            },
+            {
+                "spot_id": spot_id,
+                "posted": False,
+                "retry": True,
+                "reason": f"x_http_{response.status}",
+            },
+        )
+
+    # A server error may occur after X accepted the request. Do not guess.
+    if 500 <= response.status <= 599:
+        return (
+            {
+                "state": "uncertain",
+                "uncertain_at": int(now),
+                "reason": f"x_http_{response.status}",
+            },
+            {
+                "spot_id": spot_id,
+                "posted": False,
+                "uncertain": True,
+                "reason": f"x_http_{response.status}",
+            },
+        )
+
+    return (
+        {
+            "state": "failed",
+            "failed_at": int(now),
+            "reason": f"x_http_{response.status}",
+        },
+        {
+            "spot_id": spot_id,
+            "posted": False,
+            "failed": True,
+            "reason": f"x_http_{response.status}",
+        },
+    )
+
+
 async def run_x_auto_post_pass() -> dict[str, Any]:
-    """Post each newly-active Spot once and advance the durable activation cursor."""
+    """Post each newly-active Spot once and advance the durable cursor safely."""
     global _X_VERIFIED_USERNAME
 
     if not const.X_AUTO_POST_ENABLED:
-        cursor = await advance_disabled_cursor()
-        return {"ok": True, "enabled": False, "cursor": cursor, "checked_count": 0, "posted_count": 0}
+        cursor = await prepare_disabled_mode()
+        return {
+            "ok": True,
+            "enabled": False,
+            "cursor": cursor.__dict__,
+            "checked_count": 0,
+            "posted_count": 0,
+        }
 
     validate_configuration()
     credentials = load_credentials()
@@ -513,42 +745,82 @@ async def run_x_auto_post_pass() -> dict[str, Any]:
 
     async with get_db() as db:
         now = await db_access.get_unixepoch(db)
-        raw_cursor = await _get_metadata(db, CURSOR_METADATA_KEY)
-        if raw_cursor is None:
-            await _set_cursor(db, now)
-            await db.commit()
+        transitioned, cursor = await _prepare_mode(
+            db,
+            enabled=True,
+            now=now,
+        )
+        await db.commit()
+        if transitioned:
             return {
                 "ok": True,
                 "enabled": True,
                 "account": _X_VERIFIED_USERNAME,
-                "initialised_cursor": now,
+                "initialised_cursor": cursor.__dict__,
                 "checked_count": 0,
                 "posted_count": 0,
             }
-        cursor = await _get_cursor(db, now=now)
-        candidates = await _candidate_spots(db, cursor=cursor, now=now)
-        retries = await _due_retry_spots(db, now=now)
 
-    by_id = {int(spot[schema.SPOT_ID]): spot for spot in (*retries, *candidates)}
-    results = [
-        await post_spot_once(spot, credentials, now=now)
-        for spot in list(by_id.values())[: max(1, const.X_MAX_SPOTS_PER_RUN)]
-    ]
+        maximum = max(1, int(const.X_MAX_SPOTS_PER_RUN))
+        retries = await _due_retry_spots(
+            db,
+            now=now,
+            limit=maximum,
+        )
+        retry_ids = {int(spot[schema.SPOT_ID]) for spot in retries}
+        remaining = max(0, maximum - len(retries))
+        candidates = (
+            await _candidate_spots(
+                db,
+                cursor=cursor,
+                now=now,
+                limit=remaining,
+            )
+            if remaining
+            else []
+        )
+
+    candidate_results: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
+    for spot in retries:
+        results.append(await post_spot_once(spot, credentials, now=now))
+    for spot in candidates:
+        spot_id = int(spot[schema.SPOT_ID])
+        if spot_id in retry_ids:
+            continue
+        result = await post_spot_once(spot, credentials, now=now)
+        candidate_results.append(result)
+        results.append(result)
+
+    if candidates and len(candidates) >= remaining:
+        last = candidates[-1]
+        next_cursor = ActivationCursor(
+            int(last.get("activation_at") or cursor.timestamp),
+            int(last[schema.SPOT_ID]),
+        )
+    else:
+        next_cursor = ActivationCursor(int(now), 0)
 
     async with get_db() as db:
-        await _set_cursor(db, now)
+        await _set_cursor(db, next_cursor)
         await db.commit()
 
     return {
-        "ok": all(not result.get("failed") for result in results),
+        "ok": not any(
+            result.get("failed") or result.get("uncertain")
+            for result in results
+        ),
         "enabled": True,
         "account": _X_VERIFIED_USERNAME,
-        "cursor_before": cursor,
-        "cursor_after": now,
+        "cursor_before": cursor.__dict__,
+        "cursor_after": next_cursor.__dict__,
         "checked_count": len(results),
+        "candidate_count": len(candidate_results),
         "posted_count": sum(1 for result in results if result.get("posted")),
         "retry_count": sum(1 for result in results if result.get("retry")),
-        "uncertain_count": sum(1 for result in results if result.get("uncertain")),
+        "uncertain_count": sum(
+            1 for result in results if result.get("uncertain")
+        ),
         "failed_count": sum(1 for result in results if result.get("failed")),
         "results": results,
     }
@@ -563,14 +835,24 @@ async def _x_auto_post_loop(interval_seconds: int) -> None:
     while not stop_event.is_set():
         try:
             _X_POST_LAST_RESULT = await run_x_auto_post_pass()
-            _X_POST_LAST_ERROR = None if _X_POST_LAST_RESULT.get("ok", True) else repr(_X_POST_LAST_RESULT)
+            _X_POST_LAST_ERROR = (
+                None
+                if _X_POST_LAST_RESULT.get("ok", True)
+                else repr(_X_POST_LAST_RESULT)
+            )
             if _X_POST_LAST_ERROR:
-                logger.error("Automatic X posting pass reported failure: %s", _X_POST_LAST_RESULT)
-        except Exception as exc:  # pragma: no cover - defensive background guard
+                logger.error(
+                    "Automatic X posting pass reported failure: %s",
+                    _X_POST_LAST_RESULT,
+                )
+        except Exception as exc:  # pragma: no cover - defensive loop guard
             _X_POST_LAST_ERROR = repr(exc)
             logger.exception("Automatic X posting pass failed")
         with suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(stop_event.wait(), timeout=max(1, int(interval_seconds)))
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=max(1, int(interval_seconds)),
+            )
 
 
 async def start_x_auto_poster(
@@ -578,17 +860,18 @@ async def start_x_auto_poster(
     run_immediately: bool = False,
     interval_seconds: int | None = None,
 ) -> None:
-    """Start the opt-in worker, or advance its cursor once while disabled."""
-    global _X_POST_TASK, _X_POST_STOP_EVENT, _X_POST_LAST_RESULT, _X_POST_LAST_ERROR
+    """Start the opt-in worker, or record disabled mode without making requests."""
+    global _X_POST_TASK, _X_POST_STOP_EVENT
+    global _X_POST_LAST_RESULT, _X_POST_LAST_ERROR
 
     if _X_POST_TASK is not None and not _X_POST_TASK.done():
         return
     if not const.X_AUTO_POST_ENABLED:
-        cursor = await advance_disabled_cursor()
+        cursor = await prepare_disabled_mode()
         _X_POST_LAST_RESULT = {
             "ok": True,
             "enabled": False,
-            "cursor": cursor,
+            "cursor": cursor.__dict__,
             "checked_count": 0,
             "posted_count": 0,
         }
@@ -600,29 +883,41 @@ async def start_x_auto_poster(
     if run_immediately:
         try:
             _X_POST_LAST_RESULT = await run_x_auto_post_pass()
-            _X_POST_LAST_ERROR = None if _X_POST_LAST_RESULT.get("ok", True) else repr(_X_POST_LAST_RESULT)
+            _X_POST_LAST_ERROR = (
+                None
+                if _X_POST_LAST_RESULT.get("ok", True)
+                else repr(_X_POST_LAST_RESULT)
+            )
         except Exception as exc:
             _X_POST_LAST_ERROR = repr(exc)
             logger.exception("Initial automatic X posting pass failed")
     _X_POST_TASK = asyncio.create_task(
-        _x_auto_post_loop(int(interval_seconds or const.X_POST_INTERVAL_SECONDS))
+        _x_auto_post_loop(
+            int(interval_seconds or const.X_POST_INTERVAL_SECONDS)
+        )
     )
 
 
 def x_auto_poster_status() -> dict[str, Any]:
-    """Return secret-free worker diagnostics for health checks."""
+    """Return a secret-free worker snapshot suitable for health diagnostics."""
+    account = None
+    if const.X_ACCOUNT_HANDLE:
+        try:
+            account = normalise_account_handle(const.X_ACCOUNT_HANDLE)
+        except XConfigurationError:
+            account = "invalid"
     return {
         "enabled": bool(const.X_AUTO_POST_ENABLED),
-        "account": normalise_account_handle(const.X_ACCOUNT_HANDLE) if const.X_ACCOUNT_HANDLE else None,
+        "account": account,
         "running": _X_POST_TASK is not None and not _X_POST_TASK.done(),
         "last_error": _X_POST_LAST_ERROR,
         "last_result": _X_POST_LAST_RESULT,
-        "interval_seconds": const.X_POST_INTERVAL_SECONDS,
+        "interval_seconds": int(const.X_POST_INTERVAL_SECONDS),
     }
 
 
 async def stop_x_auto_poster() -> None:
-    global _X_POST_TASK, _X_POST_STOP_EVENT
+    global _X_POST_TASK, _X_POST_STOP_EVENT, _X_VERIFIED_USERNAME
 
     if _X_POST_STOP_EVENT is not None:
         _X_POST_STOP_EVENT.set()
@@ -632,3 +927,4 @@ async def stop_x_auto_poster() -> None:
             await _X_POST_TASK
     _X_POST_TASK = None
     _X_POST_STOP_EVENT = None
+    _X_VERIFIED_USERNAME = None

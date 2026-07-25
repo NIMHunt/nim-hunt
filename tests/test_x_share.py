@@ -78,6 +78,8 @@ def test_project_tooltips_replace_native_titles_and_track_copy_state() -> None:
     assert "tooltip.className = 'lock-tooltip spot-inline-action-tooltip'" in source
     assert "target.removeAttribute('title')" in source
     assert "link.title" not in source
+    assert "link.dataset.tooltip = UI_COPY.shareOnX" in source
+    assert "target.dataset.tooltip = text" in source
     assert "UI_COPY.shareOnX" in source
     assert "UI_COPY.copied" in source
     assert "UI_COPY.copy" in source

@@ -7,7 +7,7 @@
 
 .home-information-links a {
     color: var(--nh-text);
-    font-size: 0.9rem;
+    font-size: 1.2rem;
     font-weight: 700;
     line-height: 1.2;
     text-align: center;
@@ -22,8 +22,8 @@
     opacity: 1;
 }
 
-.static-page-card {
-    padding: 18px;
+.home-information-content {
+    padding: 3px;
 }
 
 .static-page-title {
@@ -54,9 +54,14 @@
     gap: 1.35rem;
 }
 
+.roadmap-section,
+.roadmap-heading,
+.roadmap-item {
+    text-align: left;
+}
+
 .roadmap-heading {
     margin: 0 0 0.5rem !important;
-    text-align: center;
 }
 
 .nq-style .roadmap-items {

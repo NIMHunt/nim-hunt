@@ -1,17 +1,13 @@
-import { getStaticPageText } from './static_page_text.js?v=static-pages-v1-20260724';
+import { getStaticPageText } from './static_page_text.js?v=home-information-v2-20260725';
 
 const text = getStaticPageText();
-const pageName = document.body.dataset.staticPage;
+const pageName = document.body.dataset.homeInformationView;
 const titleElement = document.querySelector('[data-static-page-title]');
 const contentElement = document.querySelector('[data-static-page-content]');
-const heroLink = document.querySelector('.home-hero-link');
-const heroScreenreaderText = document.querySelector('#connection-line');
 
 function setSharedText(pageText) {
     document.title = pageText.pageTitle;
-    titleElement.textContent = pageText.title;
-    heroLink?.setAttribute('aria-label', text.common.returnHome);
-    if (heroScreenreaderText) heroScreenreaderText.textContent = text.common.returnHome;
+    if (titleElement) titleElement.textContent = pageText.title;
 }
 
 function makeParagraph(value) {
@@ -23,7 +19,7 @@ function makeParagraph(value) {
 
 function renderAbout() {
     setSharedText(text.about);
-    contentElement.replaceChildren(...text.about.paragraphs.map(makeParagraph));
+    contentElement?.replaceChildren(...text.about.paragraphs.map(makeParagraph));
 }
 
 function validRoadmapSections(value) {
@@ -73,17 +69,17 @@ async function renderRoadmap() {
         const data = await response.json();
         const sections = validRoadmapSections(data?.sections);
         if (sections.length === 0) {
-            contentElement.replaceChildren(makeParagraph(text.roadmap.empty));
+            contentElement?.replaceChildren(makeParagraph(text.roadmap.empty));
             return;
         }
 
         const wrapper = document.createElement('div');
         wrapper.className = 'roadmap-sections';
         wrapper.append(...sections.map(makeRoadmapSection));
-        contentElement.replaceChildren(wrapper);
+        contentElement?.replaceChildren(wrapper);
     } catch (error) {
         console.error('Unable to load the NimHunt roadmap.', error);
-        contentElement.replaceChildren(makeParagraph(text.roadmap.loadFailed));
+        contentElement?.replaceChildren(makeParagraph(text.roadmap.loadFailed));
     }
 }
 
@@ -91,6 +87,4 @@ if (pageName === 'about') {
     renderAbout();
 } else if (pageName === 'roadmap') {
     renderRoadmap();
-} else {
-    contentElement?.replaceChildren(makeParagraph(text.common.loadFailed));
 }

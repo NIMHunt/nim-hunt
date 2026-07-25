@@ -160,6 +160,8 @@ def test_testnet_startup_never_contacts_x(monkeypatch) -> None:
         assert status["blocked_reason"] == (
             "requires_production_mainalbatross"
         )
+        assert status["production_mainnet_only"] is True
+        assert status["deployment_mode"] == "public-testnet"
         assert status["network"] == "TestAlbatross"
         assert status["network_id"] == 5
 

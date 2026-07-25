@@ -1,4 +1,4 @@
-{% set information_view = request.query_params.get('view', '') %}
+{% set information_view = request.query_params.get('view', '') if request is defined else '' %}
 {% if information_view == 'about' %}
 {% set page_title = 'About · ' ~ app_name %}
 {% set hero_href = '/' %}

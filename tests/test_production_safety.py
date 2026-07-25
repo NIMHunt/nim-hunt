@@ -506,6 +506,11 @@ class ApplicationLifespanTest(unittest.IsolatedAsyncioTestCase):
                 "start_transaction_refresher",
                 mock.AsyncMock(),
             ) as start_transactions,
+            mock.patch.object(
+                main.x_auto_poster,
+                "start_x_auto_poster",
+                mock.AsyncMock(),
+            ) as start_x_poster,
         ):
             await main.startup()
 
@@ -517,9 +522,15 @@ class ApplicationLifespanTest(unittest.IsolatedAsyncioTestCase):
             run_immediately=True,
             fail_on_initial_error=True,
         )
+        start_x_poster.assert_awaited_once_with(run_immediately=True)
 
     async def test_shutdown_attempts_every_service_when_one_stop_fails(self):
         with (
+            mock.patch.object(
+                main.x_auto_poster,
+                "stop_x_auto_poster",
+                mock.AsyncMock(),
+            ) as stop_x_poster,
             mock.patch.object(
                 main.trans_updater,
                 "stop_transaction_refresher",
@@ -539,6 +550,7 @@ class ApplicationLifespanTest(unittest.IsolatedAsyncioTestCase):
         ):
             await main.shutdown()
 
+        stop_x_poster.assert_awaited_once_with()
         stop_transactions.assert_awaited_once_with()
         stop_settlement.assert_awaited_once_with()
         stop_cache.assert_awaited_once_with()

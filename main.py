@@ -469,7 +469,18 @@ async def healthz() -> JSONResponse:
             "ok": True,
             "deployment_mode": getattr(const, "DEPLOYMENT_MODE", "development"),
             "network": getattr(const, "NIMIQ_NETWORK", ""),
-            "x_auto_post": x_auto_poster.x_auto_poster_status(),
+        }
+    )
+
+
+@app.get("/x-healthz", include_in_schema=False)
+async def x_healthz() -> JSONResponse:
+    """Return secret-free automatic X-poster diagnostics."""
+    status = x_auto_poster.x_auto_poster_status()
+    return JSONResponse(
+        {
+            "ok": not bool(status.get("last_error")),
+            "x_auto_post": status,
         }
     )
 

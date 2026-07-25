@@ -364,7 +364,8 @@ def test_implementation_uses_existing_metadata_and_lifecycle_hooks() -> None:
     assert "import x_auto_poster" in main
     assert "await x_auto_poster.start_x_auto_poster(run_immediately=True)" in main
     assert "x_auto_poster.stop_x_auto_poster" in main
-    assert '"x_auto_post": x_auto_poster.x_auto_poster_status()' in main
+    assert '@app.get("/x-healthz", include_in_schema=False)' in main
+    assert '"x_auto_post": status' in main
     assert "NIMHUNT_X_AUTO_POST_ENABLED" in readme
     assert "NIMHUNT_X_ACCOUNT_HANDLE" in readme
     assert "NIMHUNT_X_ACCESS_TOKEN_SECRET" in readme

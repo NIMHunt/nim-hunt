@@ -265,7 +265,11 @@ async def settle_prizedraw_spot_if_ready(*, spot_id: int) -> RowDict:
 
     try:
         async with get_db() as db:
-            async with db_access.transaction(db):
+            # Draw readiness, winner selection and winner persistence are one
+            # competing terminal decision. Reserve the write lock before reading
+            # eligibility so two settlement workers cannot select against the
+            # same stale published state.
+            async with db_access.transaction(db, immediate=True):
                 spot = await db_access.get_spot(db, spot_id=spot_id)
                 if spot is None:
                     return {"ok": False, "spot_id": spot_id, "reason": "spot_missing"}

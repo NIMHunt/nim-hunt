@@ -1775,7 +1775,11 @@ def _queue_claim_settlement(
 async def claim_spot_api(spot_id: int, payload: ClaimSpotRequest, background_tasks: BackgroundTasks) -> JSONResponse:
     """Start a CLAIM or Prizedraw entry for the current user."""
     async with get_db() as db:
-        async with db_access.transaction(db):
+        # Claim eligibility and capacity must be evaluated against the same
+        # serialised database state that records the entry. Reserving the write
+        # lock here prevents simultaneous final-capacity claims from both
+        # reading an outdated snapshot and turning into a SQLite lock error.
+        async with db_access.transaction(db, immediate=True):
             user, meta, http_status = await _identify_private_page_user(db, payload)
             if user is None:
                 return JSONResponse(meta, status_code=http_status)

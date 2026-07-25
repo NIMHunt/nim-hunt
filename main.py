@@ -18,6 +18,7 @@ import cache
 import constants as const
 import database
 import settlement_updater
+import social_preview
 import trans_updater
 import wallet
 from funding_flow import funding_flow_diagnostics
@@ -451,8 +452,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title=const.APP_NAME, lifespan=lifespan)
+app.add_middleware(social_preview.SocialPreviewMiddleware)
 app.mount("/static", StaticFiles(directory=str(const.STATIC_DIR)), name="static")
 app.include_router(public_router)
+app.include_router(social_preview.router)
 
 
 @app.get("/healthz", include_in_schema=False)

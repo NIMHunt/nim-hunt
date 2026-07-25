@@ -1,0 +1,26 @@
+name: Diagnose social card delivery
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Capture targeted pytest output
+        run: pytest tests/test_social_preview.py -vv > social-card-pytest.txt 2>&1 || true
+      - uses: actions/upload-artifact@v6
+        with:
+          name: social-card-pytest
+          path: social-card-pytest.txt

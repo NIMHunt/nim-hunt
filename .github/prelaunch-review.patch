@@ -1,0 +1,205 @@
+diff --git a/helpers/helper_rpc_send.test.mjs b/helpers/helper_rpc_send.test.mjs
+index 8bde364..e435c73 100644
+--- a/helpers/helper_rpc_send.test.mjs
++++ b/helpers/helper_rpc_send.test.mjs
+@@ -13,27 +13,31 @@ const BASE_ENV = {
+   NIMHUNT_NIMIQ_MNEMONIC: MNEMONIC,
+   NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: '0',
+ };
++const MAINNET_ENV = {
++  ...BASE_ENV,
++  NIMHUNT_DEPLOYMENT_MODE: 'production',
++};
+ 
+-function derive(index) {
++function derive(index, { network = 'TestAlbatross', networkId = 5, environment = BASE_ENV } = {}) {
+   const result = spawnSync(process.execPath, [helper], {
+     input: JSON.stringify({
+       action: 'derive_spot_deposit_address',
+-      network: 'TestAlbatross',
+-      network_id: 5,
++      network,
++      network_id: networkId,
+       key_index: index,
+       key_path: `m/44'/242'/${index}'/0'`,
+       key_version: 1,
+     }),
+     encoding: 'utf8',
+-    env: BASE_ENV,
++    env: environment,
+   });
+   assert.equal(result.status, 0, result.stdout || result.stderr);
+   return JSON.parse(result.stdout).address;
+ }
+ 
+-function runHelper(payload) {
++function runHelper(payload, environment = BASE_ENV) {
+   return new Promise((resolveResult) => {
+-    const child = spawn(process.execPath, [helper], { env: BASE_ENV });
++    const child = spawn(process.execPath, [helper], { env: environment });
+     let stdout = '';
+     let stderr = '';
+     child.stdout.setEncoding('utf8');
+@@ -97,3 +101,62 @@ test('send helper signs locally and broadcasts through configured JSON-RPC', asy
+     await new Promise(resolveClose => server.close(resolveClose));
+   }
+ });
++
++
++test('MainAlbatross send helper signs with network ID 24 and broadcasts through JSON-RPC', async () => {
++  const sender = derive(0, {
++    network: 'MainAlbatross', networkId: 24, environment: MAINNET_ENV,
++  });
++  const recipient = derive(1, {
++    network: 'MainAlbatross', networkId: 24, environment: MAINNET_ENV,
++  });
++  const expectedHash = 'cd'.repeat(32);
++  const calls = [];
++  const server = http.createServer(async (request, response) => {
++    let body = '';
++    for await (const chunk of request) body += chunk;
++    const rpc = JSON.parse(body);
++    calls.push(rpc);
++    response.setHeader('content-type', 'application/json');
++    if (rpc.method === 'getLatestBlock') {
++      response.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { data: { number: 654321 } } }));
++      return;
++    }
++    if (rpc.method === 'sendRawTransaction') {
++      assert.match(rpc.params[0], /^[0-9a-f]+$/i);
++      response.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { data: expectedHash } }));
++      return;
++    }
++    response.statusCode = 400;
++    response.end(JSON.stringify({ error: { message: 'unexpected method' } }));
++  });
++  await new Promise(resolveListen => server.listen(0, '127.0.0.1', resolveListen));
++
++  try {
++    const address = server.address();
++    const result = await runHelper({
++      action: 'send_luna_from_spot_deposit',
++      network: 'MainAlbatross',
++      network_id: 24,
++      rpc_url: `http://127.0.0.1:${address.port}`,
++      from_address: sender,
++      to_address: recipient,
++      amount: 100000,
++      fee: 0,
++      memo: 'NimHunt mainnet test',
++      deposit_key_index: 0,
++      deposit_key_path: "m/44'/242'/0'/0'",
++      deposit_key_version: 1,
++    }, MAINNET_ENV);
++    assert.equal(result.status, 0, result.stdout || result.stderr);
++    const response = JSON.parse(result.stdout);
++    assert.equal(response.ok, true);
++    assert.equal(response.network, 'MainAlbatross');
++    assert.equal(response.network_id, 24);
++    assert.equal(response.tx_hash, expectedHash);
++    assert.equal(response.broadcast_transport, 'json-rpc');
++    assert.deepEqual(calls.map(call => call.method), ['getLatestBlock', 'sendRawTransaction']);
++  } finally {
++    await new Promise(resolveClose => server.close(resolveClose));
++  }
++});
++diff --git a/main.py b/main.py
++index 655cb1d..31ed4d8 100644
++--- a/main.py
+++++ b/main.py
++@@ -487,12 +487,29 @@ async def x_healthz() -> JSONResponse:
++ 
++ @app.get("/transaction-healthz", include_in_schema=False)
++ async def transaction_healthz() -> JSONResponse:
++-    """Return secret-free transaction-refresher diagnostics."""
+++    """Return secret-free financial-worker diagnostics.
+++
+++    Ordinary pending chain transactions are healthy. A stopped/failed worker or
+++    a local outbox intent without a chain hash needs operator attention, so this
+++    dedicated endpoint reports HTTP 503 instead of presenting a false green
+++    status. Railway continues to use the lightweight ``/healthz`` endpoint.
+++    """
+++    diagnostics = await funding_flow_diagnostics()
+++    refresher = diagnostics.get("refresher") or {}
+++    settlement = diagnostics.get("settlement") or {}
+++    ok = bool(
+++        refresher.get("running")
+++        and refresher.get("healthy")
+++        and settlement.get("running")
+++        and settlement.get("healthy")
+++        and int(diagnostics.get("local_intent_count") or 0) == 0
+++    )
++     return JSONResponse(
++         {
++-            "ok": True,
++-            "transactions": await funding_flow_diagnostics(),
++-        }
+++            "ok": ok,
+++            "transactions": diagnostics,
+++        },
+++        status_code=200 if ok else 503,
++     )
++ 
++ 
++diff --git a/public_html.py b/public_html.py
++index 16a157c..06b59e1 100644
++--- a/public_html.py
+++++ b/public_html.py
++@@ -1775,7 +1775,11 @@ def _queue_claim_settlement(
++ async def claim_spot_api(spot_id: int, payload: ClaimSpotRequest, background_tasks: BackgroundTasks) -> JSONResponse:
++     """Start a CLAIM or Prizedraw entry for the current user."""
++     async with get_db() as db:
++-        async with db_access.transaction(db):
+++        # Claim eligibility and capacity must be evaluated against the same
+++        # serialised database state that records the entry. Reserving the write
+++        # lock here prevents simultaneous final-capacity claims from both
+++        # reading an outdated snapshot and turning into a SQLite lock error.
+++        async with db_access.transaction(db, immediate=True):
++             user, meta, http_status = await _identify_private_page_user(db, payload)
++             if user is None:
++                 return JSONResponse(meta, status_code=http_status)
++diff --git a/settlement_updater.py b/settlement_updater.py
++index 6efda7c..3cf155c 100644
++--- a/settlement_updater.py
+++++ b/settlement_updater.py
++@@ -265,7 +265,11 @@ async def settle_prizedraw_spot_if_ready(*, spot_id: int) -> RowDict:
++ 
++     try:
++         async with get_db() as db:
++-            async with db_access.transaction(db):
+++            # Draw readiness, winner selection and winner persistence are one
+++            # competing terminal decision. Reserve the write lock before reading
+++            # eligibility so two settlement workers cannot select against the
+++            # same stale published state.
+++            async with db_access.transaction(db, immediate=True):
++                 spot = await db_access.get_spot(db, spot_id=spot_id)
++                 if spot is None:
++                     return {"ok": False, "spot_id": spot_id, "reason": "spot_missing"}
++diff --git a/tests/test_robustness_guards.py b/tests/test_robustness_guards.py
++index 357ef07..9dae920 100644
++--- a/tests/test_robustness_guards.py
+++++ b/tests/test_robustness_guards.py
++@@ -36,7 +36,8 @@ class PrizedrawWinnerPersistenceGuardTest(unittest.IsolatedAsyncioTestCase):
++             yield object()
++ 
++         @asynccontextmanager
++-        async def fake_transaction(db):
+++        async def fake_transaction(db, *, immediate=False):
+++            self.assertTrue(immediate)
++             yield
++ 
++         spot = {
++diff --git a/tests/test_settlement_prizedraw.py b/tests/test_settlement_prizedraw.py
++index 0440040..16f7b5d 100644
++--- a/tests/test_settlement_prizedraw.py
+++++ b/tests/test_settlement_prizedraw.py
++@@ -44,7 +44,8 @@ class PrizedrawSettlementIntegrationTest(unittest.IsolatedAsyncioTestCase):
++             yield object()
++ 
++         @asynccontextmanager
++-        async def fake_transaction(db):
+++        async def fake_transaction(db, *, immediate=False):
+++            self.assertTrue(immediate)
++             yield
++ 
++         spot_published = {

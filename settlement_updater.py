@@ -338,7 +338,9 @@ async def retry_pending_prizedraw_payouts_for_spot(*, spot_id: int) -> RowDict:
         spot: RowDict | None = None
 
         async with get_db() as db:
-            async with db_access.transaction(db):
+            # Reserve before reading payout jobs so concurrent settlement/retry
+            # workers wait instead of upgrading a stale read transaction into SQLITE_BUSY.
+            async with db_access.transaction(db, immediate=True):
                 spot = await db_access.get_spot(db, spot_id=spot_id)
                 if spot is None:
                     return {"ok": False, "spot_id": spot_id, "reason": "spot_missing", "payouts": []}

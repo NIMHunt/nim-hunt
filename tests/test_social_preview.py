@@ -142,6 +142,43 @@ def test_middleware_injects_about_metadata() -> None:
     assert b"summary_large_image" in body
 
 
+def test_middleware_preserves_zero_copy_static_file_messages() -> None:
+    original = [
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"image/png")],
+        },
+        {"type": "http.response.pathsend", "path": "/tmp/example.png"},
+    ]
+
+    async def app(_scope, _receive, send) -> None:
+        for message in original:
+            await send(message)
+
+    sent: list[dict[str, object]] = []
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, object]) -> None:
+        sent.append(message)
+
+    asyncio.run(
+        social_preview.SocialPreviewMiddleware(app)(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/static/example.png",
+                "query_string": b"",
+            },
+            receive,
+            send,
+        )
+    )
+    assert sent == original
+
+
 def test_osm_policy_safeguards_are_explicit() -> None:
     source = (ROOT / "social_card_images.py").read_text(encoding="utf-8")
     assert "NimHuntSocialCards/1.0 (+https://nimhunt.app)" in source

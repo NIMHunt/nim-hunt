@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="{{ nimiq_style_cdn }}">
     <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-polish-v2-20260704') }}">
     <link rel="stylesheet" href="/static/disclaimer_button.css?v=disclaimer-button-v3-20260722">
-    <link rel="stylesheet" href="/static/static_pages.css?v=home-information-v3-20260725">
+    <link rel="stylesheet" href="/static/static_pages.css?v=home-information-v4-20260725">
 </head>
 <body class="nq-style"
     data-app-name="{{ app_name | default('NimHunt') }}"
@@ -162,7 +162,7 @@
     <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
 
     {% if information_view | default('') in ('about', 'roadmap') %}
-    <script type="module" src="/static/static_page.js?v=home-information-v2-20260725"></script>
+    <script type="module" src="/static/static_page.js?v=home-information-v3-20260725"></script>
     {% endif %}
 
     {% if home_script_src is defined and home_script_src %}

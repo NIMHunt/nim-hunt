@@ -32,8 +32,8 @@ def test_information_views_are_variants_of_the_real_homepage() -> None:
     assert 'id="home-information-content"' in shell_template
     assert 'id="home-dynamic-welcome"' in shell_template
     assert "information_view | default('') in ('about', 'roadmap')" in shell_template
-    assert "/static/static_page.js?v=home-information-v2-20260725" in shell_template
-    assert "/static/static_pages.css?v=home-information-v3-20260725" in shell_template
+    assert "/static/static_page.js?v=home-information-v3-20260725" in shell_template
+    assert "/static/static_pages.css?v=home-information-v4-20260725" in shell_template
 
 
 def test_information_links_change_only_the_current_page_link() -> None:
@@ -62,13 +62,19 @@ def test_information_link_size_and_roadmap_alignment_match_requested_style() -> 
     assert "text-align: center;" in stylesheet
 
 
-def test_roadmap_items_use_regular_welcome_card_text_size() -> None:
+def test_roadmap_items_use_nimiq_generic_text_styling() -> None:
+    renderer = _read("static/static_page.js")
     stylesheet = _read("static/static_pages.css")
-    roadmap_item_rule = stylesheet.split(".nq-style .roadmap-items > li {", 1)[1].split("}", 1)[0]
+    roadmap_item_rule = stylesheet.split(".nq-style .roadmap-items > li {", 1)[1].split(
+        "}", 1
+    )[0]
 
-    assert "font-size: 1rem !important;" in roadmap_item_rule
-    assert "font-weight: 800;" in roadmap_item_rule
-    assert "line-height: 1.45;" in roadmap_item_rule
+    assert "item.className = 'nq-text roadmap-item';" in renderer
+    assert "static-page-copy roadmap-item" not in renderer
+    assert "font-size:" not in roadmap_item_rule
+    assert "font-weight:" not in roadmap_item_rule
+    assert "line-height:" not in roadmap_item_rule
+    assert "color:" not in roadmap_item_rule
 
 
 def test_about_copy_is_kept_in_translation_ready_catalogue() -> None:

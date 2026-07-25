@@ -1,11 +1,11 @@
-"""Regression tests for X share controls beside public-link copy buttons."""
+"""Regression tests for X sharing and inline action tooltips."""
 
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "templates"
 STATIC = ROOT / "static"
-X_SHARE_VERSION = "x-share-v2-20260725"
+X_SHARE_VERSION = "x-share-v3-20260725"
 EXPECTED_TEMPLATES = {
     "find_spots.html",
     "my_spots.html",
@@ -72,8 +72,33 @@ def test_x_share_button_has_black_circle_and_inverted_hover() -> None:
     assert "fill: currentColor" in source
 
 
-def test_claim_code_copy_buttons_are_not_share_targets() -> None:
+def test_project_tooltips_replace_native_titles_and_track_copy_state() -> None:
     source = (STATIC / "x_share.js").read_text(encoding="utf-8")
 
+    assert "tooltip.className = 'lock-tooltip spot-inline-action-tooltip'" in source
+    assert "target.removeAttribute('title')" in source
+    assert "link.title" not in source
+    assert "UI_COPY.shareOnX" in source
+    assert "UI_COPY.copied" in source
+    assert "UI_COPY.copy" in source
+    assert "target.classList.contains('is-copied')" in source
+    assert "attributeFilter: ['class']" in source
+    assert "refreshActionTooltip(record.target)" in source
+
+
+def test_tooltip_copy_is_in_the_localisable_interface_catalogue() -> None:
+    source = (STATIC / "interface_text.js").read_text(encoding="utf-8")
+
+    assert "actions: {" in source
+    assert "copy: 'Copy'" in source
+    assert "copied: 'Copied'" in source
+    assert "shareOnX: 'Share on X'" in source
+    assert "return localiseSection('common', COMMON_TEXT_EN, language)" in source
+
+
+def test_claim_code_copy_buttons_gain_copy_tooltips_but_not_share_links() -> None:
+    source = (STATIC / "x_share.js").read_text(encoding="utf-8")
+
+    assert "root.querySelectorAll?.('.spot-copy-button')" in source
     assert "'.spot-detail-link-row'" in source
     assert "spot-password-copy-button" not in source

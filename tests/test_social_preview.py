@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import inspect
+import io
 from pathlib import Path
 
 from PIL import Image

@@ -7,6 +7,8 @@ import inspect
 import io
 from pathlib import Path
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from PIL import Image
 
 import database as schema
@@ -117,9 +119,43 @@ def test_prizedraw_spot_card_uses_nimiq_yellow() -> None:
 
 def test_spot_card_renderer_contains_no_decorative_clutter() -> None:
     source = inspect.getsource(social_card_images.render_spot_card)
-    for unwanted in ("rounded_rectangle", "diamond(", "draw.text", "title", "city", "badge"):
+    unwanted_tokens = (
+        "rounded_rectangle",
+        "diamond(",
+        "draw.text",
+        "title",
+        "city",
+        "badge",
+    )
+    for unwanted in unwanted_tokens:
         assert unwanted not in source
     assert "_draw_osm_attribution(image)" in source
+
+
+def test_social_image_routes_accept_head_requests() -> None:
+    app = FastAPI()
+    app.include_router(social_card_images.router)
+    client = TestClient(app)
+
+    response = client.head("/social/site/home.png")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert int(response.headers["content-length"]) > 0
+    assert response.content == b""
+
+    methods_by_path = {
+        route.path: route.methods
+        for route in social_card_images.router.routes
+        if hasattr(route, "methods")
+    }
+    assert {"GET", "HEAD"} <= methods_by_path["/social/site/{key}.png"]
+    assert {"GET", "HEAD"} <= methods_by_path["/social/spot/{ref}.png"]
+
+
+def test_cold_map_render_uses_bounded_parallel_tile_loading() -> None:
+    source = inspect.getsource(social_card_images.render_map)
+    assert "ThreadPoolExecutor" in source
+    assert "NIMHUNT_SOCIAL_TILE_WORKERS" in source
 
 
 def test_middleware_injects_about_metadata() -> None:

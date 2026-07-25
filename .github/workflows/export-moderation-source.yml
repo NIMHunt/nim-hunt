@@ -16,16 +16,6 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/upload-artifact@v6
         with:
-          name: moderation-source
-          path: |
-            public_html.py
-            db_access.py
-            constants.py
-            database.py
-            claim_location_guard.py
-            static/home.js
-            static/my_spots.js
-            static/interface_text.js
-            templates/home.html
-            tests
+          name: moderation-source-full
+          path: .
           include-hidden-files: true

@@ -9,6 +9,7 @@ class FindSpotsMapInteractionTest(unittest.TestCase):
     def setUpClass(cls):
         cls.root = Path(__file__).resolve().parents[1]
         cls.source = (cls.root / "static" / "find_spots.js").read_text(encoding="utf-8")
+        cls.spot_ui = (cls.root / "static" / "spot_ui.js").read_text(encoding="utf-8")
         cls.css = (cls.root / "static" / "home.css").read_text(encoding="utf-8")
         cls.text = (cls.root / "static" / "interface_text.js").read_text(encoding="utf-8")
         cls.template = (cls.root / "templates" / "find_spots.html").read_text(encoding="utf-8")
@@ -34,10 +35,15 @@ class FindSpotsMapInteractionTest(unittest.TestCase):
         self.assertIn("MAP_LIST_SCROLL_DURATION_MS = 420", self.source)
         self.assertRegex(self.source, r"Math\.min\(1800, Math\.max\(120,")
 
-    def test_radius_hover_uses_standard_light_tooltip_with_lock(self):
+    def test_radius_hover_uses_standard_light_tooltip_with_requirement_icons(self):
         self.assertIn("radiusCircle.on('mouseover', showTooltip)", self.source)
         self.assertIn("spotCentreWithinBounds(spot, state.map.getBounds())", self.source)
-        self.assertIn("createNimiqInlineIcon('nq-lock-locked')", self.source)
+        self.assertIn(
+            "appendSpotRequirementIcons(requirements, spot, { interactive: false });",
+            self.source,
+        )
+        self.assertIn("iconName: 'nq-lock-locked'", self.spot_ui)
+        self.assertIn("iconName: 'nq-stopwatch'", self.spot_ui)
         self.assertIn(".leaflet-tooltip.map-spot-title-tooltip", self.css)
         self.assertIn("background: rgba(255, 255, 255, 0.96);", self.css)
         self.assertIn("color: var(--nh-muted);", self.css)

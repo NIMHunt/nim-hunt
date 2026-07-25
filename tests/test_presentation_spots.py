@@ -25,12 +25,13 @@ class SpotTitlePresentationTest(unittest.TestCase):
         self.assertIn("titleEl.title = fullTitle;", source)
         self.assertIn("text-overflow: ellipsis", css)
         self.assertIn("white-space: nowrap", css)
-        self.assertIn("titleEl.append(lockIcon);", source)
-        self.assertNotIn("document.createTextNode(' '), lockIcon", source)
+        self.assertIn("appendSpotRequirementIcons(titleEl, spot);", source)
         self.assertLess(
-            source.index("titleEl.append(lockIcon);"),
+            source.index("appendSpotRequirementIcons(titleEl, spot);"),
             source.index("titleEl.append(titleText);"),
         )
+        self.assertIn("iconName: 'nq-lock-locked'", source)
+        self.assertIn("iconName: 'nq-stopwatch'", source)
         self.assertIn("flex: 0 1 auto;", css)
         self.assertIn("margin-left: 0;", css)
         self.assertIn("margin-right: 0.25em;", css)

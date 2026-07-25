@@ -6,13 +6,13 @@ import {
     appendSpotTitleWithLock,
     buildSpotLinkControl,
     createOwnerClaimCodesControl,
-    createNimiqInlineIcon,
+    appendSpotRequirementIcons,
     durationText,
     highestTimeUnitText,
     metresToText,
     spotScheduleTooltip,
     unixToText,
-} from './spot_ui.js?v=single-open-details-v1-20260722';
+} from './spot_ui.js?v=spot-requirements-v1-20260725';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { formatNimFromLuna } from './nim_format.js';
 import {
@@ -1527,13 +1527,10 @@ function createMapSpotTooltipContent(spot) {
     const content = document.createElement('span');
     content.className = 'map-spot-title-tooltip-content';
 
-    if (spot.use_password) {
-        const lock = document.createElement('span');
-        lock.className = 'map-spot-title-tooltip-lock';
-        lock.setAttribute('aria-hidden', 'true');
-        lock.append(createNimiqInlineIcon('nq-lock-locked'));
-        content.append(lock);
-    }
+    const requirements = document.createElement('span');
+    requirements.className = 'map-spot-title-tooltip-requirements';
+    appendSpotRequirementIcons(requirements, spot, { interactive: false });
+    if (requirements.childElementCount > 0) content.append(requirements);
 
     const title = document.createElement('span');
     title.className = 'map-spot-title-tooltip-text';

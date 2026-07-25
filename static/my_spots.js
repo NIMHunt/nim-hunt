@@ -4,6 +4,7 @@ import { requestNimiqPayment } from './nimiq_payment.js?v=blockchain-flow-v1-202
 import {
     appendBulletLine,
     appendDetailDescription,
+    appendSpotRequirementIcons,
     buildSpotLinkControl,
     createOwnerClaimCodesControl,
     copyText,
@@ -16,7 +17,7 @@ import {
     setCopyButtonIcon,
     spotScheduleSummary,
     unixToText,
-} from './spot_ui.js?v=single-open-details-v1-20260722';
+} from './spot_ui.js?v=spot-requirements-v1-20260725';
 import { createReusableSpotMap } from './spot_map.js?v=marker-white-outline-v1-20260723';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=single-open-details-v1-20260722';
@@ -978,7 +979,11 @@ function renderSpots(spots) {
 function spotPopupContent(spot) {
     const title = document.createElement('span');
     title.className = 'nh-spot-popup-title';
-    title.textContent = spot.title || SPOT_TEXT.fallbackTitle;
+    appendSpotRequirementIcons(title, spot, { interactive: false });
+
+    const text = document.createElement('span');
+    text.textContent = spot.title || SPOT_TEXT.fallbackTitle;
+    title.append(text);
     return title;
 }
 

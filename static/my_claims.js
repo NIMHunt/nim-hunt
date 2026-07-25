@@ -3,12 +3,13 @@ import { makeMyClaimsText } from './interface_text.js?v=single-open-details-v1-2
 import {
     appendBulletLine,
     appendDetailDescription,
+    appendSpotRequirementIcons,
     appendSpotTitleWithLock,
     buildSpotLinkControl,
     nimFromLunaText,
     spotPlaceText,
     unixToText,
-} from './spot_ui.js?v=single-open-details-v1-20260722';
+} from './spot_ui.js?v=spot-requirements-v1-20260725';
 import { createReusableSpotMap } from './spot_map.js?v=marker-white-outline-v1-20260723';
 import {
     createNoticePresenter,
@@ -379,7 +380,10 @@ function claimToMapItem(claim) {
 function claimPopupContent(item) {
     const wrap = document.createElement('span');
     wrap.className = 'nh-spot-popup-title';
-    wrap.textContent = `${item.title || TEXT.fallbackTitle} - ${claimStatusText(item.claim || {})}`;
+    appendSpotRequirementIcons(wrap, item, { interactive: false });
+    wrap.append(document.createTextNode(
+        `${item.title || TEXT.fallbackTitle} - ${claimStatusText(item.claim || {})}`,
+    ));
     return wrap;
 }
 

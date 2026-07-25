@@ -243,29 +243,29 @@ export function setCopyButtonIcon(button, iconName) {
     button.replaceChildren(createNimiqInlineIcon(iconName));
 }
 
-const PASSWORD_TOOLTIP_ID = 'spot-title-lock-tooltip';
+const REQUIREMENT_TOOLTIP_ID = 'spot-title-requirement-tooltip';
 
-function getPasswordTooltip() {
-    let tooltip = document.getElementById(PASSWORD_TOOLTIP_ID);
+function getRequirementTooltip() {
+    let tooltip = document.getElementById(REQUIREMENT_TOOLTIP_ID);
     if (!tooltip) {
         tooltip = document.createElement('div');
-        tooltip.id = PASSWORD_TOOLTIP_ID;
-        tooltip.className = 'lock-tooltip spot-title-lock-tooltip';
+        tooltip.id = REQUIREMENT_TOOLTIP_ID;
+        tooltip.className = 'lock-tooltip spot-title-requirement-tooltip';
         tooltip.hidden = true;
         document.body.append(tooltip);
     }
     return tooltip;
 }
 
-function hidePasswordTooltip() {
-    const tooltip = document.getElementById(PASSWORD_TOOLTIP_ID);
+function hideRequirementTooltip() {
+    const tooltip = document.getElementById(REQUIREMENT_TOOLTIP_ID);
     if (!tooltip) return;
     tooltip.hidden = true;
     tooltip.textContent = '';
     tooltip.removeAttribute('data-placement');
 }
 
-function positionPasswordTooltip(target, tooltip) {
+function positionRequirementTooltip(target, tooltip) {
     if (!target || !tooltip || tooltip.hidden) return;
 
     const gap = 12;
@@ -288,28 +288,28 @@ function positionPasswordTooltip(target, tooltip) {
     tooltip.dataset.placement = placement;
 }
 
-function showPasswordTooltip(target) {
-    const text = target?.dataset?.tooltip || SPOT_TEXT.passwordRequiredTooltip || 'This spot requires a password.';
+function showRequirementTooltip(target) {
+    const text = target?.dataset?.tooltip;
     if (!text) return;
 
-    const tooltip = getPasswordTooltip();
+    const tooltip = getRequirementTooltip();
     tooltip.textContent = text;
     tooltip.hidden = false;
     tooltip.dataset.placement = 'top';
-    requestAnimationFrame(() => positionPasswordTooltip(target, tooltip));
+    requestAnimationFrame(() => positionRequirementTooltip(target, tooltip));
 }
 
-function attachPasswordTooltip(wrap) {
+function attachRequirementTooltip(wrap) {
     let hideTimer = null;
 
     const show = () => {
         if (hideTimer) window.clearTimeout(hideTimer);
-        showPasswordTooltip(wrap);
+        showRequirementTooltip(wrap);
     };
 
     const hide = () => {
         if (hideTimer) window.clearTimeout(hideTimer);
-        hidePasswordTooltip();
+        hideRequirementTooltip();
     };
 
     const showBriefly = (event) => {
@@ -317,7 +317,7 @@ function attachPasswordTooltip(wrap) {
         event.stopPropagation();
         show();
         if (hideTimer) window.clearTimeout(hideTimer);
-        hideTimer = window.setTimeout(hidePasswordTooltip, 1800);
+        hideTimer = window.setTimeout(hideRequirementTooltip, 1800);
     };
 
     wrap.addEventListener('mouseenter', show);
@@ -328,16 +328,72 @@ function attachPasswordTooltip(wrap) {
     wrap.addEventListener('touchstart', showBriefly, { passive: false });
 }
 
-export function createPasswordRequiredIcon() {
+function requirementDefinitions(spot) {
+    const requirements = [];
+    if (spot?.use_password) {
+        requirements.push({
+            iconName: 'nq-lock-locked',
+            tooltip: SPOT_TEXT.passwordRequiredTooltip || 'This spot requires a password.',
+        });
+    }
+    if (Number(spot?.claim_duration || 0) > 0) {
+        requirements.push({
+            iconName: 'nq-stopwatch',
+            tooltip: SPOT_TEXT.durationRequiredTooltip
+                || 'This spot requires you to remain within its area for a set duration.',
+        });
+    }
+    return requirements;
+}
+
+function createRequirementIcon(iconName, tooltipText, { interactive = true } = {}) {
     const wrap = document.createElement('span');
-    wrap.className = 'spot-title-lock-icon-wrap has-lock-tooltip';
-    wrap.dataset.tooltip = SPOT_TEXT.passwordRequiredTooltip || 'This spot requires a password.';
-    wrap.setAttribute('aria-label', SPOT_TEXT.passwordRequiredTooltip || 'This spot requires a password.');
-    wrap.append(createNimiqInlineIcon('nq-lock-locked'));
-    attachPasswordTooltip(wrap);
+    wrap.className = 'spot-title-requirement-icon-wrap';
+    wrap.append(createNimiqInlineIcon(iconName));
+
+    if (interactive) {
+        wrap.classList.add('has-requirement-tooltip');
+        wrap.dataset.tooltip = tooltipText;
+        wrap.setAttribute('aria-label', tooltipText);
+        attachRequirementTooltip(wrap);
+    } else {
+        wrap.setAttribute('aria-hidden', 'true');
+    }
     return wrap;
 }
 
+export function createPasswordRequiredIcon(options = {}) {
+    return createRequirementIcon(
+        'nq-lock-locked',
+        SPOT_TEXT.passwordRequiredTooltip || 'This spot requires a password.',
+        options,
+    );
+}
+
+export function createDurationRequiredIcon(options = {}) {
+    return createRequirementIcon(
+        'nq-stopwatch',
+        SPOT_TEXT.durationRequiredTooltip
+            || 'This spot requires you to remain within its area for a set duration.',
+        options,
+    );
+}
+
+export function appendSpotRequirementIcons(container, spot, { interactive = true } = {}) {
+    if (!container) return 0;
+    const requirements = requirementDefinitions(spot);
+    for (const requirement of requirements) {
+        container.append(createRequirementIcon(
+            requirement.iconName,
+            requirement.tooltip,
+            { interactive },
+        ));
+    }
+    return requirements.length;
+}
+
+// The historical name is retained because all Spot/Claim pages import it. It now
+// renders every claim requirement icon rather than only the password lock.
 export function appendSpotTitleWithLock(
     titleEl,
     spot,
@@ -349,6 +405,7 @@ export function appendSpotTitleWithLock(
     const titleText = document.createElement('span');
     titleText.className = 'spot-title-text';
     titleText.textContent = fullTitle;
+    const requirements = requirementDefinitions(spot);
 
     titleEl.replaceChildren();
     titleEl.removeAttribute('title');
@@ -359,14 +416,13 @@ export function appendSpotTitleWithLock(
         titleEl.title = fullTitle;
         titleEl.setAttribute(
             'aria-label',
-            `${fullTitle}${spot.use_password ? '. Requires a password.' : ''}`,
+            requirements.length > 0
+                ? `${fullTitle}. ${requirements.map((item) => item.tooltip).join(' ')}`
+                : fullTitle,
         );
     }
 
-    if (spot.use_password) {
-        const lockIcon = createPasswordRequiredIcon();
-        titleEl.append(lockIcon);
-    }
+    appendSpotRequirementIcons(titleEl, spot);
     titleEl.append(titleText);
 }
 

@@ -32,7 +32,7 @@ def test_information_views_are_variants_of_the_real_homepage() -> None:
     assert 'id="home-information-content"' in shell_template
     assert 'id="home-dynamic-welcome"' in shell_template
     assert "information_view | default('') in ('about', 'roadmap')" in shell_template
-    assert "/static/static_page.js?v=home-information-v3-20260725" in shell_template
+    assert "/static/static_page.js?v=about-nimpay-link-v1-20260725" in shell_template
     assert "/static/static_pages.css?v=home-information-v4-20260725" in shell_template
 
 
@@ -84,6 +84,8 @@ def test_about_copy_is_kept_in_translation_ready_catalogue() -> None:
     assert "NimHunt is a simple geofaucet-style and Prizedraw mini-app" in catalogue
     assert "a loyal member of the NIMIQ Community" in catalogue
     assert "paragraphs:" in catalogue
+    assert "text: 'NimPay'" in catalogue
+    assert "href: 'https://nimpay.app'" in catalogue
 
 
 def test_roadmap_data_is_simple_customisable_and_current() -> None:
@@ -113,6 +115,8 @@ def test_information_renderer_uses_safe_text_and_bypasses_stale_roadmap_data() -
 
     assert "document.body.dataset.homeInformationView" in renderer
     assert "textContent =" in renderer
+    assert "document.createElement('a')" in renderer
+    assert "link.href = part.href" in renderer
     assert "innerHTML" not in renderer
     assert "cache: 'no-store'" in renderer
 

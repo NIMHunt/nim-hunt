@@ -1,9 +1,9 @@
 name: Diagnose social preview lint
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/social-preview-cards
+      - main
 
 permissions:
   contents: read

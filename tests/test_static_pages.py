@@ -33,6 +33,7 @@ def test_information_views_are_variants_of_the_real_homepage() -> None:
     assert 'id="home-dynamic-welcome"' in shell_template
     assert "information_view | default('') in ('about', 'roadmap')" in shell_template
     assert "/static/static_page.js?v=home-information-v2-20260725" in shell_template
+    assert "/static/static_pages.css?v=home-information-v3-20260725" in shell_template
 
 
 def test_information_links_change_only_the_current_page_link() -> None:
@@ -59,6 +60,15 @@ def test_information_link_size_and_roadmap_alignment_match_requested_style() -> 
     assert "text-align: left;" in stylesheet
     assert ".static-page-title" in stylesheet
     assert "text-align: center;" in stylesheet
+
+
+def test_roadmap_items_use_regular_welcome_card_text_size() -> None:
+    stylesheet = _read("static/static_pages.css")
+    roadmap_item_rule = stylesheet.split(".nq-style .roadmap-items > li {", 1)[1].split("}", 1)[0]
+
+    assert "font-size: 1rem !important;" in roadmap_item_rule
+    assert "font-weight: 800;" in roadmap_item_rule
+    assert "line-height: 1.45;" in roadmap_item_rule
 
 
 def test_about_copy_is_kept_in_translation_ready_catalogue() -> None:

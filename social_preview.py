@@ -13,7 +13,8 @@ from fastapi import status
 
 import constants as const
 import database as schema
-from social_card_images import CARD_VERSION, get_spot_by_ref, public_spot_ref, router
+from social_card_images import CARD_VERSION, get_spot_by_ref, public_spot_ref
+from social_card_images import router as router
 
 DEFAULT_BASE_URL = "https://nimhunt.app"
 MARKER = "<!-- nimhunt-social-preview -->"

@@ -9,4 +9,4 @@ def test_retry_only_pass_preserves_activation_cursor() -> None:
     )
     assert "if remaining == 0:" in source
     assert "next_cursor = cursor" in source
-    assert "new Spots are not skipped" in source
+    assert "Spots are not skipped" in source

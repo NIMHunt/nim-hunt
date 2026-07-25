@@ -1,27 +1,29 @@
-.spot-x-share-link {
-    color: var(--nh-text);
+.nq-style .spot-x-share-link,
+.nq-style .spot-x-share-link:visited {
+    border-radius: 50%;
+    background: #000000 !important;
+    color: #ffffff !important;
     text-decoration: none;
+    transition:
+        background-color 140ms ease,
+        color 140ms ease;
 }
 
-.spot-x-share-link:visited {
-    color: var(--nh-text);
+.nq-style .spot-x-share-link:hover,
+.nq-style .spot-x-share-link:focus-visible {
+    background: transparent !important;
+    color: #000000 !important;
 }
 
-.spot-x-share-link:hover,
-.spot-x-share-link:focus {
-    color: #000000;
-}
-
-.spot-x-share-link:focus-visible {
-    border-radius: 3px;
-    outline: 2px solid rgba(33, 188, 165, 0.45);
+.nq-style .spot-x-share-link:focus-visible {
+    outline: 2px solid rgba(33, 188, 165, 0.55);
     outline-offset: 2px;
 }
 
 .spot-x-share-icon {
     display: block;
-    width: 0.95em;
-    height: 0.95em;
+    width: 0.72em;
+    height: 0.72em;
     fill: currentColor;
     pointer-events: none;
 }

@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="{{ nimiq_style_cdn }}">
     <link rel="stylesheet" href="{{ leaflet_css_url }}">
     <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('publish-confirm-v1-20260701') }}">
+    <link rel="stylesheet" href="/static/x_share.css?v=x-share-v2-20260725">
 </head>
 <body
     class="nq-style"
@@ -140,5 +141,6 @@
     <script src="{{ leaflet_js_url }}"></script>
     <script src="/static/map_zoom_guard.js?v=success-code-map-zoom-v1-20260721"></script>
     <script type="module" src="/static/my_spots.js?v=spot-cancel-v1-20260720-{{ asset_version | default('publish-confirm-v1-20260701') }}"></script>
+    <script type="module" src="/static/x_share.js?v=x-share-v2-20260725"></script>
 </body>
 </html>

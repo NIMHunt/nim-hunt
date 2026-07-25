@@ -80,6 +80,24 @@ class ActivationCursor:
     spot_id: int = 0
 
 
+def x_posting_block_reason() -> str | None:
+    """Explain why automatic X posting is currently unable to run."""
+    if not bool(const.X_AUTO_POST_ENABLED):
+        return "disabled_by_flag"
+    if not bool(getattr(const, "PRODUCTION_MODE", False)):
+        return "requires_production_mainalbatross"
+    if str(getattr(const, "NIMIQ_NETWORK", "")).strip() != "MainAlbatross":
+        return "requires_production_mainalbatross"
+    if int(getattr(const, "NIMIQ_NETWORK_ID", 0)) != 24:
+        return "requires_production_mainalbatross"
+    return None
+
+
+def x_posting_allowed() -> bool:
+    """Return True only for an explicit opt-in on production MainAlbatross."""
+    return x_posting_block_reason() is None
+
+
 def normalise_account_handle(value: object) -> str:
     """Return an X username without @, rejecting invalid account handles."""
     handle = str(value or "").strip().lstrip("@").strip()
@@ -110,8 +128,8 @@ def load_credentials() -> XCredentials:
 
 
 def validate_configuration() -> None:
-    """Fail clearly when the opt-in flag is enabled without safe settings."""
-    if not const.X_AUTO_POST_ENABLED:
+    """Validate credentials only when production MainAlbatross posting may run."""
+    if not x_posting_allowed():
         return
     normalise_account_handle(const.X_ACCOUNT_HANDLE)
     load_credentials()
@@ -732,11 +750,14 @@ async def run_x_auto_post_pass() -> dict[str, Any]:
     """Post each newly-active Spot once and advance the durable cursor safely."""
     global _X_VERIFIED_USERNAME
 
-    if not const.X_AUTO_POST_ENABLED:
+    block_reason = x_posting_block_reason()
+    if block_reason is not None:
         cursor = await prepare_disabled_mode()
         return {
             "ok": True,
+            "requested_enabled": bool(const.X_AUTO_POST_ENABLED),
             "enabled": False,
+            "blocked_reason": block_reason,
             "cursor": cursor.__dict__,
             "checked_count": 0,
             "posted_count": 0,
@@ -874,11 +895,14 @@ async def start_x_auto_poster(
 
     if _X_POST_TASK is not None and not _X_POST_TASK.done():
         return
-    if not const.X_AUTO_POST_ENABLED:
+    block_reason = x_posting_block_reason()
+    if block_reason is not None:
         cursor = await prepare_disabled_mode()
         _X_POST_LAST_RESULT = {
             "ok": True,
+            "requested_enabled": bool(const.X_AUTO_POST_ENABLED),
             "enabled": False,
+            "blocked_reason": block_reason,
             "cursor": cursor.__dict__,
             "checked_count": 0,
             "posted_count": 0,
@@ -914,8 +938,15 @@ def x_auto_poster_status() -> dict[str, Any]:
             account = normalise_account_handle(const.X_ACCOUNT_HANDLE)
         except XConfigurationError:
             account = "invalid"
+    block_reason = x_posting_block_reason()
     return {
-        "enabled": bool(const.X_AUTO_POST_ENABLED),
+        "requested_enabled": bool(const.X_AUTO_POST_ENABLED),
+        "enabled": block_reason is None,
+        "blocked_reason": block_reason,
+        "production_mainnet_only": True,
+        "deployment_mode": str(getattr(const, "DEPLOYMENT_MODE", "development")),
+        "network": str(getattr(const, "NIMIQ_NETWORK", "")),
+        "network_id": int(getattr(const, "NIMIQ_NETWORK_ID", 0)),
         "account": account,
         "running": _X_POST_TASK is not None and not _X_POST_TASK.done(),
         "last_error": _X_POST_LAST_ERROR,

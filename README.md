@@ -162,9 +162,13 @@ included—never claim codes, device identifiers or private account information.
 ## Automatic X posting
 
 NimHunt can announce a published Spot when it first becomes active. This feature
-is **disabled by default** and makes no X API requests while disabled. When it is
-first enabled, the worker starts from that moment rather than posting a backlog
-of older active Spots.
+is **disabled by default** and makes no X API requests while disabled. It is also
+hard-gated to the real blockchain: the worker can run only when NimHunt is in
+`production` mode on `MainAlbatross` with network ID `24`. Development,
+DevAlbatross and public TestAlbatross deployments remain inert even if the master
+flag is accidentally set to `true`. When first enabled on production MainAlbatross,
+the worker starts from that moment rather than posting a backlog of older active
+Spots.
 
 Each generated Post contains a short announcement, the Spot title and its public
 `nimhunt.app` link. NimHunt generates and caches the Spot's existing map card
@@ -185,6 +189,10 @@ App with posting/Read and Write permission, then configure these server variable
 | `NIMHUNT_X_HTTP_TIMEOUT_SECONDS` | `10` | Per-request X API timeout |
 | `NIMHUNT_X_RETRY_AFTER_SECONDS` | `900` | Default delay after an authoritative retryable rejection |
 | `NIMHUNT_X_MAX_SPOTS_PER_RUN` | `10` | Maximum Posts/retries considered in one worker pass |
+
+There are six required deployment variables for eventual activation: the master
+flag, account handle and four OAuth credentials. The interval, timeout, retry and
+batch-size variables are optional and may be omitted to use their defaults.
 
 The credentials—not the handle setting—determine the account that can post.
 Before sending anything, NimHunt calls X's authenticated-user endpoint and refuses
@@ -207,7 +215,9 @@ export NIMHUNT_X_ACCOUNT_HANDLE='NimHunt'
 ```
 
 Only set the flag to `1` after all four private credential variables have been
-added to the deployment and the intended account has authorised the App.
+added to the deployment, the intended account has authorised the App, and the
+service is running in production on MainAlbatross. The worker independently
+checks all three conditions before making any X request.
 
 ## Nimiq networks
 

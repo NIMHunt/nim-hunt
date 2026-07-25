@@ -1,4 +1,4 @@
-import { getStaticPageText } from './static_page_text.js?v=about-nimpay-link-v1-20260725';
+import { getStaticPageText } from './static_page_text.js?v=about-nimiq-pay-v2-20260725';
 
 const text = getStaticPageText();
 const pageName = document.body.dataset.homeInformationView;

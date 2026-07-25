@@ -20,7 +20,7 @@ export const STATIC_PAGE_TEXT_CATALOGUES = {
                     parts: [
                         'NimHunt is a simple geofaucet-style and Prizedraw mini-app for Nimiq and ',
                         {
-                            text: 'NimPay',
+                            text: 'Nimiq Pay',
                             href: 'https://nimpay.app',
                         },
                         '. Creators can fund geographic Spots, and other users can discover and claim their rewards once they reach the required area.',

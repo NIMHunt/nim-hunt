@@ -32,7 +32,7 @@ def test_information_views_are_variants_of_the_real_homepage() -> None:
     assert 'id="home-information-content"' in shell_template
     assert 'id="home-dynamic-welcome"' in shell_template
     assert "information_view | default('') in ('about', 'roadmap')" in shell_template
-    assert "/static/static_page.js?v=about-nimpay-link-v1-20260725" in shell_template
+    assert "/static/static_page.js?v=about-nimiq-pay-v2-20260725" in shell_template
     assert "/static/static_pages.css?v=home-information-v4-20260725" in shell_template
 
 
@@ -84,7 +84,8 @@ def test_about_copy_is_kept_in_translation_ready_catalogue() -> None:
     assert "NimHunt is a simple geofaucet-style and Prizedraw mini-app" in catalogue
     assert "a loyal member of the NIMIQ Community" in catalogue
     assert "paragraphs:" in catalogue
-    assert "text: 'NimPay'" in catalogue
+    assert "text: 'Nimiq Pay'" in catalogue
+    assert "text: 'NimPay'" not in catalogue
     assert "href: 'https://nimpay.app'" in catalogue
 
 
@@ -101,8 +102,9 @@ def test_roadmap_data_is_simple_customisable_and_current() -> None:
                 "heading": "August",
                 "items": [
                     "Localisation",
-                    "Better Desktop Functionality",
-                    "Better Marketing",
+                    "More Desktop Functionality",
+                    "More Marketing",
+                    "Dark Mode",
                     "Admin Panel",
                 ],
             },

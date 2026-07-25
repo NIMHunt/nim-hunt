@@ -13,6 +13,7 @@ import textwrap
 import time
 import urllib.request
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
@@ -32,7 +33,7 @@ MAP_SIZE = (600, 315)
 TILE_SIZE = 256
 TILE_FALLBACK_TTL = 7 * 24 * 60 * 60
 CARD_TTL = 24 * 60 * 60
-CARD_VERSION = "social-cards-v2"
+CARD_VERSION = "social-cards-v3"
 STANDARD_SPOT_COLOUR = (33, 188, 165)
 PRIZEDRAW_SPOT_COLOUR = (255, 196, 53)
 RADIUS_FILL_ALPHA = round(255 * 0.22)
@@ -116,7 +117,10 @@ def load_tile(z: int, x: int, y: int) -> Image.Image:
             "Accept": "image/png,image/*;q=0.8",
         },
     )
-    timeout = max(1, int(os.getenv("NIMHUNT_SOCIAL_TILE_TIMEOUT_SECONDS", "8")))
+    timeout = max(
+        0.5,
+        float(os.getenv("NIMHUNT_SOCIAL_TILE_TIMEOUT_SECONDS", "2")),
+    )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         data, ttl = response.read(), tile_ttl(response.headers)
     with Image.open(io.BytesIO(data)) as image:
@@ -174,14 +178,34 @@ def render_map(
     y_start = math.floor(top / TILE_SIZE)
     y_end = math.floor((top + MAP_SIZE[1] - 1) / TILE_SIZE)
     canvas = Image.new("RGB", MAP_SIZE, (238, 245, 248))
-    for x in range(x_start, x_end + 1):
-        for y in range(y_start, y_end + 1):
-            try:
-                tile = loader(zoom, x, y).convert("RGB")
-            except (OSError, ValueError):
-                tile = fallback_tile()
-            paste = (round(x * TILE_SIZE - left), round(y * TILE_SIZE - top))
+
+    requests = [
+        (
+            x,
+            y,
+            (round(x * TILE_SIZE - left), round(y * TILE_SIZE - top)),
+        )
+        for x in range(x_start, x_end + 1)
+        for y in range(y_start, y_end + 1)
+    ]
+
+    def fetch_tile(item: tuple[int, int, tuple[int, int]]) -> tuple[tuple[int, int], Image.Image]:
+        x, y, paste = item
+        try:
+            tile = loader(zoom, x, y).convert("RGB")
+        except (OSError, ValueError):
+            tile = fallback_tile()
+        return paste, tile
+
+    configured_workers = max(
+        1,
+        int(os.getenv("NIMHUNT_SOCIAL_TILE_WORKERS", "4")),
+    )
+    worker_count = min(configured_workers, len(requests))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        for paste, tile in executor.map(fetch_tile, requests):
             canvas.paste(tile, paste)
+
     return canvas, max(4, radius / metres_per_pixel(lat, zoom))
 
 
@@ -333,9 +357,16 @@ def cached_card(key: str, render: Callable[[], bytes]) -> bytes:
 
 def png_response(request: Request, data: bytes) -> Response:
     etag = f'"{hashlib.sha256(data).hexdigest()}"'
-    headers = {"Cache-Control": f"public, max-age={CARD_TTL}", "ETag": etag}
+    headers = {
+        "Cache-Control": f"public, max-age={CARD_TTL}",
+        "Content-Length": str(len(data)),
+        "ETag": etag,
+    }
     if request.headers.get("if-none-match") == etag:
+        headers.pop("Content-Length", None)
         return Response(status_code=304, headers=headers)
+    if request.method == "HEAD":
+        return Response(media_type="image/png", headers=headers)
     return Response(data, media_type="image/png", headers=headers)
 
 
@@ -351,7 +382,11 @@ def spot_is_public(spot: dict[str, Any], now: int) -> bool:
     return spot.get(schema.SPOT_LAT) is not None and spot.get(schema.SPOT_LONG) is not None
 
 
-@router.get("/social/site/{key}.png", include_in_schema=False)
+@router.api_route(
+    "/social/site/{key}.png",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
 async def site_card(request: Request, key: str) -> Response:
     if key not in CARD_COPY:
         raise HTTPException(status_code=404)
@@ -363,7 +398,11 @@ async def site_card(request: Request, key: str) -> Response:
     return png_response(request, data)
 
 
-@router.get("/social/spot/{ref}.png", include_in_schema=False)
+@router.api_route(
+    "/social/spot/{ref}.png",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
 async def spot_card(request: Request, ref: str) -> Response:
     spot = await get_spot_by_ref(ref)
     async with get_db() as db:

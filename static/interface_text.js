@@ -15,6 +15,11 @@ const COMMON_TEXT_EN = {
         readMore: 'Read more',
         ok: 'OK',
     },
+    actions: {
+        copy: 'Copy',
+        copied: 'Copied',
+        shareOnX: 'Share on X',
+    },
 };
 
 const REPORT_REASON_OPTIONS_EN = [

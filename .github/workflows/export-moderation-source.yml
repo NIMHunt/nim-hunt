@@ -1,9 +1,9 @@
 name: Export moderation source
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/content-moderation
+      - main
 
 permissions:
   contents: read

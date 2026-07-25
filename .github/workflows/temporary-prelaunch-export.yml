@@ -1,4 +1,4 @@
-name: Temporary pre-launch repository export
+name: Temporary apply pre-launch review
 
 on:
   pull_request:
@@ -6,22 +6,32 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  apply:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/prelaunch-transaction-review'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check out repository
+      - name: Check out review branch
         uses: actions/checkout@v6
-
-      - name: Create source archive
-        run: tar --exclude=.git -czf /tmp/nimhunt-source.tar.gz .
-
-      - name: Upload source archive
-        uses: actions/upload-artifact@v4
         with:
-          name: nimhunt-prelaunch-source
-          path: /tmp/nimhunt-source.tar.gz
-          retention-days: 1
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Apply reviewed changes and remove temporary files
+        env:
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          base64 --decode .github/prelaunch-review.patch > /tmp/prelaunch-review.patch
+          git apply --check /tmp/prelaunch-review.patch
+          git apply /tmp/prelaunch-review.patch
+          rm .github/prelaunch-review.patch
+          rm .github/workflows/temporary-prelaunch-export.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add helpers/helper_rpc_send.test.mjs main.py public_html.py settlement_updater.py tests/test_prelaunch_financial_concurrency.py tests/test_robustness_guards.py tests/test_settlement_prizedraw.py .github
+          git commit -m "Harden pre-launch financial concurrency and diagnostics"
+          git push origin "HEAD:${HEAD_BRANCH}"

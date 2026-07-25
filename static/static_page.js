@@ -1,4 +1,4 @@
-import { getStaticPageText } from './static_page_text.js?v=home-information-v2-20260725';
+import { getStaticPageText } from './static_page_text.js?v=about-nimpay-link-v1-20260725';
 
 const text = getStaticPageText();
 const pageName = document.body.dataset.homeInformationView;
@@ -10,10 +10,35 @@ function setSharedText(pageText) {
     if (titleElement) titleElement.textContent = pageText.title;
 }
 
+function appendParagraphPart(paragraph, part) {
+    if (typeof part === 'string') {
+        paragraph.append(document.createTextNode(part));
+        return;
+    }
+    if (!part || typeof part.text !== 'string') return;
+
+    if (typeof part.href === 'string' && part.href.trim()) {
+        const link = document.createElement('a');
+        link.href = part.href;
+        link.className = 'welcome-link';
+        link.textContent = part.text;
+        paragraph.append(link);
+        return;
+    }
+
+    paragraph.append(document.createTextNode(part.text));
+}
+
 function makeParagraph(value) {
     const paragraph = document.createElement('p');
     paragraph.className = 'static-page-copy';
-    paragraph.textContent = value;
+
+    if (typeof value === 'string') {
+        paragraph.textContent = value;
+    } else if (Array.isArray(value?.parts)) {
+        for (const part of value.parts) appendParagraphPart(paragraph, part);
+    }
+
     return paragraph;
 }
 

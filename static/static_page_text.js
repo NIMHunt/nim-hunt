@@ -16,7 +16,16 @@ export const STATIC_PAGE_TEXT_CATALOGUES = {
             pageTitle: 'About · NimHunt',
             title: 'About',
             paragraphs: [
-                'NimHunt is a simple geofaucet-style and Prizedraw mini-app for Nimiq and NimPay. Creators can fund geographic Spots, and other users can discover and claim their rewards once they reach the required area.',
+                {
+                    parts: [
+                        'NimHunt is a simple geofaucet-style and Prizedraw mini-app for Nimiq and ',
+                        {
+                            text: 'NimPay',
+                            href: 'https://nimpay.app',
+                        },
+                        '. Creators can fund geographic Spots, and other users can discover and claim their rewards once they reach the required area.',
+                    ],
+                },
                 'It was made to offer the Nimiq community a simple and playful way to share NIM, encourage exploration, and experiment with location-based rewards.',
                 'NimHunt is an independent community project made by a loyal member of the NIMIQ Community.',
             ],

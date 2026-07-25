@@ -36,6 +36,7 @@ const SPOT_TEXT_EN = {
     noDescription: 'No description provided.',
     copySpotLink: 'Copy spot link',
     passwordRequiredTooltip: 'This spot requires a password.',
+    durationRequiredTooltip: 'This spot requires you to remain within its area for a set duration.',
     ownerClaimCodes: {
         title: (count) => `Claim Codes (${count})`,
         loading: 'Loading claim codes…',

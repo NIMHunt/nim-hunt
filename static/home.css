@@ -701,17 +701,22 @@ h2 {
     min-width: 0;
 }
 
-.map-spot-title-tooltip-lock {
+.map-spot-title-tooltip-requirements {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1em;
-    height: 1em;
+    gap: 0.14em;
     margin-right: 0.25em;
     color: currentColor;
 }
 
-.map-spot-title-tooltip-lock .nq-icon {
+.map-spot-title-tooltip-requirements .spot-title-requirement-icon-wrap {
+    width: 1em;
+    height: 1em;
+    margin: 0;
+}
+
+.map-spot-title-tooltip-requirements .nq-icon {
     display: block;
     width: 1em;
     height: 1em;
@@ -2858,8 +2863,9 @@ h2 {
 }
 
 /* Claim handling UI */
-.spot-list-title .spot-title-lock-icon-wrap,
-#claim-page-title .spot-title-lock-icon-wrap {
+.spot-list-title .spot-title-requirement-icon-wrap,
+#claim-page-title .spot-title-requirement-icon-wrap,
+.nh-spot-popup-title .spot-title-requirement-icon-wrap {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2871,17 +2877,17 @@ h2 {
     color: currentColor;
 }
 
-.spot-title-lock-icon-wrap .nq-icon {
+.spot-title-requirement-icon-wrap .nq-icon {
     width: 1em;
     height: 1em;
     display: block;
 }
 
-.spot-title-lock-icon-wrap.has-lock-tooltip {
+.spot-title-requirement-icon-wrap.has-requirement-tooltip {
     cursor: inherit;
 }
 
-.spot-title-lock-tooltip {
+.spot-title-requirement-tooltip {
     white-space: normal;
 }
 
@@ -3584,7 +3590,7 @@ h2 {
     white-space: nowrap;
 }
 
-.spot-list-title.is-truncated-title .spot-title-lock-icon-wrap {
+.spot-list-title.is-truncated-title .spot-title-requirement-icon-wrap {
     flex: 0 0 auto;
 }
 

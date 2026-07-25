@@ -4,13 +4,15 @@ import { formatNimFromLuna } from './nim_format.js';
 import {
     appendBulletLine,
     appendDetailDescription,
+    appendSpotRequirementIcons,
+    appendSpotTitleWithLock,
     buildClaimCodeCopyButton as buildSharedClaimCodeCopyButton,
     buildSpotLinkControl,
     durationText,
     highestTimeUnitText,
     spotScheduleTooltip,
     unixToText,
-} from './spot_ui.js?v=single-open-details-v1-20260722';
+} from './spot_ui.js?v=spot-requirements-v1-20260725';
 import {
     createNoticePresenter,
     getLanguage,
@@ -792,7 +794,11 @@ function buildSpotMapShell() {
 function makeSpotMapPopup(spot) {
     const title = document.createElement('span');
     title.className = 'nh-spot-popup-title';
-    title.textContent = spot.title || 'NimHunt Spot';
+    appendSpotRequirementIcons(title, spot, { interactive: false });
+
+    const text = document.createElement('span');
+    text.textContent = spot.title || 'NimHunt Spot';
+    title.append(text);
 
     const wrap = document.createElement('div');
     wrap.className = 'nh-spot-popup-content is-clickable';
@@ -957,7 +963,7 @@ function renderSpot(spot) {
 
     const title = document.createElement('span');
     title.className = 'spot-list-title';
-    title.textContent = spot.title || 'NimHunt Spot';
+    appendSpotTitleWithLock(title, spot);
 
     const statusBadge = document.createElement('span');
     statusBadge.className = `spot-badge ${spotStatusClass(spot)}`;

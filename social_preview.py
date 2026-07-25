@@ -204,7 +204,7 @@ async def metadata_for_request(
 
 
 class SocialPreviewMiddleware:
-    """Inject metadata into every uncompressed server-rendered HTML response."""
+    """Inject metadata into HTML while preserving every other ASGI response."""
 
     def __init__(self, app: Callable[..., Awaitable[None]]) -> None:
         self.app = app
@@ -213,37 +213,61 @@ class SocialPreviewMiddleware:
         if scope.get("type") != "http" or scope.get("method") not in {"GET", "HEAD"}:
             await self.app(scope, receive, send)
             return
-        start: dict[str, Any] | None = None
-        chunks: list[bytes] = []
+
+        messages: list[dict[str, Any]] = []
 
         async def capture(message: dict[str, Any]) -> None:
-            nonlocal start
-            if message["type"] == "http.response.start":
-                start = message
-            elif message["type"] == "http.response.body":
-                chunks.append(message.get("body", b""))
+            messages.append(message)
 
         await self.app(scope, receive, capture)
-        if start is None:
+
+        start_index = next(
+            (
+                index
+                for index, message in enumerate(messages)
+                if message.get("type") == "http.response.start"
+            ),
+            None,
+        )
+        if start_index is None:
+            for message in messages:
+                await send(message)
             return
+
+        standard_types = {"http.response.start", "http.response.body"}
+        if any(message.get("type") not in standard_types for message in messages):
+            # Starlette may use extensions such as http.response.pathsend for
+            # zero-copy static files. Those messages must pass through exactly.
+            for message in messages:
+                await send(message)
+            return
+
+        start = messages[start_index]
         headers = list(start.get("headers", []))
         header_map = {key.lower(): value for key, value in headers}
-        body = b"".join(chunks)
+        body = b"".join(
+            message.get("body", b"")
+            for message in messages
+            if message.get("type") == "http.response.body"
+        )
         is_html = b"text/html" in header_map.get(b"content-type", b"").lower()
         compressed = bool(header_map.get(b"content-encoding", b""))
-        if is_html and not compressed and body:
-            meta = await metadata_for_request(
-                str(scope.get("path") or "/"),
-                scope.get("query_string", b""),
-                int(start.get("status", 200)),
-            )
-            body = inject_social_tags(body, meta)
-            headers = [
-                (key, value)
-                for key, value in headers
-                if key.lower() != b"content-length"
-            ]
-            headers.append((b"content-length", str(len(body)).encode()))
-            start = {**start, "headers": headers}
-        await send(start)
+        if not is_html or compressed or not body:
+            for message in messages:
+                await send(message)
+            return
+
+        meta = await metadata_for_request(
+            str(scope.get("path") or "/"),
+            scope.get("query_string", b""),
+            int(start.get("status", 200)),
+        )
+        body = inject_social_tags(body, meta)
+        headers = [
+            (key, value)
+            for key, value in headers
+            if key.lower() != b"content-length"
+        ]
+        headers.append((b"content-length", str(len(body)).encode()))
+        await send({**start, "headers": headers})
         await send({"type": "http.response.body", "body": body, "more_body": False})

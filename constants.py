@@ -144,6 +144,10 @@ TEST_USER_ID = 0
 DISPLAY_NAME_MIN_CHARS = 3
 DISPLAY_NAME_MAX_CHARS = 18
 
+# A blocked public submission pauses further profile changes and Spot publishing
+# for one hour. Claims and financial/cancellation actions remain available.
+CONTENT_MODERATION_COOLDOWN_SECONDS = 60 * 60
+
 # Spot title validation. A draft SPOT can be created with only a title;
 # the remaining fields are filled on the full Create Spot form. Keep this
 # independent from display names because useful location/event titles are longer.

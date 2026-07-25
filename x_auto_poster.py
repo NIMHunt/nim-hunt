@@ -442,6 +442,8 @@ async def _candidate_spots(
                 ON pd.{schema.PRIZEDRAW_SPOT_ID} = s.{schema.SPOT_ID}
             WHERE s.{schema.SPOT_STATUS} = ?
               AND s.{schema.SPOT_CANCELLATION_STARTED_AT} IS NULL
+              AND s.{schema.SPOT_LAT} IS NOT NULL
+              AND s.{schema.SPOT_LONG} IS NOT NULL
               AND s.{schema.SPOT_STARTS_AT} IS NOT NULL
               AND s.{schema.SPOT_STARTS_AT} <= ?
               AND (s.{schema.SPOT_STARTS_AT} + s.{schema.SPOT_ENDS_AT}) > ?
@@ -511,6 +513,8 @@ async def _due_retry_spots(
         WHERE s.{schema.SPOT_ID} IN ({placeholders})
           AND s.{schema.SPOT_STATUS} = ?
           AND s.{schema.SPOT_CANCELLATION_STARTED_AT} IS NULL
+          AND s.{schema.SPOT_LAT} IS NOT NULL
+          AND s.{schema.SPOT_LONG} IS NOT NULL
           AND s.{schema.SPOT_STARTS_AT} IS NOT NULL
           AND s.{schema.SPOT_STARTS_AT} <= ?
           AND (s.{schema.SPOT_STARTS_AT} + s.{schema.SPOT_ENDS_AT}) > ?
@@ -792,7 +796,11 @@ async def run_x_auto_post_pass() -> dict[str, Any]:
         candidate_results.append(result)
         results.append(result)
 
-    if candidates and len(candidates) >= remaining:
+    if remaining == 0:
+        # Retry work consumed this pass. Preserve the activation cursor so new
+        # Spots are not skipped merely because older safe retries were due.
+        next_cursor = cursor
+    elif candidates and len(candidates) >= remaining:
         last = candidates[-1]
         next_cursor = ActivationCursor(
             int(last.get("activation_at") or cursor.timestamp),

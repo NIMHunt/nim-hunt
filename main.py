@@ -21,6 +21,7 @@ import settlement_updater
 import social_preview
 import trans_updater
 import wallet
+import x_auto_poster
 from funding_flow import funding_flow_diagnostics
 from funding_flow import install as install_funding_flow
 from public_html import render_not_found_page
@@ -416,6 +417,7 @@ async def startup() -> None:
             run_immediately=True,
             fail_on_initial_error=strict_startup,
         )
+        await x_auto_poster.start_x_auto_poster(run_immediately=True)
     except Exception:
         # FastAPI does not enter the lifespan context when startup fails, so
         # stop any service that started before the failing one. Cleanup errors
@@ -430,6 +432,7 @@ async def startup() -> None:
 async def shutdown() -> None:
     """Stop NimHunt's background services cleanly."""
     services = (
+        ("automatic X poster", x_auto_poster.stop_x_auto_poster),
         ("transaction refresher", trans_updater.stop_transaction_refresher),
         ("settlement refresher", settlement_updater.stop_settlement_refresher),
         ("cache refresher", cache.stop_cache_refresher),
@@ -466,6 +469,7 @@ async def healthz() -> JSONResponse:
             "ok": True,
             "deployment_mode": getattr(const, "DEPLOYMENT_MODE", "development"),
             "network": getattr(const, "NIMIQ_NETWORK", ""),
+            "x_auto_post": x_auto_poster.x_auto_poster_status(),
         }
     )
 

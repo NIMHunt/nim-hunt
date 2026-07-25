@@ -22,6 +22,7 @@ than high-volume financial infrastructure.
 - **Creator tools** — inspect drafts, deposits, publishing state, claim codes and history.
 - **Claim history** — users can review pending, successful and failed claims.
 - **On-chain descriptions** — NimHunt-generated transactions include short Spot labels.
+- **Optional X announcements** — automatically announce newly-active Spots through a configured account.
 - **Deployment/network separation** — desktop shortcuts remain available locally,
   while public TestAlbatross and MainAlbatross deployments both use production-grade guards.
 - **Localisation-ready UI** — interface copy is centralised and selected from
@@ -54,8 +55,8 @@ NimHunt intentionally uses a small stack:
 - **`helpers/nimiq_helper.mjs`** uses the official pinned `@nimiq/core` package
   to derive addresses and sign outgoing transactions, then broadcasts their
   serialized form through the configured Nimiq JSON-RPC endpoint.
-- **Background services** refresh caches, settle completed Prizedraws and reconcile
-  pending blockchain transactions.
+- **Background services** refresh caches, settle completed Prizedraws, reconcile
+  pending blockchain transactions and optionally announce newly-active Spots on X.
 
 The important chain-facing modules are:
 
@@ -157,6 +158,56 @@ NimHunt includes short public transaction data:
 Descriptions are limited to 30 UTF-8 bytes and safely truncated. Because this
 information is written to the blockchain, only the already-public Spot title is
 included—never claim codes, device identifiers or private account information.
+
+## Automatic X posting
+
+NimHunt can announce a published Spot when it first becomes active. This feature
+is **disabled by default** and makes no X API requests while disabled. When it is
+first enabled, the worker starts from that moment rather than posting a backlog
+of older active Spots.
+
+Each generated Post contains a short announcement, the Spot title and its public
+`nimhunt.app` link. NimHunt generates and caches the Spot's existing map card
+before creating the Post, so X can fetch a warm preview image.
+
+The worker uses OAuth 1.0a user-context credentials. Create an approved X developer
+App with posting/Read and Write permission, then configure these server variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `NIMHUNT_X_AUTO_POST_ENABLED` | `false` | Master switch; accepts the same strict boolean values as other NimHunt flags |
+| `NIMHUNT_X_ACCOUNT_HANDLE` | empty | Expected account username, with or without `@` |
+| `NIMHUNT_X_API_KEY` | empty | X developer App API/consumer key |
+| `NIMHUNT_X_API_SECRET` | empty | X developer App API/consumer secret |
+| `NIMHUNT_X_ACCESS_TOKEN` | empty | User Access Token for the posting account |
+| `NIMHUNT_X_ACCESS_TOKEN_SECRET` | empty | User Access Token Secret for the posting account |
+| `NIMHUNT_X_POST_INTERVAL_SECONDS` | `30` | How often to check for newly-active Spots |
+| `NIMHUNT_X_HTTP_TIMEOUT_SECONDS` | `10` | Per-request X API timeout |
+| `NIMHUNT_X_RETRY_AFTER_SECONDS` | `900` | Default delay after an authoritative retryable rejection |
+| `NIMHUNT_X_MAX_SPOTS_PER_RUN` | `10` | Maximum Posts/retries considered in one worker pass |
+
+The credentials—not the handle setting—determine the account that can post.
+Before sending anything, NimHunt calls X's authenticated-user endpoint and refuses
+to post unless its returned username matches `NIMHUNT_X_ACCOUNT_HANDLE`.
+Credentials stay in environment variables and are never written to SQLite,
+health output or logs.
+
+Successful Post IDs and per-Spot delivery states are stored in the existing
+`app_metadata` table, so restarts do not duplicate confirmed announcements and no
+schema reset is required. Rate limits and explicit authentication rejections can
+be retried safely. A timeout, lost connection or X server error is recorded as
+**uncertain** and is not retried automatically, because the Post may already have
+been created and a blind retry could publish it twice.
+
+Example disabled configuration:
+
+```bash
+export NIMHUNT_X_AUTO_POST_ENABLED=0
+export NIMHUNT_X_ACCOUNT_HANDLE='NimHunt'
+```
+
+Only set the flag to `1` after all four private credential variables have been
+added to the deployment and the intended account has authorised the App.
 
 ## Nimiq networks
 

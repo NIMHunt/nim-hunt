@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 import cache
 import constants as const
+import content_moderation
 import database as schema
 import db_access
 import settlement_updater
@@ -2929,7 +2930,19 @@ async def my_spots_deposit_submitted_api(spot_id: int, payload: DepositSubmitted
 
 @router.post("/api/my-spots/{spot_id}/publish")
 async def my_spots_publish_api(spot_id: int, payload: HomeSessionRequest) -> JSONResponse:
-    """Publish one complete, fully funded draft SPOT."""
+    """Publish one complete, fully funded draft SPOT.
+
+    Public text is checked only at this final boundary. Draft editing remains
+    private and unrestricted; a rude title/description is censored atomically
+    before the Spot becomes visible.
+    """
+    moderation_result = {
+        "changed": False,
+        "title_changed": False,
+        "description_changed": False,
+    }
+    moderation_marker = None
+
     async with get_db() as db:
         # Publishing and cancellation are competing terminal draft actions. A
         # write reservation prevents either workflow from committing based on a
@@ -2946,23 +2959,77 @@ async def my_spots_publish_api(spot_id: int, payload: HomeSessionRequest) -> JSO
                     status_code=status.HTTP_403_FORBIDDEN,
                 )
 
+            checked_at = await db_access.get_unixepoch(db)
+            active_cooldown = await content_moderation.get_content_cooldown(
+                db,
+                user_id=user_id,
+                checked_at=checked_at,
+            )
+            if active_cooldown is not None:
+                return JSONResponse(
+                    {
+                        **meta,
+                        "ok": False,
+                        "code": "content_moderation_cooldown",
+                        "message": content_moderation.active_cooldown_message(
+                            active_cooldown,
+                            checked_at=checked_at,
+                        ),
+                        **content_moderation.cooldown_api_fields(
+                            active_cooldown,
+                            checked_at=checked_at,
+                        ),
+                    },
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
+
+            # Avoid censoring or penalising a draft which could not have been
+            # published for ordinary completeness/funding reasons anyway.
+            if not await db_access.can_publish_spot(db, spot_id=spot_id):
+                return JSONResponse(
+                    {
+                        **meta,
+                        "ok": False,
+                        "code": "publish_failed",
+                        "message": "spot is not complete and fully funded enough to publish",
+                    },
+                    status_code=status.HTTP_409_CONFLICT,
+                )
+
+            moderation_result = await content_moderation.censor_draft_spot_for_publish(
+                db,
+                spot_id=spot_id,
+            )
+
             try:
                 await db_access.publish_spot(db, spot_id=spot_id)
             except ValueError as exc:
                 return JSONResponse({**meta, "ok": False, "code": "publish_failed", "message": str(exc)}, status_code=status.HTTP_409_CONFLICT)
+
+            if moderation_result["changed"]:
+                moderation_marker = await content_moderation.start_content_cooldown(
+                    db,
+                    user_id=user_id,
+                    reason="spot_publish",
+                    checked_at=checked_at,
+                )
 
         await _notify_all_cache_for_spot_owner_change(db, user_id=user_id, spot_id=spot_id)
         spot_summary = await db_access.get_spot_owner_summary(db, spot_id=spot_id)
         transactions = await db_access.get_transactions_by_spot(db, spot_id=spot_id, limit=50)
         now = await db_access.get_unixepoch(db)
 
-    return JSONResponse(
-        {
-            **meta,
-            "ok": True,
-            "spot": _serialise_owner_spot(spot_summary, now=now, transactions=transactions) if spot_summary else None,
-        }
-    )
+    response = {
+        **meta,
+        "ok": True,
+        "spot": _serialise_owner_spot(spot_summary, now=now, transactions=transactions) if spot_summary else None,
+        "content_censored": bool(moderation_result["changed"]),
+        "title_censored": bool(moderation_result["title_changed"]),
+        "description_censored": bool(moderation_result["description_changed"]),
+    }
+    if moderation_marker is not None:
+        response.update(content_moderation.cooldown_api_fields(moderation_marker))
+    return JSONResponse(response)
 
 
 @router.post("/api/my-spots/{spot_id}/cancel")
@@ -3157,7 +3224,8 @@ async def update_display_name(payload: DisplayNameRequest) -> JSONResponse:
 
     In normal use the user is identified by the Nimiq Pay device hash. During
     desktop development, DEFAULT_TO_TEST_USER lets this endpoint update the
-    spoof/test user when no device hash is available.
+    spoof/test user when no device hash is available. Blocked words are rejected
+    on the server so bypassing the page JavaScript cannot save them.
     """
     display_name = payload.display_name.strip()
     if not (const.DISPLAY_NAME_MIN_CHARS <= len(display_name) <= const.DISPLAY_NAME_MAX_CHARS):
@@ -3195,6 +3263,53 @@ async def update_display_name(payload: DisplayNameRequest) -> JSONResponse:
             user_id = int(user[schema.USER_ID])
             if int(user[schema.USER_STATUS]) == const.USER_STATUS_BANNED:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Banned users cannot edit their profile")
+
+            checked_at = await db_access.get_unixepoch(db)
+            active_cooldown = await content_moderation.get_content_cooldown(
+                db,
+                user_id=user_id,
+                checked_at=checked_at,
+            )
+            if active_cooldown is not None:
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "code": "content_moderation_cooldown",
+                        "message": content_moderation.active_cooldown_message(
+                            active_cooldown,
+                            checked_at=checked_at,
+                        ),
+                        **content_moderation.cooldown_api_fields(
+                            active_cooldown,
+                            checked_at=checked_at,
+                        ),
+                    },
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
+
+            if content_moderation.contains_blocked_word(display_name):
+                moderation_marker = await content_moderation.start_content_cooldown(
+                    db,
+                    user_id=user_id,
+                    reason="display_name",
+                    checked_at=checked_at,
+                )
+                wait = content_moderation.format_wait(
+                    int(moderation_marker["retry_after_seconds"])
+                )
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "code": "inappropriate_display_name",
+                        "message": (
+                            "That display name contains blocked language and was not saved. "
+                            "Public profile changes and Spot publishing are paused for "
+                            f"{wait}."
+                        ),
+                        **content_moderation.cooldown_api_fields(moderation_marker),
+                    },
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
 
             await db_access.modify_user_display_name(db, user_id=user_id, display_name=display_name)
             await db_access.touch_user_last_seen(db, user_id=user_id)

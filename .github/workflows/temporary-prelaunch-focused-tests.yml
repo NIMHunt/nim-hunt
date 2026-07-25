@@ -30,8 +30,20 @@ jobs:
       - name: Capture focused test output
         shell: bash
         run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("tests/test_prelaunch_financial_concurrency.py")
+          text = path.read_text()
+          marker = "        self.assertEqual(len(sends), 2)\n"
+          text = text.replace(
+              marker,
+              "        print('DEBUG_SETTLEMENT_RESULTS', results)\n" + marker,
+              1,
+          )
+          path.write_text(text)
+          PY
           set +e
-          python -m pytest -vv tests/test_prelaunch_financial_concurrency.py tests/test_prelaunch_financial_health.py > /tmp/prelaunch-focused.log 2>&1
+          python -m pytest -vv -s tests/test_prelaunch_financial_concurrency.py tests/test_prelaunch_financial_health.py > /tmp/prelaunch-focused.log 2>&1
           code=$?
           cat /tmp/prelaunch-focused.log
           echo "$code" > /tmp/prelaunch-focused.exit

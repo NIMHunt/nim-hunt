@@ -7,9 +7,8 @@ import inspect
 import io
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from PIL import Image
+from starlette.requests import Request
 
 import database as schema
 import social_card_images
@@ -132,16 +131,30 @@ def test_spot_card_renderer_contains_no_decorative_clutter() -> None:
     assert "_draw_osm_attribution(image)" in source
 
 
-def test_social_image_routes_accept_head_requests() -> None:
-    app = FastAPI()
-    app.include_router(social_card_images.router)
-    client = TestClient(app)
+def head_request() -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "HEAD",
+            "path": "/social/site/home.png",
+            "headers": [],
+            "query_string": b"",
+            "scheme": "https",
+            "server": ("nimhunt.app", 443),
+            "client": ("127.0.0.1", 12345),
+            "root_path": "",
+            "http_version": "1.1",
+        }
+    )
 
-    response = client.head("/social/site/home.png")
+
+def test_social_image_routes_accept_head_requests() -> None:
+    data = social_card_images.render_site_card("home")
+    response = social_card_images.png_response(head_request(), data)
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
-    assert int(response.headers["content-length"]) > 0
-    assert response.content == b""
+    assert int(response.headers["content-length"]) == len(data)
+    assert response.body == b""
 
     methods_by_path = {
         route.path: route.methods

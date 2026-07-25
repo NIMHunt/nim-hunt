@@ -44,15 +44,6 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-dev.txt
           npm ci --prefix helpers
 
-      - name: Capture Python test diagnostics
-        run: python -m pytest -q > pytest-diagnostic.txt 2>&1 || true
-
-      - name: Upload Python test diagnostics
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-diagnostic
-          path: pytest-diagnostic.txt
-
       - name: Run Python tests
         run: python -m pytest -q
 

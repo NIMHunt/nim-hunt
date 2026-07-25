@@ -75,6 +75,10 @@ def test_disabled_configuration_does_not_require_credentials(monkeypatch) -> Non
 
 def test_enabled_configuration_requires_account_and_credentials(monkeypatch) -> None:
     monkeypatch.setattr(const, "X_AUTO_POST_ENABLED", True)
+    monkeypatch.setattr(const, "PRODUCTION_MODE", True)
+    monkeypatch.setattr(const, "DEPLOYMENT_MODE", "production")
+    monkeypatch.setattr(const, "NIMIQ_NETWORK", "MainAlbatross")
+    monkeypatch.setattr(const, "NIMIQ_NETWORK_ID", 24)
     monkeypatch.setattr(const, "X_ACCOUNT_HANDLE", "NimHunt")
     for name in (
         const.NIMHUNT_X_API_KEY_ENV,

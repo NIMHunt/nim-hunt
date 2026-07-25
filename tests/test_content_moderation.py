@@ -128,6 +128,7 @@ class ContentModerationRouteTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertNotEqual(user[schema.USER_DISPLAY_NAME], "F U C K")
         self.assertIsNotNone(marker)
+        retry_at = marker["retry_at"]
 
         blocked = await public_html.update_display_name(
             public_html.DisplayNameRequest(
@@ -137,6 +138,13 @@ class ContentModerationRouteTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(blocked.status_code, 429)
         self.assertEqual(self._json(blocked)["code"], "content_moderation_cooldown")
+
+        async with schema.get_db() as db:
+            marker_after_retry = await content_moderation.get_content_cooldown(
+                db,
+                user_id=self.user_id,
+            )
+        self.assertEqual(marker_after_retry["retry_at"], retry_at)
 
     async def test_expired_cooldown_is_cleared_and_clean_name_can_save(self):
         async with schema.get_db() as db:

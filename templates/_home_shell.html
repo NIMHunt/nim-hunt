@@ -11,13 +11,14 @@
     <link rel="stylesheet" href="{{ nimiq_style_cdn }}">
     <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-polish-v2-20260704') }}">
     <link rel="stylesheet" href="/static/disclaimer_button.css?v=disclaimer-button-v3-20260722">
-    <link rel="stylesheet" href="/static/static_pages.css?v=static-pages-v1-20260724">
+    <link rel="stylesheet" href="/static/static_pages.css?v=home-information-v2-20260725">
 </head>
 <body class="nq-style"
     data-app-name="{{ app_name | default('NimHunt') }}"
     data-nimiq-pay-url="{{ nimiq_pay_url | default('https://nimpay.app') }}"
     data-display-name-min="{{ display_name_min | default(3) }}"
     data-display-name-max="{{ display_name_max | default(18) }}"
+    data-home-information-view="{{ information_view | default('') }}"
 >
     {% if show_notice | default(true) %}
     <div id="notice-backdrop" class="notice-backdrop" hidden>
@@ -65,12 +66,24 @@
             <p class="home-error-message">{{ error_message }}</p>
             {% endif %}
             {% else %}
-            <p id="welcome-line" class="welcome-line" data-i18n="home.preparing">Preparing your home screen.</p>
-            <div id="display-name-editor" class="display-name-editor" hidden>
-                <p id="display-name-error" class="display-name-error" role="alert" hidden></p>
-                <div class="display-name-actions">
-                    <button id="display-name-save" class="nq-button green" type="button" data-i18n="home.save">Save</button>
-                    <button id="display-name-cancel" class="nq-button light-blue" type="button" data-i18n="common.cancel">Cancel</button>
+            {% if information_view | default('') in ('about', 'roadmap') %}
+            <div id="home-information-content" class="home-information-content" aria-labelledby="home-information-title">
+                <h2 id="home-information-title" class="nq-label static-page-title" data-static-page-title>
+                    {{ 'About' if information_view == 'about' else 'Roadmap' }}
+                </h2>
+                <div class="static-page-body" data-static-page-content>
+                    <p class="static-page-copy">Loading…</p>
+                </div>
+            </div>
+            {% endif %}
+            <div id="home-dynamic-welcome"{% if information_view | default('') in ('about', 'roadmap') %} hidden{% endif %}>
+                <p id="welcome-line" class="welcome-line" data-i18n="home.preparing">Preparing your home screen.</p>
+                <div id="display-name-editor" class="display-name-editor" hidden>
+                    <p id="display-name-error" class="display-name-error" role="alert" hidden></p>
+                    <div class="display-name-actions">
+                        <button id="display-name-save" class="nq-button green" type="button" data-i18n="home.save">Save</button>
+                        <button id="display-name-cancel" class="nq-button light-blue" type="button" data-i18n="common.cancel">Cancel</button>
+                    </div>
                 </div>
             </div>
             {% endif %}
@@ -131,14 +144,26 @@
 
         {% if show_information_links | default(false) %}
         <nav class="home-information-links" aria-label="Project information">
-            <a href="/static/about.html">About</a>
-            <a href="/static/roadmap.html">Roadmap</a>
+            {% if information_view | default('') == 'about' %}
+            <a href="/">Home</a>
+            <a href="/?view=roadmap">Roadmap</a>
+            {% elif information_view | default('') == 'roadmap' %}
+            <a href="/?view=about">About</a>
+            <a href="/">Home</a>
+            {% else %}
+            <a href="/?view=about">About</a>
+            <a href="/?view=roadmap">Roadmap</a>
+            {% endif %}
         </nav>
         {% endif %}
     </main>
 
     <script type="module" src="/static/page_lifecycle.js?v=history-card-v4-20260722"></script>
     <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
+
+    {% if information_view | default('') in ('about', 'roadmap') %}
+    <script type="module" src="/static/static_page.js?v=home-information-v2-20260725"></script>
+    {% endif %}
 
     {% if home_script_src is defined and home_script_src %}
     <script type="module" src="{{ home_script_src }}"></script>

@@ -101,6 +101,7 @@ def test_roadmap_data_is_simple_customisable_and_current() -> None:
                     "Localisation",
                     "Better Desktop Functionality",
                     "Better Marketing",
+                    "Admin Panel",
                 ],
             },
         ]

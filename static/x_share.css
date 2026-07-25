@@ -1,0 +1,27 @@
+.spot-x-share-link {
+    color: var(--nh-text);
+    text-decoration: none;
+}
+
+.spot-x-share-link:visited {
+    color: var(--nh-text);
+}
+
+.spot-x-share-link:hover,
+.spot-x-share-link:focus {
+    color: #000000;
+}
+
+.spot-x-share-link:focus-visible {
+    border-radius: 3px;
+    outline: 2px solid rgba(33, 188, 165, 0.45);
+    outline-offset: 2px;
+}
+
+.spot-x-share-icon {
+    display: block;
+    width: 0.95em;
+    height: 0.95em;
+    fill: currentColor;
+    pointer-events: none;
+}

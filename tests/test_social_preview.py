@@ -8,6 +8,7 @@ import io
 from pathlib import Path
 
 from PIL import Image
+from starlette.requests import Request
 
 import database as schema
 import social_card_images
@@ -117,9 +118,57 @@ def test_prizedraw_spot_card_uses_nimiq_yellow() -> None:
 
 def test_spot_card_renderer_contains_no_decorative_clutter() -> None:
     source = inspect.getsource(social_card_images.render_spot_card)
-    for unwanted in ("rounded_rectangle", "diamond(", "draw.text", "title", "city", "badge"):
+    unwanted_tokens = (
+        "rounded_rectangle",
+        "diamond(",
+        "draw.text",
+        "title",
+        "city",
+        "badge",
+    )
+    for unwanted in unwanted_tokens:
         assert unwanted not in source
     assert "_draw_osm_attribution(image)" in source
+
+
+def head_request() -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "HEAD",
+            "path": "/social/site/home.png",
+            "headers": [],
+            "query_string": b"",
+            "scheme": "https",
+            "server": ("nimhunt.app", 443),
+            "client": ("127.0.0.1", 12345),
+            "root_path": "",
+            "http_version": "1.1",
+        }
+    )
+
+
+def test_social_image_routes_accept_head_requests() -> None:
+    data = social_card_images.render_site_card("home")
+    response = social_card_images.png_response(head_request(), data)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert int(response.headers["content-length"]) == len(data)
+    assert response.body == b""
+
+    methods_by_path = {
+        route.path: route.methods
+        for route in social_card_images.router.routes
+        if hasattr(route, "methods")
+    }
+    assert {"GET", "HEAD"} <= methods_by_path["/social/site/{key}.png"]
+    assert {"GET", "HEAD"} <= methods_by_path["/social/spot/{ref}.png"]
+
+
+def test_cold_map_render_uses_bounded_parallel_tile_loading() -> None:
+    source = inspect.getsource(social_card_images.render_map)
+    assert "ThreadPoolExecutor" in source
+    assert "NIMHUNT_SOCIAL_TILE_WORKERS" in source
 
 
 def test_middleware_injects_about_metadata() -> None:

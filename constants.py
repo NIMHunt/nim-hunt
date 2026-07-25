@@ -174,6 +174,22 @@ CREATE_SPOT_URL = "/create"
 SPOT_PAGE_URL_PREFIX = "/spot"
 CLAIM_PAGE_URL_PREFIX = "/claim"
 
+# Automatic X announcements are strictly opt-in. The account handle is a safety
+# assertion only: the OAuth user Access Token and Secret determine which account
+# actually creates Posts, and the worker verifies that identity before posting.
+X_AUTO_POST_ENABLED = bool(
+    _optional_env_bool("NIMHUNT_X_AUTO_POST_ENABLED") or False
+)
+X_ACCOUNT_HANDLE = os.getenv("NIMHUNT_X_ACCOUNT_HANDLE", "").strip().lstrip("@")
+NIMHUNT_X_API_KEY_ENV = "NIMHUNT_X_API_KEY"
+NIMHUNT_X_API_SECRET_ENV = "NIMHUNT_X_API_SECRET"
+NIMHUNT_X_ACCESS_TOKEN_ENV = "NIMHUNT_X_ACCESS_TOKEN"
+NIMHUNT_X_ACCESS_TOKEN_SECRET_ENV = "NIMHUNT_X_ACCESS_TOKEN_SECRET"
+X_POST_INTERVAL_SECONDS = _env_int("NIMHUNT_X_POST_INTERVAL_SECONDS", 30)
+X_HTTP_TIMEOUT_SECONDS = _env_int("NIMHUNT_X_HTTP_TIMEOUT_SECONDS", 10)
+X_RETRY_AFTER_SECONDS = _env_int("NIMHUNT_X_RETRY_AFTER_SECONDS", 15 * 60)
+X_MAX_SPOTS_PER_RUN = _env_int("NIMHUNT_X_MAX_SPOTS_PER_RUN", 10)
+
 
 # -----------------------------
 # SPOT creation limits

@@ -1,0 +1,215 @@
+name: One-time mnemonic cleanup
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/mnemonic-cleanup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: helpers/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          npm ci --prefix helpers
+
+      - name: Apply cleanup
+        run: |
+          cat > helpers/test_mnemonic.mjs <<'EOF'
+          import * as NimiqModule from '@nimiq/core';
+
+          const Nimiq = (NimiqModule.default && NimiqModule.default.MnemonicUtils)
+            ? NimiqModule.default
+            : NimiqModule;
+
+          export function generateTestMnemonic() {
+            const generated = Nimiq.MnemonicUtils.generateMnemonic();
+            return Array.isArray(generated) ? generated.join(' ') : String(generated);
+          }
+          EOF
+
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, *, count=None):
+              file_path = Path(path)
+              text = file_path.read_text()
+              if old not in text:
+                  raise SystemExit(f"Expected text not found in {path}: {old[:100]!r}")
+              updated = text.replace(old, new, count if count is not None else -1)
+              file_path.write_text(updated)
+
+          # Node helper tests: create throwaway BIP39 mnemonics at runtime rather
+          # than storing complete phrases in the repository.
+          for path, variable in (
+              ('helpers/helper_safety.test.mjs', 'TEST_MNEMONIC'),
+              ('helpers/helper_rpc_send.test.mjs', 'MNEMONIC'),
+              ('helpers/helper_rpc_failure.test.mjs', 'MNEMONIC'),
+          ):
+              replace(
+                  path,
+                  "import { resolve } from 'node:path';\n",
+                  "import { resolve } from 'node:path';\nimport { generateTestMnemonic } from './test_mnemonic.mjs';\n",
+                  count=1,
+              )
+              file_path = Path(path)
+              text = file_path.read_text()
+              lines = text.splitlines()
+              phrase_line = next(
+                  (line for line in lines if line.startswith(f'const {variable} = ') and "'" in line),
+                  None,
+              )
+              if phrase_line is None:
+                  raise SystemExit(f'Hardcoded {variable} line not found in {path}')
+              replace(path, phrase_line, f'const {variable} = generateTestMnemonic();', count=1)
+
+          # Remove the obsolete fallback flag from all active tests and CI.
+          for path in (
+              'helpers/helper_safety.test.mjs',
+              'helpers/helper_rpc_send.test.mjs',
+              'helpers/helper_rpc_failure.test.mjs',
+              '.github/workflows/ci.yml',
+          ):
+              file_path = Path(path)
+              lines = [
+                  line for line in file_path.read_text().splitlines()
+                  if 'NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC' not in line
+              ]
+              file_path.write_text('\n'.join(lines) + '\n')
+
+          # The test that existed solely for the removed flag is obsolete.
+          safety = Path('helpers/helper_safety.test.mjs')
+          text = safety.read_text()
+          start = text.find("test('the removed default-mnemonic flag no longer supplies signing material'")
+          if start != -1:
+              end = text.find("\n\ntest(", start + 1)
+              if end == -1:
+                  raise SystemExit('Could not locate the end of the obsolete helper-safety test')
+              text = text[:start] + text[end + 2:]
+              safety.write_text(text)
+
+          constants = Path('constants.py')
+          constants.write_text('\n'.join(
+              line for line in constants.read_text().splitlines()
+              if 'NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC_ENV' not in line
+          ) + '\n')
+          replace(
+              'constants.py',
+              "# This valid TestAlbatross address is derived from the repository's public\n# development mnemonic at a reserved path. It is convenient for local testing\n# only: anyone can derive its key, so public deployments explicitly reject it.\n",
+              "# This valid TestAlbatross address belongs to a historic public development\n# wallet. It is convenient for local testing only and is not operator-controlled,\n# so public deployments explicitly reject it.\n",
+          )
+
+          # README: document the explicit local mnemonic requirement and remove
+          # every description of the deleted built-in fallback.
+          replace(
+              'README.md',
+              "Both public modes disable Desktop User, Test Location, mock data, placeholder\naddresses, fake sends, development seeds and the repository's public test mnemonic.\nThey also require explicit signer commands, private signing material, HTTPS chain\nendpoints and a valid operator-controlled cancellation-fee address.\n",
+              "Both public modes disable Desktop User, Test Location, mock data, placeholder\naddresses, fake sends and development seeds. They also require explicit signer\ncommands, private signing material, HTTPS chain endpoints and a valid\noperator-controlled cancellation-fee address.\n",
+          )
+          replace(
+              'README.md',
+              "The development launcher configures TestAlbatross, the bundled helper and the\npublic test mnemonic unless you override them:\n\n```bash\n./nimhunt_start_dev.sh\n```\n",
+              "The development launcher configures TestAlbatross and the bundled helper.\nSupply a dedicated TestAlbatross mnemonic explicitly before starting:\n\n```bash\nexport NIMHUNT_NIMIQ_MNEMONIC='your private TestAlbatross mnemonic'\n./nimhunt_start_dev.sh\n```\n\nUse a development-only mnemonic and never commit it. The launcher stops with a\nclear error if `NIMHUNT_NIMIQ_MNEMONIC` is missing.\n",
+          )
+          replace(
+              'README.md',
+              "| `NIMHUNT_PROJECT_DIR` | launcher directory | alternate project directory |\n| `NIMHUNT_HOST` | `0.0.0.0` | Uvicorn bind host |\n",
+              "| `NIMHUNT_PROJECT_DIR` | launcher directory | alternate project directory |\n| `NIMHUNT_NIMIQ_MNEMONIC` | none; required | development-only TestAlbatross signing mnemonic |\n| `NIMHUNT_HOST` | `0.0.0.0` | Uvicorn bind host |\n",
+          )
+          replace(
+              'README.md',
+              "### Public test mnemonic\n\nFor TestAlbatross only, the bundled helper can use its public deterministic test\nmnemonic:\n\n```bash\nexport NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC=1\n```\n\nThis is enabled by the local development launcher. It is intentionally public and\nmust never protect a publicly reachable deployment, even one using test NIM. Both\n`public-testnet` and `production` reject the flag and the same mnemonic if supplied\ndirectly through `NIMHUNT_NIMIQ_MNEMONIC`.\n\n",
+              "",
+          )
+          replace(
+              'README.md',
+              "In `development`, `trans_updater.py` may find the bundled helper automatically if\na permitted development mnemonic is available. Both public modes require explicit\nderive and send commands so the operator's intent is unambiguous.\n",
+              "In `development`, `trans_updater.py` may find the bundled helper automatically when\n`NIMHUNT_NIMIQ_MNEMONIC` is supplied. Both public modes require explicit derive\nand send commands so the operator's intent is unambiguous.\n",
+          )
+          replace(
+              'README.md',
+              "The variable retains its historical name for compatibility. The repository's\ndevelopment default is a real TestAlbatross address derived from the public test\nmnemonic, so anyone can spend from it. Both public modes explicitly reject that\naddress and require a different checksum-valid address controlled by the operator.\n",
+              "The variable retains its historical name for compatibility. The development\ndefault is a real TestAlbatross address belonging to a public test wallet, so it is\nnot operator-controlled. Both public modes explicitly reject that address and\nrequire a different checksum-valid address controlled by the operator.\n",
+          )
+          readme = Path('README.md')
+          readme.write_text('\n'.join(
+              line for line in readme.read_text().splitlines()
+              if 'NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC' not in line
+          ) + '\n')
+          replace(
+              'README.md',
+              "Use a newly generated **private testnet mnemonic**. Do not use the repository's\npublic development mnemonic and do not plan to reuse this seed on mainnet.\n",
+              "Use a newly generated **private testnet mnemonic** and do not plan to reuse this\nseed on mainnet.\n",
+          )
+          replace(
+              'README.md',
+              "Do not set `NIMHUNT_PRODUCTION`, `NIMHUNT_DEV_MASTER_SEED`, or\nDo not reuse the public development\nmnemonic. `NIMHUNT_NIMIQ_EXTERNAL_SIGNER` is unnecessary when using the bundled\nhelper.\n",
+              "Do not set `NIMHUNT_PRODUCTION` or `NIMHUNT_DEV_MASTER_SEED`.\n`NIMHUNT_NIMIQ_EXTERNAL_SIGNER` is unnecessary when using the bundled helper.\n",
+          )
+          PY
+
+      - name: Verify no obsolete material remains
+        run: |
+          if git grep -n 'NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC' -- ':!.github/workflows/mnemonic-cleanup.yml'; then
+            echo 'Obsolete fallback setting still exists.'
+            exit 1
+          fi
+          if git grep -n 'abandon abandon abandon abandon abandon abandon' -- ':!.github/workflows/mnemonic-cleanup.yml'; then
+            echo 'Embedded public mnemonic still exists.'
+            exit 1
+          fi
+          if git grep -n 'legal winner thank year wave sausage worth useful' -- ':!.github/workflows/mnemonic-cleanup.yml'; then
+            echo 'Embedded test mnemonic still exists.'
+            exit 1
+          fi
+
+      - name: Run complete verification
+        run: |
+          python -m pytest -q
+          npm test --prefix helpers
+          ruff check .
+          python -m compileall -q *.py tests
+          for file in static/*.js; do node --check --input-type=module < "$file"; done
+          for file in helpers/*.mjs; do node --check "$file"; done
+          for file in *.sh; do bash -n "$file"; done
+          python -m pip check
+          python -m pip_audit --progress-spinner off
+          npm audit --omit=dev --prefix helpers
+
+      - name: Commit cleanup
+        run: |
+          git config user.name 'NIMHunt'
+          git config user.email '300551717+NIMHunt@users.noreply.github.com'
+          git add README.md constants.py .github/workflows/ci.yml helpers
+          git commit -m 'Finish mnemonic cleanup'
+          git push origin HEAD:main

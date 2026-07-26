@@ -1,2 +1,2 @@
 Run the one-time mnemonic cleanup workflow.
-Capture the exact cleanup diagnostic output.
+Capture diagnostics using the checked-out repository root.

@@ -27,21 +27,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Capture Ruff output
-        shell: bash
-        run: |
-          set +e
-          ruff check . > /tmp/remainder-ruff.log 2>&1
-          code=$?
-          cat /tmp/remainder-ruff.log
-          echo "$code" > /tmp/remainder-ruff.exit
-          exit 0
+      - name: Apply Ruff import fix
+        run: ruff check --select I --fix tests/test_spot_remainder_refunds.py
 
-      - name: Upload Ruff output
+      - name: Upload fixed test
         uses: actions/upload-artifact@v4
         with:
-          name: remainder-ruff-output
-          path: |
-            /tmp/remainder-ruff.log
-            /tmp/remainder-ruff.exit
+          name: remainder-ruff-fixed-test
+          path: tests/test_spot_remainder_refunds.py
           retention-days: 1

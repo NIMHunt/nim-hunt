@@ -9,6 +9,7 @@ const { compactClaimBadgeStatus } = await import(moduleUrl);
 test('Claim badges omit trailing parenthetical detail', () => {
     assert.equal(compactClaimBadgeStatus('Success (Pending)'), 'Success');
     assert.equal(compactClaimBadgeStatus('Success(Pending)'), 'Success');
+    assert.equal(compactClaimBadgeStatus('Success(Processing)'), 'Success');
     assert.equal(compactClaimBadgeStatus('Success (Verifying)'), 'Success');
     assert.equal(compactClaimBadgeStatus('Won! (Payment pending)'), 'Won!');
 });
@@ -20,8 +21,9 @@ test('Claim badges preserve statuses without trailing detail', () => {
     assert.equal(compactClaimBadgeStatus('Success (Pending) later'), 'Success (Pending) later');
 });
 
-test('Claim badge compactor is scoped to the Claim badge list', () => {
-    assert.match(moduleSource, /getElementById\('claim-detail-list'\)/);
+test('Claim badge compactor covers detail and My Claims badge lists only', () => {
+    assert.match(moduleSource, /'claim-detail-list'/);
+    assert.match(moduleSource, /'my-claims-list'/);
     assert.match(moduleSource, /querySelectorAll\('\.spot-badge'\)/);
     assert.doesNotMatch(moduleSource, /claim-status-keyword/);
 });

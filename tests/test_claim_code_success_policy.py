@@ -45,7 +45,10 @@ class ClaimCodeSuccessRaceTest(unittest.IsolatedAsyncioTestCase):
                 claim_duration=600,
                 max_claims_per_user=1,
                 max_total_claims=2,
-                total_value=2 * const.MIN_STANDARD_CLAIM_PAYOUT,
+                total_value=max(
+                    const.MIN_SPOT_TOTAL_VALUE,
+                    2 * const.MIN_STANDARD_CLAIM_PAYOUT,
+                ),
                 starts_at=now - 30,
                 ends_at=const.MIN_SPOT_ENDS_AFTER_SECONDS,
                 use_password=True,

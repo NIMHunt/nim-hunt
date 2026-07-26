@@ -48,7 +48,10 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
             total_value = (
                 const.MIN_PRIZEDRAW_PRIZE_PAYOUT * prize_count
                 if is_prizedraw
-                else const.MIN_STANDARD_CLAIM_PAYOUT * max_total_claims
+                else max(
+                    const.MIN_SPOT_TOTAL_VALUE,
+                    const.MIN_STANDARD_CLAIM_PAYOUT * max_total_claims,
+                )
             )
             spot_id = await db_access.create_spot(
                 db,

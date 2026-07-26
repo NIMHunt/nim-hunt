@@ -41,7 +41,7 @@ def test_full_pending_deposit_is_processing_not_partial():
     assert result['funding_complete'] is False
 
 
-def test_confirmed_full_funding_is_ready_before_internal_fee_submission():
+def test_confirmed_full_funding_waits_for_internal_fee_submission():
     total_value = 100 * const.LUNA_PER_NIM
     creation_fee = const.LUNA_PER_NIM
     required = total_value + creation_fee
@@ -62,12 +62,12 @@ def test_confirmed_full_funding_is_ready_before_internal_fee_submission():
     )
 
     assert result['status'] == 'ready'
-    assert result['fee_paid'] is True
+    assert result['fee_paid'] is False
     assert result['fee_submitted'] is False
     assert result['fee_status'] == 'preparing'
 
 
-def test_broadcast_fee_unlocks_ready_before_confirmation():
+def test_broadcast_fee_still_waits_for_confirmation():
     total_value = 100 * const.LUNA_PER_NIM
     creation_fee = const.LUNA_PER_NIM
     required = total_value + creation_fee
@@ -98,13 +98,13 @@ def test_broadcast_fee_unlocks_ready_before_confirmation():
     )
 
     assert result['status'] == 'ready'
-    assert result['fee_paid'] is True
+    assert result['fee_paid'] is False
     assert result['fee_submitted'] is True
     assert result['fee_confirmed'] is False
     assert result['fee_status'] == 'pending'
 
 
-def test_local_fee_intent_is_invisible_and_does_not_block_ready_status():
+def test_local_fee_intent_requires_attention_and_blocks_publication():
     total_value = 100 * const.LUNA_PER_NIM
     creation_fee = const.LUNA_PER_NIM
     required = total_value + creation_fee
@@ -135,7 +135,7 @@ def test_local_fee_intent_is_invisible_and_does_not_block_ready_status():
     )
 
     assert result['status'] == 'ready'
-    assert result['fee_paid'] is True
+    assert result['fee_paid'] is False
     assert result['fee_submitted'] is False
     assert result['requires_attention'] is True
     assert result['fee_status'] == 'attention_required'

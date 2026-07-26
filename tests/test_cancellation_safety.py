@@ -14,7 +14,37 @@ class CancellationSafetyTest(IsolatedAsyncioTestCase):
         cancellation_safety._ORIGINAL_SUBMIT = self.original
         cancellation_safety._SPOT_LOCKS.clear()
 
+        async def passthrough_policy(
+            _db,
+            *,
+            spot_id,
+            cancellation_fee=None,
+            fee_address=None,
+        ):
+            return (
+                {
+                    "spot_id": int(spot_id),
+                    "fee_amount": int(
+                        const.SPOT_CANCELLATION_FEE
+                        if cancellation_fee is None
+                        else cancellation_fee
+                    ),
+                    "fee_address": str(
+                        fee_address or const.SPOT_CANCELLATION_FEE_ADDRESS
+                    ),
+                },
+                False,
+            )
+
+        self.policy_patcher = mock.patch.object(
+            cancellation_safety,
+            "_snapshot_cancellation_policy",
+            side_effect=passthrough_policy,
+        )
+        self.policy_patcher.start()
+
     def tearDown(self) -> None:
+        self.policy_patcher.stop()
         cancellation_safety._ORIGINAL_SUBMIT = self.previous_original
         cancellation_safety._SPOT_LOCKS.clear()
 

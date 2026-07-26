@@ -1,4 +1,4 @@
-name: Temporary apply remainder refund patch
+name: Temporary apply remainder refund implementation
 
 on:
   pull_request:
@@ -20,7 +20,7 @@ jobs:
           ref: agent/prelaunch-transaction-review
           fetch-depth: 0
 
-      - name: Apply verified patch and remove temporary files
+      - name: Apply verified source and tests
         shell: bash
         run: |
           set -euo pipefail
@@ -28,7 +28,10 @@ jobs:
           echo 'be7bbf702799fdffb2ed4828fb722708367e25b2c10c46f0da1f30f8c3107037  /tmp/remainder.patch' | sha256sum -c -
           git apply --check /tmp/remainder.patch
           git apply /tmp/remainder.patch
-          rm -rf .github/remainder-patch
+          mkdir -p tests
+          cat .github/remainder-test/part* | base64 -d | gzip -d > tests/test_spot_remainder_refunds.py
+          echo '38653b40c3675c61a0a1475fc094504ae6a32b205bd95da1b69a4b72e9f75707  tests/test_spot_remainder_refunds.py' | sha256sum -c -
+          rm -rf .github/remainder-patch .github/remainder-test
           rm -f .github/workflows/temporary-remainder-review-export.yml
           git config user.name 'NIMHunt'
           git config user.email 'noreply@nimhunt.app'

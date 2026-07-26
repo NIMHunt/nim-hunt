@@ -116,17 +116,10 @@ class SubmittedChainTransaction:
 
 
 def _helper_seed_configured() -> bool:
-    mnemonic_env = getattr(const, "NIMHUNT_NIMIQ_MNEMONIC_ENV", "NIMHUNT_NIMIQ_MNEMONIC")
-    default_test_env = getattr(
-        const,
-        "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC_ENV",
-        "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC",
+    mnemonic_env = getattr(
+        const, "NIMHUNT_NIMIQ_MNEMONIC_ENV", "NIMHUNT_NIMIQ_MNEMONIC"
     )
-    if os.getenv(mnemonic_env):
-        return True
-    if _env_enabled(default_test_env) and str(getattr(const, "NIMIQ_NETWORK", "TestAlbatross")) != "MainAlbatross":
-        return True
-    return False
+    return bool(os.getenv(mnemonic_env))
 
 
 def _default_helper_command() -> list[str] | None:

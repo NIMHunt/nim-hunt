@@ -630,7 +630,6 @@ class ClaimLocationGuardRuntimeTest(unittest.TestCase):
             {
                 "NIMHUNT_DEPLOYMENT_MODE": "development",
                 "NIMHUNT_NIMIQ_NETWORK": "TestAlbatross",
-                "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC": "1",
             }
         )
         command = (

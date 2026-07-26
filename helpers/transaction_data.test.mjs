@@ -3,12 +3,13 @@ import test from 'node:test';
 
 import * as NimiqModule from '@nimiq/core';
 import { encodeTransactionMemo } from './transaction_data.mjs';
+import { generateTestMnemonic } from './test_mnemonic.mjs';
 
 const Nimiq = (NimiqModule.default && NimiqModule.default.Client)
   ? NimiqModule.default
   : NimiqModule;
 
-const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+const TEST_MNEMONIC = generateTestMnemonic();
 
 test('memo encoding is trimmed, UTF-8, and bounded', () => {
   assert.deepEqual(encodeTransactionMemo(null), new Uint8Array());

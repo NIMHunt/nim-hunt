@@ -3,15 +3,15 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import http from 'node:http';
 import { resolve } from 'node:path';
+import { generateTestMnemonic } from './test_mnemonic.mjs';
 
 const helper = resolve(import.meta.dirname, 'nimiq_helper.mjs');
-const MNEMONIC = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
+const MNEMONIC = generateTestMnemonic();
 const BASE_ENV = {
   ...process.env,
   NIMHUNT_DEPLOYMENT_MODE: 'public-testnet',
   NIMHUNT_PRODUCTION: '',
   NIMHUNT_NIMIQ_MNEMONIC: MNEMONIC,
-  NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: '0',
 };
 
 function derive(index) {

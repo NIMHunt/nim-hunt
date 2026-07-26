@@ -32,7 +32,6 @@ def clean_environment() -> dict[str, str]:
         "NIMHUNT_NIMIQ_SEND_COMMAND",
         "NIMHUNT_NIMIQ_MNEMONIC",
         "NIMHUNT_NIMIQ_EXTERNAL_SIGNER",
-        "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC",
         "NIMHUNT_DEV_MASTER_SEED",
         "NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM",
         "NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM",
@@ -123,17 +122,13 @@ class DeploymentModeParsingTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must be development, public-testnet, or production", result.stderr)
 
-    def test_default_helper_accepts_documented_true_alias(self):
-        with (
-            mock.patch.dict(
-                os.environ,
-                {
-                    "NIMHUNT_NIMIQ_MNEMONIC": "",
-                    "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC": "yes",
-                },
-                clear=False,
-            ),
-            mock.patch.object(const, "NIMIQ_NETWORK", "TestAlbatross"),
+    def test_default_helper_requires_an_explicit_mnemonic(self):
+        with mock.patch.dict(
+            os.environ, {"NIMHUNT_NIMIQ_MNEMONIC": ""}, clear=False
+        ):
+            self.assertFalse(trans_updater._helper_seed_configured())
+        with mock.patch.dict(
+            os.environ, {"NIMHUNT_NIMIQ_MNEMONIC": "test-only mnemonic"}, clear=False
         ):
             self.assertTrue(trans_updater._helper_seed_configured())
 
@@ -189,18 +184,10 @@ class PublicDeploymentValidationTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("public-testnet requires TestAlbatross", result.stderr)
 
-    def test_public_testnet_rejects_public_default_mnemonic_flag(self):
-        environment = valid_public_environment("public-testnet")
-        environment["NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC"] = "1"
-        result = run_python("import main; main.validate_deployment_safety()", environment)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("must not be enabled", result.stderr)
-
     def test_public_testnet_rejects_public_default_mnemonic_when_set_directly(self):
         environment = valid_public_environment("public-testnet")
-        environment["NIMHUNT_NIMIQ_MNEMONIC"] = (
-            "abandon abandon abandon abandon abandon abandon abandon abandon "
-            "abandon abandon abandon about"
+        environment["NIMHUNT_NIMIQ_MNEMONIC"] = " ".join(
+            ["abandon"] * 11 + ["about"]
         )
         result = run_python("import main; main.validate_deployment_safety()", environment)
         self.assertNotEqual(result.returncode, 0)
@@ -227,7 +214,6 @@ class PublicDeploymentValidationTest(unittest.TestCase):
                     "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND": "node /app/helpers/nimiq_helper.mjs",
                     "NIMHUNT_NIMIQ_SEND_COMMAND": "node /app/helpers/nimiq_helper.mjs",
                     "NIMHUNT_NIMIQ_MNEMONIC": "private operator mnemonic words",
-                    "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC": "",
                     "NIMHUNT_DEV_MASTER_SEED": "",
                 },
                 clear=False,
@@ -292,7 +278,6 @@ class PublicDeploymentValidationTest(unittest.TestCase):
                     "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND": "node /app/helpers/nimiq_helper.mjs",
                     "NIMHUNT_NIMIQ_SEND_COMMAND": "node /app/helpers/nimiq_helper.mjs",
                     "NIMHUNT_NIMIQ_MNEMONIC": "private operator mnemonic words",
-                    "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC": "",
                     "NIMHUNT_DEV_MASTER_SEED": "",
                 },
                 clear=False,

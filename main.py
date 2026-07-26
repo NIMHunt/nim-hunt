@@ -1,6 +1,7 @@
 """NimHunt FastAPI application setup and background-service lifecycle."""
 
 import asyncio
+import hashlib
 import logging
 import os
 import urllib.error
@@ -31,9 +32,19 @@ install_funding_flow()
 
 logger = logging.getLogger(__name__)
 
+_PUBLIC_TEST_MNEMONIC_SHA256 = "c557eec878dfd852ba3f88087c4f350f09c55537ab5e549c3cd14320ec3cef38"
+
 
 def _env_enabled(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_public_test_mnemonic(value: str) -> bool:
+    normalised = " ".join(str(value or "").split()).lower()
+    if not normalised:
+        return False
+    digest = hashlib.sha256(normalised.encode("utf-8")).hexdigest()
+    return digest == _PUBLIC_TEST_MNEMONIC_SHA256
 
 
 def _endpoint_host(value: str) -> str:
@@ -105,14 +116,6 @@ def validate_deployment_safety() -> None:
     if os.getenv(dev_seed_env):
         unsafe.append(f"{dev_seed_env} must not be set")
 
-    default_mnemonic_env = getattr(
-        const,
-        "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC_ENV",
-        "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC",
-    )
-    if _env_enabled(default_mnemonic_env):
-        unsafe.append(f"{default_mnemonic_env} must not be enabled")
-
     derive_env = getattr(
         const,
         "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND_ENV",
@@ -134,11 +137,7 @@ def validate_deployment_safety() -> None:
         const, "NIMHUNT_NIMIQ_MNEMONIC_ENV", "NIMHUNT_NIMIQ_MNEMONIC"
     )
     mnemonic = os.getenv(mnemonic_env, "").strip()
-    public_default = (
-        "abandon abandon abandon abandon abandon abandon abandon abandon "
-        "abandon abandon abandon about"
-    )
-    if mnemonic and " ".join(mnemonic.split()).lower() == public_default:
+    if mnemonic and _is_public_test_mnemonic(mnemonic):
         unsafe.append(f"{mnemonic_env} must not contain the public default test mnemonic")
 
     external_signer_env = getattr(

@@ -261,9 +261,9 @@ variable is absent. `NIMHUNT_DEPLOYMENT_MODE` is preferred. Contradictory old an
 new settings are rejected rather than silently resolved.
 
 Both public modes disable Desktop User, Test Location, mock data, placeholder
-addresses, fake sends, development seeds and the repository's public test mnemonic.
-They also require explicit signer commands, private signing material, HTTPS chain
-endpoints and a valid operator-controlled cancellation-fee address.
+addresses, fake sends and development seeds. They also require explicit signer
+commands, private signing material, HTTPS chain endpoints and a valid
+operator-controlled cancellation-fee address.
 
 ## Requirements
 
@@ -303,12 +303,16 @@ the pinned test, lint and dependency-audit tools used by contributors and CI.
 
 ## Run locally
 
-The development launcher configures TestAlbatross, the bundled helper and the
-public test mnemonic unless you override them:
+The development launcher configures TestAlbatross and the bundled helper.
+Supply a dedicated TestAlbatross mnemonic explicitly before starting:
 
 ```bash
+export NIMHUNT_NIMIQ_MNEMONIC='your private TestAlbatross mnemonic'
 ./nimhunt_start_dev.sh
 ```
+
+Use a development-only mnemonic and never commit it. The launcher stops with a
+clear error if `NIMHUNT_NIMIQ_MNEMONIC` is missing.
 
 Open:
 
@@ -328,6 +332,7 @@ Development launcher settings:
 | Variable | Default | Purpose |
 |---|---|---|
 | `NIMHUNT_PROJECT_DIR` | launcher directory | alternate project directory |
+| `NIMHUNT_NIMIQ_MNEMONIC` | none; required | development-only TestAlbatross signing mnemonic |
 | `NIMHUNT_HOST` | `0.0.0.0` | Uvicorn bind host |
 | `NIMHUNT_PORT` | `8000` | Uvicorn port |
 
@@ -393,20 +398,6 @@ committed file, shell history or the repository. The bundled sender uses
 more suitable for hosted backends than requiring the Railway container to form
 its own peer-to-peer Nimiq consensus connection.
 
-### Public test mnemonic
-
-For TestAlbatross only, the bundled helper can use its public deterministic test
-mnemonic:
-
-```bash
-export NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC=1
-```
-
-This is enabled by the local development launcher. It is intentionally public and
-must never protect a publicly reachable deployment, even one using test NIM. Both
-`public-testnet` and `production` reject the flag and the same mnemonic if supplied
-directly through `NIMHUNT_NIMIQ_MNEMONIC`.
-
 ### Derive and send commands
 
 Python communicates with a signer through JSON on standard input/output. To use
@@ -425,9 +416,9 @@ startup, so a missing or inconsistent send-side key fails before a payout is due
 This allows a deployment to keep key access inside a separate process or
 hardware-backed service without giving NimHunt the private key itself.
 
-In `development`, `trans_updater.py` may find the bundled helper automatically if
-a permitted development mnemonic is available. Both public modes require explicit
-derive and send commands so the operator's intent is unambiguous.
+In `development`, `trans_updater.py` may find the bundled helper automatically when
+`NIMHUNT_NIMIQ_MNEMONIC` is supplied. Both public modes require explicit derive
+and send commands so the operator's intent is unambiguous.
 
 A custom signer that manages its own keys may omit `NIMHUNT_NIMIQ_MNEMONIC`, but
 then it must use custom commands and set `NIMHUNT_NIMIQ_EXTERNAL_SIGNER=1`. The
@@ -491,10 +482,10 @@ Set the checksummed Nimiq address that receives both creation and cancellation f
 export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ45 ... real address ...'
 ```
 
-The variable retains its historical name for compatibility. The repository's
-development default is a real TestAlbatross address derived from the public test
-mnemonic, so anyone can spend from it. Both public modes explicitly reject that
-address and require a different checksum-valid address controlled by the operator.
+The variable retains its historical name for compatibility. The development
+default is a real TestAlbatross address belonging to a public test wallet, so it is
+not operator-controlled. Both public modes explicitly reject that address and
+require a different checksum-valid address controlled by the operator.
 The destination is also snapshotted onto each new Spot for its creation fee.
 
 ## Environment variable reference
@@ -535,7 +526,6 @@ still use the setting for controlled experiments.
 |---|---|---|
 | `NIMHUNT_NIMIQ_MNEMONIC` | none | mnemonic used by bundled helper |
 | `NIMHUNT_NIMIQ_MNEMONIC_PASSWORD` | none | optional BIP39 passphrase |
-| `NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC` | `0` | permit the public mnemonic in local development only |
 | `NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND` | auto only in development | JSON address-derivation command |
 | `NIMHUNT_NIMIQ_SEND_COMMAND` | auto only in development | JSON signing/broadcast command |
 | `NIMHUNT_NIMIQ_EXTERNAL_SIGNER` | `0` | assert that custom signer commands manage private keys themselves |
@@ -585,8 +575,8 @@ passes before traffic is accepted.
 
 ### Public TestAlbatross environment
 
-Use a newly generated **private testnet mnemonic**. Do not use the repository's
-public development mnemonic and do not plan to reuse this seed on mainnet.
+Use a newly generated **private testnet mnemonic** and do not plan to reuse this
+seed on mainnet.
 
 ```bash
 export NIMHUNT_DEPLOYMENT_MODE=public-testnet
@@ -720,10 +710,8 @@ NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
 NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS=OPERATOR_TESTNET_NQ_ADDRESS
 ```
 
-Do not set `NIMHUNT_PRODUCTION`, `NIMHUNT_DEV_MASTER_SEED`, or
-`NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC`. Do not reuse the public development
-mnemonic. `NIMHUNT_NIMIQ_EXTERNAL_SIGNER` is unnecessary when using the bundled
-helper.
+Do not set `NIMHUNT_PRODUCTION` or `NIMHUNT_DEV_MASTER_SEED`.
+`NIMHUNT_NIMIQ_EXTERNAL_SIGNER` is unnecessary when using the bundled helper.
 
 #### Railway variables: MainAlbatross production
 

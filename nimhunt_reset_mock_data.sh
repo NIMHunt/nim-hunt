@@ -47,12 +47,19 @@ if [ ! -f "$HELPER_PATH" ] || [ ! -d "$NIMIQ_CORE_PATH" ]; then
     exit 1
 fi
 
+if [ -z "${NIMHUNT_NIMIQ_MNEMONIC:-}" ]; then
+    echo "NIMHUNT_NIMIQ_MNEMONIC is not set."
+    echo "Export a dedicated TestAlbatross mnemonic before resetting mock data."
+    echo "The repository no longer contains a built-in development mnemonic."
+    read -r -p "Press Enter to close..." _
+    exit 1
+fi
+
 source venv/bin/activate
 
 export NIMHUNT_DEPLOYMENT_MODE="${NIMHUNT_DEPLOYMENT_MODE:-development}"
 
 export NIMHUNT_NIMIQ_NETWORK="${NIMHUNT_NIMIQ_NETWORK:-TestAlbatross}"
-export NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC="${NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC:-1}"
 export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND="${NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND:-node \"${HELPER_PATH}\"}"
 export NIMHUNT_NIMIQ_SEND_COMMAND="${NIMHUNT_NIMIQ_SEND_COMMAND:-node \"${HELPER_PATH}\"}"
 

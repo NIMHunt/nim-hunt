@@ -37,11 +37,6 @@ SAFE_PRODUCTION_SETTINGS = {
 def patched_settings(**overrides):
     settings = {**SAFE_PRODUCTION_SETTINGS, **overrides}
     dev_seed_env = getattr(const, "NIMHUNT_DEV_MASTER_SEED_ENV", "NIMHUNT_DEV_MASTER_SEED")
-    default_mnemonic_env = getattr(
-        const,
-        "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC_ENV",
-        "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC",
-    )
     with ExitStack() as stack:
         derive_command_env = getattr(
             const,
@@ -58,7 +53,6 @@ def patched_settings(**overrides):
                 os.environ,
                 {
                     dev_seed_env: "",
-                    default_mnemonic_env: "",
                     derive_command_env: "configured-derive-helper",
                     send_command_env: "configured-send-helper",
                     "NIMHUNT_NIMIQ_MNEMONIC": "private operator mnemonic words",
@@ -103,16 +97,6 @@ class ProductionSafetyValidationTest(unittest.TestCase):
         dev_seed_env = getattr(const, "NIMHUNT_DEV_MASTER_SEED_ENV", "NIMHUNT_DEV_MASTER_SEED")
         with patched_settings(), mock.patch.dict(os.environ, {dev_seed_env: "unsafe seed"}, clear=False):
             with self.assertRaisesRegex(RuntimeError, dev_seed_env):
-                main.validate_deployment_safety()
-
-    def test_production_refuses_public_default_test_mnemonic(self):
-        env_name = getattr(
-            const,
-            "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC_ENV",
-            "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC",
-        )
-        with patched_settings(), mock.patch.dict(os.environ, {env_name: "1"}, clear=False):
-            with self.assertRaisesRegex(RuntimeError, env_name):
                 main.validate_deployment_safety()
 
     def test_production_environment_disables_test_helpers_at_import(self):

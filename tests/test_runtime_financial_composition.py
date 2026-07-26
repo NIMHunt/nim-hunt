@@ -14,7 +14,6 @@ def test_production_runtime_installs_financial_guards_but_keeps_core_deposit_rec
             "NIMHUNT_DEPLOYMENT_MODE": "development",
             "NIMHUNT_PRODUCTION": "",
             "NIMHUNT_NIMIQ_NETWORK": "TestAlbatross",
-            "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC": "1",
         }
         code = """
 import main

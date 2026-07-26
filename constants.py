@@ -269,9 +269,9 @@ PRIZEDRAW_SPOT_CREATION_FEE = _env_nim_amount(
     luna_per_nim=LUNA_PER_NIM,
 )
 
-# This valid TestAlbatross address is derived from the repository's public
-# development mnemonic at a reserved path. It is convenient for local testing
-# only: anyone can derive its key, so public deployments explicitly reject it.
+# This valid TestAlbatross address belongs to a historic public development
+# wallet. It is convenient for local testing only and is not operator-controlled,
+# so public deployments explicitly reject it.
 DEV_PLATFORM_FEE_ADDRESS = "NQ35 6EUX JD08 6F88 KYA2 EDMC V3BC PXLB ELSB"
 
 # The operator supplies a human-readable cancellation fee, converted exactly
@@ -367,7 +367,6 @@ NIMHUNT_MASTER_SEED_ENV = "NIMHUNT_MASTER_SEED_ENC"
 NIMHUNT_MASTER_SEED_SECRET_ENV = "NIMHUNT_MASTER_SEED_SECRET"
 NIMHUNT_DEV_MASTER_SEED_ENV = "NIMHUNT_DEV_MASTER_SEED"
 NIMHUNT_NIMIQ_MNEMONIC_ENV = "NIMHUNT_NIMIQ_MNEMONIC"
-NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC_ENV = "NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC"
 NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND_ENV = "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND"
 NIMHUNT_NIMIQ_SEND_COMMAND_ENV = "NIMHUNT_NIMIQ_SEND_COMMAND"
 NIMHUNT_NIMIQ_EXTERNAL_SIGNER_ENV = "NIMHUNT_NIMIQ_EXTERNAL_SIGNER"

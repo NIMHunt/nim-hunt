@@ -545,11 +545,10 @@ async def _due_retry_spots(
 
 async def prewarm_spot_card(spot: dict[str, Any]) -> None:
     """Generate/cache the social image before X crawls the shared Spot URL."""
-    ref = str(spot.get(schema.SPOT_LINK) or spot[schema.SPOT_ID])
     is_prizedraw = spot.get(schema.PRIZEDRAW_PRIZE_COUNT) is not None
     await asyncio.to_thread(
         social_card_images.cached_card,
-        f"spot:{ref}",
+        social_card_images.spot_card_cache_key(spot),
         lambda: social_card_images.render_spot_card(spot, is_prizedraw),
     )
 

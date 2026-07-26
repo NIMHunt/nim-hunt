@@ -68,6 +68,34 @@ def test_spot_metadata_uses_requested_title_description_and_map(monkeypatch) -> 
     assert "250-metre claim radius" in meta.image_alt
 
 
+def test_draft_map_changes_create_a_new_social_card_revision(monkeypatch) -> None:
+    monkeypatch.delenv("NIMHUNT_PUBLIC_BASE_URL", raising=False)
+    original = spot_fixture()
+    moved = {**original, schema.SPOT_LAT: 55.9533, schema.SPOT_LONG: -3.1883}
+    resized = {**original, schema.SPOT_RADIUS: 500}
+
+    original_revision = social_card_images.spot_card_revision(original)
+    assert social_card_images.spot_card_revision(moved) != original_revision
+    assert social_card_images.spot_card_revision(resized) != original_revision
+    assert social_card_images.spot_card_cache_key(moved) != (
+        social_card_images.spot_card_cache_key(original)
+    )
+    assert social_preview.spot_metadata(moved).image_url != (
+        social_preview.spot_metadata(original).image_url
+    )
+
+    draft = {**moved, schema.SPOT_STATUS: 0}
+    assert not social_card_images.spot_is_public(draft, now=0)
+
+
+def test_non_visual_spot_copy_does_not_change_map_card_revision() -> None:
+    original = spot_fixture()
+    renamed = {**original, schema.SPOT_TITLE: "A Different Title"}
+    assert social_card_images.spot_card_revision(renamed) == (
+        social_card_images.spot_card_revision(original)
+    )
+
+
 def test_claim_metadata_does_not_leak_spot_details(monkeypatch) -> None:
     monkeypatch.delenv("NIMHUNT_PUBLIC_BASE_URL", raising=False)
     meta = social_preview.claim_metadata(123)

@@ -78,7 +78,6 @@ jobs:
           NIMHUNT_DB_PATH: ${{ runner.temp }}/nimhunt-ci.db
           NIMHUNT_DEPLOYMENT_MODE: development
           NIMHUNT_NIMIQ_NETWORK: TestAlbatross
-          NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: "1"
         run: python spoof.py
 
       - name: Check installed dependencies

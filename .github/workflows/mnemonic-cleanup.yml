@@ -69,8 +69,6 @@ jobs:
               updated = text.replace(old, new, count if count is not None else -1)
               file_path.write_text(updated)
 
-          # Node helper tests: create throwaway BIP39 mnemonics at runtime rather
-          # than storing complete phrases in the repository.
           for path, variable in (
               ('helpers/helper_safety.test.mjs', 'TEST_MNEMONIC'),
               ('helpers/helper_rpc_send.test.mjs', 'MNEMONIC'),
@@ -83,17 +81,17 @@ jobs:
                   count=1,
               )
               file_path = Path(path)
-              text = file_path.read_text()
-              lines = text.splitlines()
               phrase_line = next(
-                  (line for line in lines if line.startswith(f'const {variable} = ') and "'" in line),
+                  (
+                      line for line in file_path.read_text().splitlines()
+                      if line.startswith(f'const {variable} = ') and "'" in line
+                  ),
                   None,
               )
               if phrase_line is None:
                   raise SystemExit(f'Hardcoded {variable} line not found in {path}')
               replace(path, phrase_line, f'const {variable} = generateTestMnemonic();', count=1)
 
-          # Remove the obsolete fallback flag from all active tests and CI.
           for path in (
               'helpers/helper_safety.test.mjs',
               'helpers/helper_rpc_send.test.mjs',
@@ -107,7 +105,6 @@ jobs:
               ]
               file_path.write_text('\n'.join(lines) + '\n')
 
-          # The test that existed solely for the removed flag is obsolete.
           safety = Path('helpers/helper_safety.test.mjs')
           text = safety.read_text()
           start = text.find("test('the removed default-mnemonic flag no longer supplies signing material'")
@@ -129,8 +126,6 @@ jobs:
               "# This valid TestAlbatross address belongs to a historic public development\n# wallet. It is convenient for local testing only and is not operator-controlled,\n# so public deployments explicitly reject it.\n",
           )
 
-          # README: document the explicit local mnemonic requirement and remove
-          # every description of the deleted built-in fallback.
           replace(
               'README.md',
               "Both public modes disable Desktop User, Test Location, mock data, placeholder\naddresses, fake sends, development seeds and the repository's public test mnemonic.\nThey also require explicit signer commands, private signing material, HTTPS chain\nendpoints and a valid operator-controlled cancellation-fee address.\n",
@@ -161,11 +156,6 @@ jobs:
               "The variable retains its historical name for compatibility. The repository's\ndevelopment default is a real TestAlbatross address derived from the public test\nmnemonic, so anyone can spend from it. Both public modes explicitly reject that\naddress and require a different checksum-valid address controlled by the operator.\n",
               "The variable retains its historical name for compatibility. The development\ndefault is a real TestAlbatross address belonging to a public test wallet, so it is\nnot operator-controlled. Both public modes explicitly reject that address and\nrequire a different checksum-valid address controlled by the operator.\n",
           )
-          readme = Path('README.md')
-          readme.write_text('\n'.join(
-              line for line in readme.read_text().splitlines()
-              if 'NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC' not in line
-          ) + '\n')
           replace(
               'README.md',
               "Use a newly generated **private testnet mnemonic**. Do not use the repository's\npublic development mnemonic and do not plan to reuse this seed on mainnet.\n",
@@ -173,9 +163,15 @@ jobs:
           )
           replace(
               'README.md',
-              "Do not set `NIMHUNT_PRODUCTION`, `NIMHUNT_DEV_MASTER_SEED`, or\nDo not reuse the public development\nmnemonic. `NIMHUNT_NIMIQ_EXTERNAL_SIGNER` is unnecessary when using the bundled\nhelper.\n",
+              "Do not set `NIMHUNT_PRODUCTION`, `NIMHUNT_DEV_MASTER_SEED`, or\n`NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC`. Do not reuse the public development\nmnemonic. `NIMHUNT_NIMIQ_EXTERNAL_SIGNER` is unnecessary when using the bundled\nhelper.\n",
               "Do not set `NIMHUNT_PRODUCTION` or `NIMHUNT_DEV_MASTER_SEED`.\n`NIMHUNT_NIMIQ_EXTERNAL_SIGNER` is unnecessary when using the bundled helper.\n",
           )
+
+          readme = Path('README.md')
+          readme.write_text('\n'.join(
+              line for line in readme.read_text().splitlines()
+              if 'NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC' not in line
+          ) + '\n')
           PY
 
       - name: Verify no obsolete material remains

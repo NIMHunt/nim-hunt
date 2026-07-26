@@ -13,7 +13,6 @@ import db_access
 import settlement_updater
 import trans_updater
 
-
 FUNDING_ADDRESS = const.DEV_PLATFORM_FEE_ADDRESS
 
 

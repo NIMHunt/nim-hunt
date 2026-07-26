@@ -45,18 +45,7 @@ jobs:
           npm ci --prefix helpers
 
       - name: Run Python tests
-        shell: bash
-        run: |
-          set -o pipefail
-          python -m pytest -q 2>&1 | tee pytest-output.txt
-
-      - name: Upload temporary pytest diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-output
-          path: pytest-output.txt
-          if-no-files-found: ignore
+        run: python -m pytest -q
 
       - name: Run Node tests
         run: npm test --prefix helpers

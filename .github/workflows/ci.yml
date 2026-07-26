@@ -44,12 +44,6 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-dev.txt
           npm ci --prefix helpers
 
-      - name: Run Python tests
-        run: python -m pytest -q
-
-      - name: Run Node tests
-        run: npm test --prefix helpers
-
       - name: Auto-format temporary Ruff diagnostic
         run: ruff check --fix tests/test_refund_address_safety.py
 
@@ -58,6 +52,12 @@ jobs:
         with:
           name: ruff-formatted-test
           path: tests/test_refund_address_safety.py
+
+      - name: Run Python tests
+        run: python -m pytest -q
+
+      - name: Run Node tests
+        run: npm test --prefix helpers
 
       - name: Run Python lint and compilation checks
         run: |

@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 const helper = resolve(import.meta.dirname, 'nimiq_helper.mjs');
-const PUBLIC_DEFAULT = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+const TEST_MNEMONIC = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
 const REQUEST = JSON.stringify({
   action: 'derive_spot_deposit_address',
   network: 'TestAlbatross',
@@ -21,69 +21,42 @@ function runHelper(extraEnvironment) {
     env: {
       ...process.env,
       NIMHUNT_NIMIQ_MNEMONIC: '',
-      NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: '0',
+      NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: '',
       NIMHUNT_PRODUCTION: '',
       ...extraEnvironment,
     },
   });
 }
 
-test('development accepts documented true aliases for the public test mnemonic flag', () => {
+test('development requires an explicitly supplied mnemonic', () => {
   const result = runHelper({
     NIMHUNT_DEPLOYMENT_MODE: 'development',
-    NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: 'true',
   });
-  assert.equal(result.status, 0, result.stdout || result.stderr);
-  const response = JSON.parse(result.stdout);
-  assert.equal(response.ok, true);
-  assert.match(response.address, /^NQ/);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /set NIMHUNT_NIMIQ_MNEMONIC/i);
 });
 
-test('public-testnet rejects the public default mnemonic flag', () => {
+test('the removed default-mnemonic flag no longer supplies signing material', () => {
   const result = runHelper({
-    NIMHUNT_DEPLOYMENT_MODE: 'public-testnet',
+    NIMHUNT_DEPLOYMENT_MODE: 'development',
     NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: '1',
   });
   assert.notEqual(result.status, 0);
-  assert.match(result.stdout, /public default test mnemonic/i);
+  assert.match(result.stdout, /set NIMHUNT_NIMIQ_MNEMONIC/i);
 });
 
-test('public-testnet rejects the public default mnemonic when supplied directly', () => {
+test('public-testnet requires an explicitly supplied mnemonic', () => {
   const result = runHelper({
     NIMHUNT_DEPLOYMENT_MODE: 'public-testnet',
-    NIMHUNT_NIMIQ_MNEMONIC: PUBLIC_DEFAULT,
   });
   assert.notEqual(result.status, 0);
-  assert.match(result.stdout, /public default test mnemonic/i);
-});
-
-test('MainAlbatross rejects the public default mnemonic even in development', () => {
-  const result = spawnSync(process.execPath, [helper], {
-    input: JSON.stringify({
-      action: 'derive_spot_deposit_address',
-      network: 'MainAlbatross',
-      network_id: 24,
-      key_index: 0,
-      key_path: "m/44'/242'/0'/0'",
-      key_version: 1,
-    }),
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      NIMHUNT_DEPLOYMENT_MODE: 'development',
-      NIMHUNT_PRODUCTION: '',
-      NIMHUNT_NIMIQ_MNEMONIC: PUBLIC_DEFAULT,
-      NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: '0',
-    },
-  });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stdout, /public default test mnemonic on MainAlbatross/i);
+  assert.match(result.stdout, /set NIMHUNT_NIMIQ_MNEMONIC/i);
 });
 
 test('helper rejects unknown deployment modes', () => {
   const result = runHelper({
     NIMHUNT_DEPLOYMENT_MODE: 'staging-ish',
-    NIMHUNT_NIMIQ_MNEMONIC: 'legal winner thank year wave sausage worth useful legal winner thank yellow',
+    NIMHUNT_NIMIQ_MNEMONIC: TEST_MNEMONIC,
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stdout, /must be development, public-testnet, or production/i);
@@ -93,7 +66,7 @@ test('helper rejects conflicting legacy and preferred deployment settings', () =
   const result = runHelper({
     NIMHUNT_DEPLOYMENT_MODE: 'public-testnet',
     NIMHUNT_PRODUCTION: '1',
-    NIMHUNT_NIMIQ_MNEMONIC: 'legal winner thank year wave sausage worth useful legal winner thank yellow',
+    NIMHUNT_NIMIQ_MNEMONIC: TEST_MNEMONIC,
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stdout, /conflicts with NIMHUNT_PRODUCTION/i);
@@ -114,8 +87,8 @@ test('helper rejects a network ID that does not match the selected network', () 
       ...process.env,
       NIMHUNT_DEPLOYMENT_MODE: 'development',
       NIMHUNT_PRODUCTION: '',
-      NIMHUNT_NIMIQ_MNEMONIC: 'legal winner thank year wave sausage worth useful legal winner thank yellow',
-      NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: '0',
+      NIMHUNT_NIMIQ_MNEMONIC: TEST_MNEMONIC,
+      NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: '',
     },
   });
   assert.notEqual(result.status, 0);
@@ -137,8 +110,8 @@ test('non-broadcast signer validation derives an address in public-testnet mode'
       ...process.env,
       NIMHUNT_DEPLOYMENT_MODE: 'public-testnet',
       NIMHUNT_PRODUCTION: '',
-      NIMHUNT_NIMIQ_MNEMONIC: 'legal winner thank year wave sausage worth useful legal winner thank yellow',
-      NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: '0',
+      NIMHUNT_NIMIQ_MNEMONIC: TEST_MNEMONIC,
+      NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC: '',
     },
   });
   assert.equal(result.status, 0, result.stdout || result.stderr);

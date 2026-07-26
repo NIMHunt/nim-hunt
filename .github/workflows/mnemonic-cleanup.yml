@@ -8,10 +8,10 @@ on:
       - .github/mnemonic-cleanup-trigger
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  verify:
+  apply:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -44,50 +44,37 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-dev.txt
           npm ci --prefix helpers
 
-      - name: Apply and verify targeted cleanup
+      - name: Apply previously verified cleanup
         run: |
-          set +e
           git show origin/main:scripts/mnemonic_cleanup_v2.py > /tmp/mnemonic_cleanup_v2.py
           sed -i "s|import \* as NimiqModule from '@nimiq/core';|import { randomBytes } from 'node:crypto';\\nimport * as NimiqModule from '@nimiq/core';|" /tmp/mnemonic_cleanup_v2.py
           sed -i 's|Nimiq.MnemonicUtils.generateMnemonic()|Nimiq.MnemonicUtils.entropyToMnemonic(randomBytes(32))|' /tmp/mnemonic_cleanup_v2.py
-          python /tmp/mnemonic_cleanup_v2.py > /tmp/cleanup.log 2>&1
-          cleanup_status=$?
+          python /tmp/mnemonic_cleanup_v2.py
           git checkout -- .github/workflows/ci.yml
-          git add -N helpers/test_mnemonic.mjs 2>/dev/null || true
-          git diff --binary > /tmp/cleanup.patch
-
           expected='.github/workflows/ci.yml: obsolete fallback flag'
-          actual="$(cat .github/mnemonic-cleanup-report.txt 2>/dev/null)"
-          if [ "$cleanup_status" -ne 0 ] || [ "$actual" != "$expected" ]; then
-            echo "$cleanup_status" > /tmp/verification-status.txt
-            printf 'Unexpected cleanup result.\nExpected report: %s\nActual report: %s\n' "$expected" "$actual" >> /tmp/cleanup.log
-            exit 0
-          fi
+          actual="$(cat .github/mnemonic-cleanup-report.txt)"
+          test "$actual" = "$expected"
+          rm -f .github/mnemonic-cleanup-report.txt .github/mnemonic-cleanup-trigger
 
-          {
-            python -m pytest -q &&
-            npm test --prefix helpers &&
-            ruff check . &&
-            python -m compileall -q *.py tests &&
-            for file in static/*.js; do node --check --input-type=module < "$file" || exit 1; done &&
-            for file in helpers/*.mjs; do node --check "$file" || exit 1; done &&
-            for file in *.sh; do bash -n "$file" || exit 1; done &&
-            python -m pip check &&
-            python -m pip_audit --progress-spinner off &&
-            npm audit --omit=dev --prefix helpers
-          } > /tmp/verification.log 2>&1
-          echo "$?" > /tmp/verification-status.txt
-          exit 0
+      - name: Re-run complete verification
+        run: |
+          python -m pytest -q
+          npm test --prefix helpers
+          ruff check .
+          python -m compileall -q *.py tests
+          for file in static/*.js; do node --check --input-type=module < "$file"; done
+          for file in helpers/*.mjs; do node --check "$file"; done
+          for file in *.sh; do bash -n "$file"; done
+          python -m pip check
+          python -m pip_audit --progress-spinner off
+          npm audit --omit=dev --prefix helpers
 
-      - name: Upload verification output
-        uses: actions/upload-artifact@v4
-        with:
-          name: mnemonic-cleanup-verification
-          path: |
-            /tmp/cleanup.log
-            /tmp/cleanup.patch
-            /tmp/verification.log
-            /tmp/verification-status.txt
-            .github/mnemonic-cleanup-report.txt
-          if-no-files-found: error
-          retention-days: 1
+      - name: Commit verified cleanup
+        env:
+          TARGET_BRANCH: ${{ github.head_ref }}
+        run: |
+          git config user.name 'NIMHunt'
+          git config user.email '300551717+NIMHunt@users.noreply.github.com'
+          git add -A
+          git commit -m 'Finish mnemonic cleanup'
+          git push origin HEAD:"${TARGET_BRANCH}"

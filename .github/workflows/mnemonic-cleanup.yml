@@ -11,9 +11,9 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Check out pull-request branch
@@ -26,26 +26,66 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
-      - name: Run targeted cleanup diagnostically
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: helpers/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          npm ci --prefix helpers
+
+      - name: Apply and verify targeted cleanup
         run: |
           set +e
           git show origin/main:scripts/mnemonic_cleanup_v2.py > /tmp/mnemonic_cleanup_v2.py
           python /tmp/mnemonic_cleanup_v2.py > /tmp/cleanup.log 2>&1
-          echo "$?" > /tmp/cleanup-status.txt
+          cleanup_status=$?
+          git checkout -- .github/workflows/ci.yml
           git add -N helpers/test_mnemonic.mjs 2>/dev/null || true
           git diff --binary > /tmp/cleanup.patch
-          cp .github/mnemonic-cleanup-report.txt /tmp/mnemonic-cleanup-report.txt 2>/dev/null || true
+
+          expected='.github/workflows/ci.yml: obsolete fallback flag'
+          actual="$(cat .github/mnemonic-cleanup-report.txt 2>/dev/null)"
+          if [ "$cleanup_status" -ne 0 ] || [ "$actual" != "$expected" ]; then
+            echo "$cleanup_status" > /tmp/verification-status.txt
+            printf 'Unexpected cleanup result.\nExpected report: %s\nActual report: %s\n' "$expected" "$actual" >> /tmp/cleanup.log
+            exit 0
+          fi
+
+          {
+            python -m pytest -q &&
+            npm test --prefix helpers &&
+            ruff check . &&
+            python -m compileall -q *.py tests &&
+            for file in static/*.js; do node --check --input-type=module < "$file" || exit 1; done &&
+            for file in helpers/*.mjs; do node --check "$file" || exit 1; done &&
+            for file in *.sh; do bash -n "$file" || exit 1; done &&
+            python -m pip check &&
+            python -m pip_audit --progress-spinner off &&
+            npm audit --omit=dev --prefix helpers
+          } > /tmp/verification.log 2>&1
+          echo "$?" > /tmp/verification-status.txt
           exit 0
 
-      - name: Upload diagnostic output
+      - name: Upload verification output
         uses: actions/upload-artifact@v4
         with:
-          name: mnemonic-cleanup-diagnostics
+          name: mnemonic-cleanup-verification
           path: |
             /tmp/cleanup.log
-            /tmp/cleanup-status.txt
             /tmp/cleanup.patch
-            /tmp/mnemonic-cleanup-report.txt
+            /tmp/verification.log
+            /tmp/verification-status.txt
+            .github/mnemonic-cleanup-report.txt
           if-no-files-found: error
           retention-days: 1

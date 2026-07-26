@@ -27,13 +27,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run cleanup diagnostically
+      - name: Run targeted cleanup diagnostically
         run: |
           set +e
-          git show origin/main:scripts/mnemonic_cleanup.py > /tmp/mnemonic_cleanup.py
-          sed -i 's|ROOT = Path(__file__).resolve().parents\[1\]|ROOT = Path.cwd()|' /tmp/mnemonic_cleanup.py
-          python /tmp/mnemonic_cleanup.py > /tmp/cleanup.log 2>&1
+          git show origin/main:scripts/mnemonic_cleanup_v2.py > /tmp/mnemonic_cleanup_v2.py
+          python /tmp/mnemonic_cleanup_v2.py > /tmp/cleanup.log 2>&1
           echo "$?" > /tmp/cleanup-status.txt
+          git add -N helpers/test_mnemonic.mjs 2>/dev/null || true
           git diff --binary > /tmp/cleanup.patch
           cp .github/mnemonic-cleanup-report.txt /tmp/mnemonic-cleanup-report.txt 2>/dev/null || true
           exit 0

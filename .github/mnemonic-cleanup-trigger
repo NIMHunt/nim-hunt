@@ -1,2 +1,2 @@
 Run the one-time mnemonic cleanup workflow.
-Diagnose the targeted cleanup patch.
+Verify the targeted cleanup against the full test suite.

@@ -77,7 +77,7 @@ class ContentModerationRouteTests(unittest.IsolatedAsyncioTestCase):
                     claim_duration=0,
                     max_claims_per_user=1,
                     max_total_claims=1,
-                    total_value=const.MIN_STANDARD_CLAIM_PAYOUT,
+                    total_value=const.MIN_SPOT_TOTAL_VALUE,
                     starts_at=int(time.time()) + 3600,
                     ends_at=const.MIN_SPOT_ENDS_AFTER_SECONDS,
                     auto_reverse_geocode=False,

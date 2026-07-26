@@ -243,7 +243,7 @@ DEFAULT_DRAFT_PRIZEDRAW_MAX_TOTAL_CLAIMS = MIN_PRIZEDRAW_MAX_TOTAL_CLAIMS
 # Nimiq amount conversion and total spot value bounds.
 # total_value is stored in Luna; 1 NIM = 100,000 Luna.
 LUNA_PER_NIM = 100_000
-MIN_SPOT_TOTAL_VALUE_NIM = 100
+MIN_SPOT_TOTAL_VALUE_NIM = 500
 MIN_SPOT_TOTAL_VALUE = MIN_SPOT_TOTAL_VALUE_NIM * LUNA_PER_NIM
 
 # Minimum payout floors. Standard spots divide total_value by max_total_claims;
@@ -260,12 +260,12 @@ MIN_PRIZEDRAW_PRIZE_PAYOUT = MIN_PRIZEDRAW_PRIZE_PAYOUT_NIM * LUNA_PER_NIM
 # destination address.
 STANDARD_SPOT_CREATION_FEE = _env_nim_amount(
     "NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM",
-    "1",
+    "200",
     luna_per_nim=LUNA_PER_NIM,
 )
 PRIZEDRAW_SPOT_CREATION_FEE = _env_nim_amount(
     "NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM",
-    "1",
+    "200",
     luna_per_nim=LUNA_PER_NIM,
 )
 
@@ -278,7 +278,7 @@ DEV_PLATFORM_FEE_ADDRESS = "NQ35 6EUX JD08 6F88 KYA2 EDMC V3BC PXLB ELSB"
 # to Luna at import time. One shared address receives both fee types.
 SPOT_CANCELLATION_FEE = _env_nim_amount(
     "NIMHUNT_SPOT_CANCELLATION_FEE_NIM",
-    "1",
+    "500",
     luna_per_nim=LUNA_PER_NIM,
 )
 SPOT_CANCELLATION_FEE_ADDRESS = os.getenv(

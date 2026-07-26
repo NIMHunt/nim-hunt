@@ -119,7 +119,12 @@ class FinancialDatabaseFixture(unittest.IsolatedAsyncioTestCase):
                     {schema.SPOT_MAX_TOTAL_CLAIMS} = ?
                 WHERE {schema.SPOT_ID} = ?;
                 """,
-                (const.SPOT_STATUS_PUBLISHED, 10_000_001, 2, spot_id),
+                (
+                    const.SPOT_STATUS_PUBLISHED,
+                    const.MIN_SPOT_TOTAL_VALUE + 1,
+                    2,
+                    spot_id,
+                ),
             )
             claim_id = await db_access.create_claim(
                 db,
@@ -242,7 +247,10 @@ class StandardPayoutRecoveryTest(FinancialDatabaseFixture):
         self.assertTrue(result["ok"])
         self.assertTrue(result["paid"])
         submit.assert_awaited_once()
-        self.assertEqual(submit.await_args.kwargs["amount"], 5_000_000)
+        self.assertEqual(
+            submit.await_args.kwargs["amount"],
+            (const.MIN_SPOT_TOTAL_VALUE + 1) // 2,
+        )
 
     async def test_chain_send_failure_is_not_mislabeled_as_concurrent(self):
         _owner_id, _claimant_id, _spot_id, claim_id = await self.create_claim_fixture()

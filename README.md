@@ -457,22 +457,23 @@ negative values or fractions smaller than one Luna are rejected at startup.
 Standard Spots and Prizedraws have independent settings:
 
 ```bash
-export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=1
-export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=1
+export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=200
+export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
 ```
 
-Both default to `1 NIM`. Each new draft snapshots the appropriate amount. Changing
+Standard Spots and Prizedraws both default to `200 NIM`. Each new draft snapshots the appropriate amount. Changing
 an environment variable later does not retroactively change an existing draft's
 deposit target or fee transaction.
 
 ### Cancellation fee amount
 
 ```bash
-export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
+export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
 ```
 
-The default is `1 NIM`. A value of `0` preserves the refund flow without charging
-a cancellation fee.
+The default is `500 NIM`. A value of `0` preserves the refund flow without charging
+a cancellation fee. The amount and destination are snapshotted when cancellation first starts,
+so later environment changes cannot alter a cancellation already in progress.
 
 ### Shared fee destination
 
@@ -497,9 +498,9 @@ The destination is also snapshotted onto each new Spot for its creation fee.
 | `NIMHUNT_DEPLOYMENT_MODE` | `development` | preferred: `development`, `public-testnet`, or `production` |
 | `NIMHUNT_PRODUCTION` | unset | legacy compatibility flag; `1` maps to `production` only |
 | `NIMHUNT_DB_PATH` | `records.db` | SQLite file; public modes require a separate absolute persistent path |
-| `NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM` | `1` | one-time creation fee for Standard Spots, in NIM |
-| `NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM` | `1` | one-time creation fee for Prizedraws, in NIM |
-| `NIMHUNT_SPOT_CANCELLATION_FEE_NIM` | `1` | cancellation fee amount in NIM |
+| `NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM` | `200` | one-time creation fee for Standard Spots, in NIM |
+| `NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM` | `200` | one-time creation fee for Prizedraws, in NIM |
+| `NIMHUNT_SPOT_CANCELLATION_FEE_NIM` | `500` | cancellation fee amount in NIM; snapshotted when cancellation starts |
 | `NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS` | public TestAlbatross development address | shared creation/cancellation fee recipient; public modes require an operator address |
 
 ### Nimiq network and RPC
@@ -552,6 +553,7 @@ deployment secrets. This includes:
 - radius and duration ranges;
 - total and per-user participant maxima;
 - allowed Prizedraw prize-count options;
+- minimum Spot reward pool (currently `500 NIM`);
 - minimum standard and Prizedraw payout amounts;
 - report and display-name limits;
 - background settlement and cache batch sizes.
@@ -590,9 +592,9 @@ export NIMHUNT_NIMIQ_MNEMONIC='private testnet mnemonic -- supply as a secret'
 export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
 export NIMHUNT_NIMIQ_SEND_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
 
-export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=1
-export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=1
-export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
+export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=200
+export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
+export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
 export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ... operator testnet fee address ...'
 ```
 
@@ -618,9 +620,9 @@ export NIMHUNT_NIMIQ_MNEMONIC='private mainnet mnemonic -- supply as a secret'
 export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
 export NIMHUNT_NIMIQ_SEND_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
 
-export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=1
-export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=1
-export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
+export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=200
+export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
+export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
 export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ... operator mainnet fee address ...'
 ```
 
@@ -650,7 +652,7 @@ in an additive `app_metadata` table. Once bound, it refuses another network or m
 - A public database is also protected from `spoof.py` resets if the process is
   accidentally launched with development settings.
 - Network/deployment metadata remains additive, but the creation-fee release also
-  adds immutable Spot columns and uses schema version `2`. There is deliberately no
+  adds immutable Spot columns and uses schema version `3`. There is deliberately no
   `ALTER` migration: existing development databases must be recreated, and public
   deployments must start with a fresh volume/database for this release.
 
@@ -704,9 +706,9 @@ NIMHUNT_NIMIQ_MNEMONIC=SECRET_PRIVATE_TESTNET_MNEMONIC
 NIMHUNT_NIMIQ_MNEMONIC_PASSWORD=SECRET_OPTIONAL_PASSPHRASE
 NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND=node /app/helpers/nimiq_helper.mjs
 NIMHUNT_NIMIQ_SEND_COMMAND=node /app/helpers/nimiq_helper.mjs
-NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=1
-NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=1
-NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
+NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=200
+NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
+NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
 NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS=OPERATOR_TESTNET_NQ_ADDRESS
 ```
 
@@ -729,9 +731,9 @@ NIMHUNT_NIMIQ_MNEMONIC=SECRET_PRIVATE_MAINNET_MNEMONIC
 NIMHUNT_NIMIQ_MNEMONIC_PASSWORD=SECRET_OPTIONAL_PASSPHRASE
 NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND=node /app/helpers/nimiq_helper.mjs
 NIMHUNT_NIMIQ_SEND_COMMAND=node /app/helpers/nimiq_helper.mjs
-NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=1
-NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=1
-NIMHUNT_SPOT_CANCELLATION_FEE_NIM=1
+NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=200
+NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
+NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
 NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS=OPERATOR_MAINNET_NQ_ADDRESS
 ```
 
@@ -760,7 +762,7 @@ Before public launch:
 3. Back up the mnemonic separately and verify recovery.
 4. Configure the correct deployment mode, network, ID, RPC and Hub.
 5. Configure a real fee address, both creation fees and the cancellation fee.
-6. Use a fresh schema-version-2 network-specific persistent database.
+6. Use a fresh schema-version-3 network-specific persistent database.
 7. Serve over HTTPS with one application replica and worker.
 8. Confirm strict startup and `/healthz`.
 9. Complete a deliberately small-value end-to-end cycle.

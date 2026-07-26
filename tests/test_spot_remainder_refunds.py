@@ -203,7 +203,10 @@ class SpotRemainderRefundIntegrationTest(unittest.IsolatedAsyncioTestCase):
         return fake_send
 
     async def test_expired_standard_refunds_unclaimed_rewards_and_overfunding(self):
-        total_value = 3 * const.MIN_STANDARD_CLAIM_PAYOUT
+        total_value = max(
+            const.MIN_SPOT_TOTAL_VALUE,
+            3 * const.MIN_STANDARD_CLAIM_PAYOUT,
+        )
         overfunding = 777
         spot_id = await self._create_spot(
             total_value=total_value,
@@ -273,7 +276,7 @@ class SpotRemainderRefundIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_pending_duration_claim_survives_public_end_and_blocks_refund(self):
         spot_id = await self._create_spot(
-            total_value=const.MIN_STANDARD_CLAIM_PAYOUT,
+            total_value=const.MIN_SPOT_TOTAL_VALUE,
             max_total_claims=1,
             claim_duration=600,
         )
@@ -310,7 +313,10 @@ class SpotRemainderRefundIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_successful_standard_claim_must_be_paid_before_remainder(self):
         spot_id = await self._create_spot(
-            total_value=2 * const.MIN_STANDARD_CLAIM_PAYOUT,
+            total_value=max(
+                const.MIN_SPOT_TOTAL_VALUE,
+                2 * const.MIN_STANDARD_CLAIM_PAYOUT,
+            ),
             max_total_claims=2,
         )
         spot = await self._spot(spot_id)
@@ -333,7 +339,7 @@ class SpotRemainderRefundIntegrationTest(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_pending_refund_is_idempotent_and_failed_refund_retries_exact_amount(self):
-        total_value = const.MIN_STANDARD_CLAIM_PAYOUT
+        total_value = const.MIN_SPOT_TOTAL_VALUE
         spot_id = await self._create_spot(
             total_value=total_value,
             max_total_claims=1,
@@ -409,7 +415,7 @@ class SpotRemainderRefundIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sends, [(FUNDING_ADDRESS, total_value), (FUNDING_ADDRESS, total_value)])
 
     async def test_confirmed_refund_marks_remainder_settled_and_leaves_queue(self):
-        total_value = const.MIN_STANDARD_CLAIM_PAYOUT
+        total_value = const.MIN_SPOT_TOTAL_VALUE
         spot_id = await self._create_spot(
             total_value=total_value,
             max_total_claims=1,
@@ -524,7 +530,7 @@ class SpotRemainderRefundIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sends, [(FUNDING_ADDRESS, total_value)])
 
     async def test_concurrent_remainder_workers_create_only_one_active_refund(self):
-        total_value = const.MIN_STANDARD_CLAIM_PAYOUT
+        total_value = const.MIN_SPOT_TOTAL_VALUE
         spot_id = await self._create_spot(
             total_value=total_value,
             max_total_claims=1,
@@ -602,7 +608,7 @@ class DurationCapacitySemanticsTest(unittest.IsolatedAsyncioTestCase):
                 claim_duration=600,
                 max_claims_per_user=1,
                 max_total_claims=1,
-                total_value=const.MIN_STANDARD_CLAIM_PAYOUT,
+                total_value=const.MIN_SPOT_TOTAL_VALUE,
                 starts_at=int(time.time()) - 60,
                 ends_at=const.MIN_SPOT_ENDS_AFTER_SECONDS,
                 auto_reverse_geocode=False,

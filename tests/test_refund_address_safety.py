@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from unittest import mock
 
 import constants as const
+import database as schema
 import refund_address_safety
 import trans_updater
 
@@ -134,13 +135,55 @@ class RefundAddressResolutionTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ReturnAddressPersistenceTest(unittest.IsolatedAsyncioTestCase):
-    async def test_deposit_records_provider_return_address_before_chain_overwrite(self):
-        db = QueueDb([None, None])
-        original = mock.AsyncMock(return_value={"ok": True, "trans_id": 9})
+    def _draft_spot(self):
+        return {
+            schema.SPOT_STATUS: const.SPOT_STATUS_DRAFT,
+            schema.SPOT_CANCELLATION_STARTED_AT: None,
+            schema.SPOT_DEPOSIT_ADDRESS: OTHER_ADDRESS,
+        }
 
-        with mock.patch.object(refund_address_safety, "_ORIGINAL_RECORD", original):
+    async def test_deposit_records_provider_return_address_before_chain_overwrite(self):
+        create_transaction = mock.AsyncMock(return_value=9)
+        remember = mock.AsyncMock()
+        with mock.patch.object(
+            refund_address_safety,
+            "_ensure_return_address_table",
+            mock.AsyncMock(),
+        ), mock.patch.object(
+            refund_address_safety.trans_updater,
+            "_transaction_by_hash",
+            mock.AsyncMock(return_value=None),
+        ), mock.patch.object(
+            refund_address_safety,
+            "_spot_return_address",
+            mock.AsyncMock(return_value=None),
+        ), mock.patch.object(
+            refund_address_safety.db_access,
+            "get_confirmed_spot_funding_address",
+            mock.AsyncMock(return_value=None),
+        ), mock.patch.object(
+            refund_address_safety.db_access,
+            "get_spot",
+            mock.AsyncMock(return_value=self._draft_spot()),
+        ), mock.patch.object(
+            refund_address_safety.db_access,
+            "get_spot_deposit_totals",
+            mock.AsyncMock(return_value={"pending_amount": 0, "confirmed_amount": 0}),
+        ), mock.patch.object(
+            refund_address_safety.db_access,
+            "spot_required_deposit_amount",
+            return_value=200_000,
+        ), mock.patch.object(
+            refund_address_safety.db_access,
+            "create_spot_deposit_transaction",
+            create_transaction,
+        ), mock.patch.object(
+            refund_address_safety,
+            "_remember_return_address",
+            remember,
+        ):
             result = await refund_address_safety.record_spot_deposit_transaction(
-                db,
+                object(),
                 user_id=1,
                 spot_id=7,
                 amount=100_000,
@@ -150,34 +193,134 @@ class ReturnAddressPersistenceTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertTrue(result["ok"])
-        self.assertEqual(original.await_args.kwargs["from_address"], TOP_UP_ADDRESS)
-        inserts = [
-            params
-            for sql, params in db.executed
-            if "INSERT INTO nimiq_pay_return_address" in sql
-        ]
-        self.assertEqual(inserts, [(TX_HASH, 7, TOP_UP_ADDRESS)])
+        self.assertFalse(result["already_recorded"])
+        self.assertEqual(create_transaction.await_args.kwargs["from_address"], TOP_UP_ADDRESS)
+        remember.assert_awaited_once()
+        self.assertEqual(remember.await_args.kwargs["return_address"], TOP_UP_ADDRESS)
+
+    async def test_same_nimiq_pay_account_can_top_up_after_htlc_confirmation(self):
+        create_transaction = mock.AsyncMock(return_value=10)
+        confirmed_chain_sender = mock.AsyncMock(
+            side_effect=AssertionError("HTLC sender must not be used as top-up identity")
+        )
+        with mock.patch.object(
+            refund_address_safety,
+            "_ensure_return_address_table",
+            mock.AsyncMock(),
+        ), mock.patch.object(
+            refund_address_safety.trans_updater,
+            "_transaction_by_hash",
+            mock.AsyncMock(return_value=None),
+        ), mock.patch.object(
+            refund_address_safety,
+            "_spot_return_address",
+            mock.AsyncMock(return_value=TOP_UP_ADDRESS),
+        ), mock.patch.object(
+            refund_address_safety.db_access,
+            "get_confirmed_spot_funding_address",
+            confirmed_chain_sender,
+        ), mock.patch.object(
+            refund_address_safety.db_access,
+            "get_spot",
+            mock.AsyncMock(return_value=self._draft_spot()),
+        ), mock.patch.object(
+            refund_address_safety.db_access,
+            "get_spot_deposit_totals",
+            mock.AsyncMock(return_value={"pending_amount": 0, "confirmed_amount": 50_000}),
+        ), mock.patch.object(
+            refund_address_safety.db_access,
+            "spot_required_deposit_amount",
+            return_value=200_000,
+        ), mock.patch.object(
+            refund_address_safety.db_access,
+            "create_spot_deposit_transaction",
+            create_transaction,
+        ), mock.patch.object(
+            refund_address_safety,
+            "_remember_return_address",
+            mock.AsyncMock(),
+        ):
+            result = await refund_address_safety.record_spot_deposit_transaction(
+                object(),
+                user_id=1,
+                spot_id=7,
+                amount=150_000,
+                from_address=TOP_UP_ADDRESS,
+                tx_hash="b" * 64,
+                to_address=OTHER_ADDRESS,
+            )
+
+        self.assertTrue(result["ok"])
+        confirmed_chain_sender.assert_not_awaited()
+        self.assertEqual(create_transaction.await_args.kwargs["from_address"], TOP_UP_ADDRESS)
 
     async def test_second_return_address_for_same_spot_is_rejected(self):
-        db = QueueDb([{"return_address": TOP_UP_ADDRESS}])
-        original = mock.AsyncMock(return_value={"ok": True, "trans_id": 9})
-
-        with mock.patch.object(refund_address_safety, "_ORIGINAL_RECORD", original):
+        create_transaction = mock.AsyncMock()
+        with mock.patch.object(
+            refund_address_safety,
+            "_ensure_return_address_table",
+            mock.AsyncMock(),
+        ), mock.patch.object(
+            refund_address_safety.trans_updater,
+            "_transaction_by_hash",
+            mock.AsyncMock(return_value=None),
+        ), mock.patch.object(
+            refund_address_safety,
+            "_spot_return_address",
+            mock.AsyncMock(return_value=TOP_UP_ADDRESS),
+        ), mock.patch.object(
+            refund_address_safety.db_access,
+            "get_spot",
+            mock.AsyncMock(return_value=self._draft_spot()),
+        ), mock.patch.object(
+            refund_address_safety.db_access,
+            "create_spot_deposit_transaction",
+            create_transaction,
+        ):
             with self.assertRaisesRegex(ValueError, "original Nimiq Pay account"):
                 await refund_address_safety.record_spot_deposit_transaction(
-                    db,
+                    object(),
                     user_id=1,
                     spot_id=7,
                     amount=100_000,
                     from_address=OTHER_ADDRESS,
-                    tx_hash=TX_HASH,
-                    to_address=TOP_UP_ADDRESS,
+                    tx_hash="c" * 64,
+                    to_address=OTHER_ADDRESS,
                 )
+        create_transaction.assert_not_awaited()
 
-        # The core record is called before the additive mapping is persisted. In
-        # production this whole route is one SQLite transaction, so the raised
-        # validation error rolls the core insert back as well.
-        original.assert_awaited_once()
+    async def test_legacy_confirmed_deposit_without_mapping_fails_closed(self):
+        with mock.patch.object(
+            refund_address_safety,
+            "_ensure_return_address_table",
+            mock.AsyncMock(),
+        ), mock.patch.object(
+            refund_address_safety.trans_updater,
+            "_transaction_by_hash",
+            mock.AsyncMock(return_value=None),
+        ), mock.patch.object(
+            refund_address_safety,
+            "_spot_return_address",
+            mock.AsyncMock(return_value=None),
+        ), mock.patch.object(
+            refund_address_safety.db_access,
+            "get_confirmed_spot_funding_address",
+            mock.AsyncMock(return_value=HTLC_ADDRESS),
+        ), mock.patch.object(
+            refund_address_safety.db_access,
+            "get_spot",
+            mock.AsyncMock(return_value=self._draft_spot()),
+        ):
+            with self.assertRaisesRegex(ValueError, "manual reconciliation"):
+                await refund_address_safety.record_spot_deposit_transaction(
+                    object(),
+                    user_id=1,
+                    spot_id=7,
+                    amount=100_000,
+                    from_address=TOP_UP_ADDRESS,
+                    tx_hash="d" * 64,
+                    to_address=OTHER_ADDRESS,
+                )
 
 
 if __name__ == "__main__":

@@ -12,10 +12,12 @@ transaction continue through the existing claim-address path.
 
 from __future__ import annotations
 
+import sqlite3
 from typing import Any, Awaitable, Callable
 
 import constants as const
 import database as schema
+import db_access
 import trans_updater
 import wallet
 from database import get_db
@@ -132,11 +134,13 @@ async def record_spot_deposit_transaction(
     tx_hash: str,
     to_address: str | None = None,
 ) -> RowDict:
-    """Record a deposit while preserving Nimiq Pay's return/top-up address."""
-    original = _ORIGINAL_RECORD
-    if original is None:
-        raise RuntimeError("refund-address safety hook is not installed")
+    """Record a deposit while preserving Nimiq Pay's account identity.
 
+    The normal transaction row is later updated with the authoritative
+    on-chain sender, which may be a temporary HTLC.  Top-up ownership must
+    therefore be checked against the separately preserved Nimiq Pay account,
+    never against the previous chain sender.
+    """
     return_address = wallet.normalise_nimiq_address(
         str(from_address or ""),
         field_name="Nimiq Pay return address",
@@ -146,22 +150,161 @@ async def record_spot_deposit_transaction(
     if not trans_updater._NIMIQ_TRANSACTION_HASH_RE.fullmatch(clean_hash):
         raise ValueError("tx_hash must be a 64-character hexadecimal Nimiq transaction hash")
 
-    result = await original(
-        db,
-        user_id=int(user_id),
-        spot_id=int(spot_id),
-        amount=int(amount),
-        from_address=return_address,
-        tx_hash=clean_hash,
-        to_address=to_address,
+    await _ensure_return_address_table(db)
+    existing = await trans_updater._transaction_by_hash(db, tx_hash=clean_hash)
+    if existing is not None:
+        if not trans_updater._same_recorded_deposit(
+            existing,
+            user_id=int(user_id),
+            spot_id=int(spot_id),
+        ):
+            raise ValueError("this transaction hash is already attached to a different record")
+
+        stored_return = await _spot_return_address(db, spot_id=int(spot_id))
+        if stored_return is None:
+            stored_sender = wallet.normalise_nimiq_address(
+                str(existing.get(schema.TRANS_FROM_ADDRESS) or ""),
+                field_name="stored deposit sender",
+                allow_dev_placeholder=bool(
+                    getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)
+                ),
+            )
+            existing_status = int(
+                existing.get(schema.TRANS_STATUS)
+                if existing.get(schema.TRANS_STATUS) is not None
+                else -1
+            )
+            if (
+                existing_status != const.TRANS_STATUS_PENDING
+                or stored_sender != return_address
+            ):
+                raise ValueError(
+                    "this existing deposit has no safely recorded Nimiq Pay account; "
+                    "manual reconciliation is required"
+                )
+            await _remember_return_address(
+                db,
+                spot_id=int(spot_id),
+                source_tx_hash=clean_hash,
+                return_address=return_address,
+            )
+        else:
+            stored_return = wallet.normalise_nimiq_address(
+                stored_return,
+                field_name="stored Nimiq Pay return address",
+                allow_dev_placeholder=bool(
+                    getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)
+                ),
+            )
+            if stored_return != return_address:
+                raise ValueError(
+                    "Additional deposits for this Spot must use its original Nimiq Pay account."
+                )
+
+        return {
+            "ok": True,
+            "already_recorded": True,
+            "trans_id": int(existing[schema.TRANS_ID]),
+            "spot_id": int(spot_id),
+            "amount": int(existing.get(schema.TRANS_AMOUNT) or 0),
+        }
+
+    amount = int(amount)
+    if amount <= 0:
+        raise ValueError("amount must be positive")
+
+    spot = await db_access.get_spot(db, spot_id=int(spot_id))
+    if spot is None:
+        raise ValueError(f"spot id={spot_id} does not exist")
+    if int(spot[schema.SPOT_STATUS]) != const.SPOT_STATUS_DRAFT:
+        raise ValueError("only draft spots can receive creator deposits")
+    if spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None:
+        raise ValueError("this draft is being cancelled and cannot receive another deposit")
+
+    clean_to_address = wallet.normalise_nimiq_address(
+        str(to_address or spot.get(schema.SPOT_DEPOSIT_ADDRESS) or ""),
+        field_name="deposit to_address",
+        allow_dev_placeholder=bool(getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)),
     )
+
+    established_return = await _spot_return_address(db, spot_id=int(spot_id))
+    if established_return is not None:
+        established_return = wallet.normalise_nimiq_address(
+            established_return,
+            field_name="stored Nimiq Pay return address",
+            allow_dev_placeholder=bool(
+                getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)
+            ),
+        )
+        if established_return != return_address:
+            raise ValueError(
+                "Additional deposits for this Spot must use its original Nimiq Pay account."
+            )
+    else:
+        legacy_chain_sender = await db_access.get_confirmed_spot_funding_address(
+            db,
+            spot_id=int(spot_id),
+        )
+        if legacy_chain_sender is not None:
+            raise ValueError(
+                "this Spot has confirmed legacy funding without a safely recorded "
+                "Nimiq Pay account; manual reconciliation is required"
+            )
+
+    totals = await db_access.get_spot_deposit_totals(db, spot_id=int(spot_id))
+    if int(totals.get("pending_amount") or 0) > 0:
+        raise ValueError("this draft already has a pending deposit")
+    required = int(db_access.spot_required_deposit_amount(spot))
+    amount_due = max(0, required - int(totals.get("confirmed_amount") or 0))
+    if amount_due <= 0:
+        raise ValueError("this draft is already fully funded")
+    amount = min(amount, amount_due)
+
+    try:
+        trans_id = await db_access.create_spot_deposit_transaction(
+            db,
+            user_id=int(user_id),
+            spot_id=int(spot_id),
+            amount=amount,
+            from_address=return_address,
+            to_address=clean_to_address,
+            tx_hash=clean_hash,
+        )
+    except sqlite3.IntegrityError:
+        existing = await trans_updater._transaction_by_hash(db, tx_hash=clean_hash)
+        if existing is None or not trans_updater._same_recorded_deposit(
+            existing,
+            user_id=int(user_id),
+            spot_id=int(spot_id),
+        ):
+            raise
+        await _remember_return_address(
+            db,
+            spot_id=int(spot_id),
+            source_tx_hash=clean_hash,
+            return_address=return_address,
+        )
+        return {
+            "ok": True,
+            "already_recorded": True,
+            "trans_id": int(existing[schema.TRANS_ID]),
+            "spot_id": int(spot_id),
+            "amount": int(existing.get(schema.TRANS_AMOUNT) or 0),
+        }
+
     await _remember_return_address(
         db,
         spot_id=int(spot_id),
         source_tx_hash=clean_hash,
         return_address=return_address,
     )
-    return result
+    return {
+        "ok": True,
+        "already_recorded": False,
+        "trans_id": int(trans_id),
+        "spot_id": int(spot_id),
+        "amount": amount,
+    }
 
 
 async def _mapped_return_address(

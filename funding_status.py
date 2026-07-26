@@ -80,77 +80,13 @@ async def has_broadcast_spot_creation_fee_transaction(db, *, spot_id: int) -> bo
 
 
 async def can_publish_spot_after_fee_broadcast(db, *, spot_id: int) -> bool:
-    """Keep all existing checks but make the internal fee non-blocking."""
-    if await _ORIGINAL_CAN_PUBLISH_SPOT(db, spot_id=int(spot_id)):
-        return True
-
-    spot = await db_access.get_spot(db, spot_id=int(spot_id))
-    if not spot or int(spot[schema.SPOT_STATUS]) != const.SPOT_STATUS_DRAFT:
+    """Require all ordinary checks and an exact confirmed creation fee."""
+    if not await _ORIGINAL_CAN_PUBLISH_SPOT(db, spot_id=int(spot_id)):
         return False
-    if spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None:
-        return False
-    if not await db_access.can_user_create_spot(
-        db,
-        user_id=int(spot[schema.SPOT_CREATED_BY]),
-    ):
-        return False
-
-    required_values = (
-        spot.get(schema.SPOT_TITLE),
-        spot.get(schema.SPOT_DEPOSIT_ADDRESS),
-        spot.get(schema.SPOT_LAT),
-        spot.get(schema.SPOT_LONG),
-        spot.get(schema.SPOT_RADIUS),
-        spot.get(schema.SPOT_MAX_TOTAL_CLAIMS),
-        spot.get(schema.SPOT_TOTAL_VALUE),
-    )
-    if any(value is None for value in required_values):
-        return False
-
-    total_value = int(spot.get(schema.SPOT_TOTAL_VALUE) or 0)
-    if total_value <= 0:
-        return False
-
-    max_total_claims = int(spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) or 0)
-    prizedraw = await db_access.get_prizedraw(db, spot_id=int(spot_id))
-    is_prizedraw = prizedraw is not None
-    if max_total_claims < const.MIN_SPOT_MAX_TOTAL_CLAIMS and not is_prizedraw:
-        return False
-    if is_prizedraw:
-        try:
-            db_access._validate_prizedraw_participant_limits(
-                max_claims_per_user=int(
-                    spot.get(schema.SPOT_MAX_CLAIMS_PER_USER) or 0
-                ),
-                max_total_claims=max_total_claims,
-                prize_count=int(prizedraw[schema.PRIZEDRAW_PRIZE_COUNT]),
-            )
-        except ValueError:
-            return False
-
-    if not await db_access.spot_meets_minimum_payout(db, spot_id=int(spot_id)):
-        return False
-
-    starts_at = spot.get(schema.SPOT_STARTS_AT)
-    ends_after = int(spot.get(schema.SPOT_ENDS_AT) or 0)
-    if ends_after < const.MIN_SPOT_ENDS_AFTER_SECONDS:
-        return False
-    if starts_at is not None:
-        now = await db_access.get_unixepoch(db)
-        if int(starts_at) + ends_after <= now:
-            return False
-
-    use_password = int(spot.get(schema.SPOT_USE_PASSWORD) or 0) == 1
-    if use_password and (max_total_claims <= 0 or is_prizedraw):
-        return False
-
-    confirmed_amount = await db_access.get_confirmed_spot_deposit_total(
+    return await db_access.has_confirmed_spot_creation_fee_transaction(
         db,
         spot_id=int(spot_id),
     )
-    if confirmed_amount < db_access.spot_required_deposit_amount(spot):
-        return False
-    return True
 
 
 def deposit_summary(
@@ -292,8 +228,8 @@ def deposit_summary(
         "funding_submitted": funding_submitted,
         "funding_complete": funding_complete,
         # Existing owner serialisation uses fee_paid as its publish-readiness flag.
-        # The internal transfer is deliberately non-blocking for the creator.
-        "fee_paid": funding_complete,
+        # Publication now waits for the exact snapshotted fee transfer to confirm.
+        "fee_paid": fee_confirmed,
         "fee_submitted": fee_submitted,
         "fee_confirmed": fee_confirmed,
         "fee_status": fee_status,

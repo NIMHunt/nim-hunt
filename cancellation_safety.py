@@ -18,11 +18,13 @@ import constants as const
 import database as schema
 import db_access
 import trans_updater
+import wallet
 
 RowDict = dict[str, Any]
 CancellationSubmitter = Callable[..., Awaitable[RowDict]]
 
 _GUARD_TABLE = "CANCELLATION_SEND_GUARD"
+_POLICY_TABLE = "CANCELLATION_POLICY"
 _RETRYABLE_FAILED_REFUND_GUARD_REASON = "existing failed or ambiguous cancellation transaction"
 _INSTALLED = False
 _ORIGINAL_SUBMIT: CancellationSubmitter | None = None
@@ -49,6 +51,19 @@ async def _ensure_guard_table(db) -> None:
         );
         """
     )
+    await db.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {_POLICY_TABLE} (
+            spot_id INTEGER PRIMARY KEY,
+            fee_amount INTEGER NOT NULL CHECK (fee_amount >= 0),
+            fee_address TEXT NOT NULL CHECK (TRIM(fee_address) != ''),
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            FOREIGN KEY (spot_id)
+                REFERENCES {schema.SPOT_TABLE_NAME}({schema.SPOT_ID})
+                ON DELETE CASCADE
+        );
+        """
+    )
     await db.commit()
 
 
@@ -59,6 +74,73 @@ async def _guard_row(db, *, spot_id: int) -> RowDict | None:
     )
     row = await cur.fetchone()
     return dict(row) if row is not None else None
+
+
+
+async def _policy_row(db, *, spot_id: int) -> RowDict | None:
+    cur = await db.execute(
+        f"SELECT * FROM {_POLICY_TABLE} WHERE spot_id = ?;",
+        (int(spot_id),),
+    )
+    row = await cur.fetchone()
+    return dict(row) if row is not None else None
+
+
+async def _snapshot_cancellation_policy(
+    db,
+    *,
+    spot_id: int,
+    cancellation_fee: int | None,
+    fee_address: str | None,
+) -> tuple[RowDict, bool]:
+    existing = await _policy_row(db, spot_id=int(spot_id))
+    if existing is not None:
+        return existing, False
+
+    fee_amount = max(
+        0,
+        int(
+            getattr(const, "SPOT_CANCELLATION_FEE", 0)
+            if cancellation_fee is None
+            else cancellation_fee
+        ),
+    )
+    configured_address = str(
+        fee_address
+        or getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "")
+    ).strip()
+    clean_address = wallet.normalise_nimiq_address(
+        configured_address,
+        field_name="cancellation fee address",
+        allow_dev_placeholder=bool(
+            getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)
+        ),
+    )
+
+    cur = await db.execute(
+        f"""
+        INSERT OR IGNORE INTO {_POLICY_TABLE} (
+            spot_id,
+            fee_amount,
+            fee_address
+        ) VALUES (?, ?, ?);
+        """,
+        (int(spot_id), fee_amount, clean_address),
+    )
+    created = int(cur.rowcount or 0) == 1
+    await db.commit()
+    policy = await _policy_row(db, spot_id=int(spot_id))
+    if policy is None:
+        raise RuntimeError("cancellation policy could not be persisted")
+    return policy, created
+
+
+async def _delete_cancellation_policy(db, *, spot_id: int) -> None:
+    await db.execute(
+        f"DELETE FROM {_POLICY_TABLE} WHERE spot_id = ?;",
+        (int(spot_id),),
+    )
+    await db.commit()
 
 
 async def _acquire_guard(db, *, spot_id: int) -> bool:
@@ -228,24 +310,37 @@ async def guarded_submit_spot_cancellation_transactions(
                 reason=_RETRYABLE_FAILED_REFUND_GUARD_REASON,
             )
 
+        policy, policy_created = await _snapshot_cancellation_policy(
+            db,
+            spot_id=spot_id,
+            cancellation_fee=cancellation_fee,
+            fee_address=fee_address,
+        )
+
         if not await _acquire_guard(db, spot_id=spot_id):
             current = await _guard_row(db, spot_id=spot_id)
             return _blocked_result(
                 spot_id=spot_id,
-                reason=str((current or {}).get("reason") or "another cancellation worker acquired the lease"),
+                reason=str(
+                    (current or {}).get("reason")
+                    or "another cancellation worker acquired the lease"
+                ),
             )
 
         try:
             result = await original(
                 db,
                 spot_id=spot_id,
-                cancellation_fee=cancellation_fee,
-                fee_address=fee_address,
+                cancellation_fee=int(policy["fee_amount"]),
+                fee_address=str(policy["fee_address"]),
             )
         except ValueError:
             # Validation failures happen before chain submission and are safe to
-            # correct and retry normally.
+            # correct and retry normally. A policy created solely for that invalid
+            # attempt is removed so a corrected request can snapshot fresh values.
             await _release_guard(db, spot_id=spot_id)
+            if policy_created:
+                await _delete_cancellation_policy(db, spot_id=spot_id)
             raise
         except Exception as exc:
             await _block_guard(

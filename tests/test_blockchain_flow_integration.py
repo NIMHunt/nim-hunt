@@ -32,7 +32,15 @@ class BlockchainFlowIntegrationTest(IsolatedAsyncioTestCase):
     async def create_owner_spot(self):
         async with schema.get_db() as db:
             owner_id = await db_access.create_user(db, device_id_hash="owner-blockchain")
-            spot_id = await db_access.create_spot(db, created_by=owner_id, title="Chain Spot")
+            spot_id = await db_access.create_spot(
+        db,
+        created_by=owner_id,
+        title="Chain Spot",
+        total_value=(
+            const.MIN_SPOT_TOTAL_VALUE
+            + const.SPOT_CANCELLATION_FEE
+        ),
+    )
             await db.commit()
             spot = await db_access.get_spot(db, spot_id=spot_id)
         return owner_id, spot_id, spot

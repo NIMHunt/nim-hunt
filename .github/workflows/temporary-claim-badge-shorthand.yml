@@ -4,12 +4,16 @@ on:
   push:
     branches:
       - agent/claim-badge-status-shorthand
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'agent/claim-badge-status-shorthand'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

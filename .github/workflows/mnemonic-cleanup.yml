@@ -50,6 +50,9 @@ jobs:
         run: |
           git show origin/main:scripts/mnemonic_cleanup.py > /tmp/mnemonic_cleanup.py
           python /tmp/mnemonic_cleanup.py
+          # GitHub restricts workflow-file updates made by a workflow token. The
+          # obsolete CI environment line is removed separately through the repo API.
+          git checkout -- .github/workflows/ci.yml
           git config user.name 'NIMHunt'
           git config user.email '300551717+NIMHunt@users.noreply.github.com'
           git add -A

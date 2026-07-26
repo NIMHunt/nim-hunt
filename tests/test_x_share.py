@@ -48,6 +48,7 @@ def test_x_share_link_is_inserted_after_public_link_copy_control() -> None:
     assert "if (!rowIsShareable(row)) continue" in source
     assert "url.pathname.startsWith('/spot/')" in source
     assert "return isIndividualClaimPage() || Boolean(publishedSpotLinkForRow(row))" in source
+    assert "spotHref || canonicalPageUrl()" not in source
     assert "copyButton.after(createXShareLink(shareUrlForRow(row)))" in source
     assert "row.querySelector('.spot-copy-button')" in source
     assert "row.querySelector('.spot-x-share-link')" in source

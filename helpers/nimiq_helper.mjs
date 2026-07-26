@@ -8,6 +8,7 @@
  * addresses using @nimiq/core.
  */
 
+import { createHash } from 'node:crypto';
 import * as NimiqModule from '@nimiq/core';
 import { encodeTransactionMemo } from './transaction_data.mjs';
 
@@ -16,7 +17,10 @@ import { encodeTransactionMemo } from './transaction_data.mjs';
 // failure when no default export is present.
 const Nimiq = (NimiqModule.default && NimiqModule.default.Client) ? NimiqModule.default : NimiqModule;
 
-const DEFAULT_TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+// Fingerprint only: the public development mnemonic itself is deliberately not
+// embedded in the repository. Keep rejecting it if an operator supplies it to
+// a public deployment by mistake.
+const PUBLIC_TEST_MNEMONIC_SHA256 = 'c557eec878dfd852ba3f88087c4f350f09c55537ab5e549c3cd14320ec3cef38';
 
 function readStdin() {
   return new Promise((resolve, reject) => {
@@ -47,16 +51,11 @@ function networkFromPayload(payload) {
   return String(payload.network || env('NIMHUNT_NIMIQ_NETWORK', 'TestAlbatross'));
 }
 
-function mnemonicForNetwork(network) {
-  const mnemonic = env('NIMHUNT_NIMIQ_MNEMONIC');
+function mnemonicForNetwork() {
+  const mnemonic = String(env('NIMHUNT_NIMIQ_MNEMONIC', '')).trim();
   if (mnemonic) return mnemonic;
 
-  const allowDefaultTestMnemonic = envEnabled('NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC');
-  if (allowDefaultTestMnemonic && network !== 'MainAlbatross') {
-    return DEFAULT_TEST_MNEMONIC;
-  }
-
-  throw new Error('Set NIMHUNT_NIMIQ_MNEMONIC before deriving or sending real Nimiq transactions. For TestAlbatross-only experiments, you may set NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC=1.');
+  throw new Error('Set NIMHUNT_NIMIQ_MNEMONIC before deriving or sending Nimiq transactions.');
 }
 
 const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
@@ -70,10 +69,6 @@ function optionalEnvBoolean(name) {
   if (TRUE_VALUES.has(value)) return true;
   if (FALSE_VALUES.has(value)) return false;
   throw new Error(`${name} must be one of: 1, 0, true, false, yes, no, on, off`);
-}
-
-function envEnabled(name) {
-  return optionalEnvBoolean(name) === true;
 }
 
 function normalisedDeploymentMode() {
@@ -115,18 +110,24 @@ function validateNetworkConfiguration(payload, network) {
   return deploymentMode;
 }
 
+function isPublicTestMnemonic(mnemonic) {
+  const normalised = String(mnemonic || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  if (!normalised) return false;
+  const digest = createHash('sha256').update(normalised, 'utf8').digest('hex');
+  return digest === PUBLIC_TEST_MNEMONIC_SHA256;
+}
+
 function ensureNotUnsafeDefault(network, payload = {}) {
   const deploymentMode = validateNetworkConfiguration(payload, network);
   const publicDeployment = deploymentMode === 'public-testnet' || deploymentMode === 'production';
-  const configuredMnemonic = String(env('NIMHUNT_NIMIQ_MNEMONIC', '')).trim().replace(/\s+/g, ' ');
-  const defaultEnabled = envEnabled('NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC');
-  const explicitlyDefault = configuredMnemonic.toLowerCase() === DEFAULT_TEST_MNEMONIC;
+  const configuredMnemonic = env('NIMHUNT_NIMIQ_MNEMONIC', '');
+  const explicitlyPublicTestMnemonic = isPublicTestMnemonic(configuredMnemonic);
 
-  if (publicDeployment && (defaultEnabled || explicitlyDefault)) {
-    throw new Error('Refusing to use the public default test mnemonic in a public NimHunt deployment. Configure a private deployment-specific mnemonic.');
+  if (publicDeployment && explicitlyPublicTestMnemonic) {
+    throw new Error('Refusing to use the public test mnemonic in a public NimHunt deployment. Configure a private deployment-specific mnemonic.');
   }
-  if (network === 'MainAlbatross' && (defaultEnabled || explicitlyDefault)) {
-    throw new Error('Refusing to use the public default test mnemonic on MainAlbatross. Set a private NIMHUNT_NIMIQ_MNEMONIC.');
+  if (network === 'MainAlbatross' && explicitlyPublicTestMnemonic) {
+    throw new Error('Refusing to use the public test mnemonic on MainAlbatross. Set a private NIMHUNT_NIMIQ_MNEMONIC.');
   }
 }
 
@@ -166,7 +167,7 @@ function keyPairForPath(payload) {
   const network = networkFromPayload(payload);
   ensureNotUnsafeDefault(network, payload);
 
-  const mnemonic = mnemonicForNetwork(network);
+  const mnemonic = mnemonicForNetwork();
   const password = env('NIMHUNT_NIMIQ_MNEMONIC_PASSWORD', undefined);
   const keyPath = normalisePath(payload.deposit_key_path || payload.key_path);
 

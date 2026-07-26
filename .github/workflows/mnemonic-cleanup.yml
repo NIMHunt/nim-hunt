@@ -6,6 +6,11 @@ on:
       - main
     paths:
       - .github/workflows/mnemonic-cleanup.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/mnemonic-cleanup-trigger
 
 permissions:
   contents: write
@@ -20,6 +25,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v6
@@ -203,9 +209,11 @@ jobs:
           npm audit --omit=dev --prefix helpers
 
       - name: Commit cleanup
+        env:
+          TARGET_BRANCH: ${{ github.head_ref || 'main' }}
         run: |
           git config user.name 'NIMHunt'
           git config user.email '300551717+NIMHunt@users.noreply.github.com'
           git add README.md constants.py .github/workflows/ci.yml helpers
           git commit -m 'Finish mnemonic cleanup'
-          git push origin HEAD:main
+          git push origin HEAD:"${TARGET_BRANCH}"

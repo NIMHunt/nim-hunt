@@ -1,2 +1,2 @@
 Run the one-time mnemonic cleanup workflow.
-Verify the targeted cleanup against the full test suite.
+Inspect the pinned Nimiq mnemonic API.

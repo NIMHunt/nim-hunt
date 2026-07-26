@@ -45,6 +45,7 @@ from constants import (
     TRANS_TYPE_CLAIM,
     TRANS_TYPE_CREATION_FEE,
     TRANS_TYPE_PLAT_FEE,
+    TRANS_TYPE_REMAINDER_REFUND,
     USER_STATUS_ACTIVE,
 )
 from constants import (
@@ -923,7 +924,7 @@ TRANS_USER_ID = "user_id"                    # FK from USER.id
 TRANS_SPOT_ID = "spot_id"                    # Optional FK from SPOT.id
 TRANS_CLAIM_ID = "claim_id"                  # Optional FK from CLAIM.id
 
-TRANS_TYPE = "type"                          # Enum-ish. FILL_SPOT, CANCEL_SPOT, CLAIM, PLAT_FEE, CREATION_FEE
+TRANS_TYPE = "type"                          # Enum-ish. FILL_SPOT, CANCEL_SPOT, REMAINDER_REFUND, CLAIM, PLAT_FEE, CREATION_FEE
 TRANS_AMOUNT = "amount"                      # Amount in Luna
 
 TRANS_FROM_ADDRESS = "from_address"          # Sender Nimiq address
@@ -1054,6 +1055,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS {TRANS_INDEX_SPOT_ACTIVE_CREATION_FEE_UNIQUE}
 ON {TRANS_TABLE_NAME}({TRANS_SPOT_ID}, {TRANS_TYPE})
 WHERE {TRANS_SPOT_ID} IS NOT NULL
   AND {TRANS_TYPE} = {TRANS_TYPE_CREATION_FEE}
+  AND {TRANS_STATUS} != {TRANS_STATUS_FAILED};
+"""
+
+
+# Prevents duplicate active end-of-Spot remainder refunds while allowing a
+# definitively failed attempt to be retried. Ambiguous local intents remain
+# pending and continue to block automatic retries.
+TRANS_INDEX_SPOT_ACTIVE_REMAINDER_REFUND_UNIQUE = "idx_trans_spot_active_remainder_refund_unique"
+TRANS_INDEX_SPOT_ACTIVE_REMAINDER_REFUND_UNIQUE_QUERY = f"""
+CREATE UNIQUE INDEX IF NOT EXISTS {TRANS_INDEX_SPOT_ACTIVE_REMAINDER_REFUND_UNIQUE}
+ON {TRANS_TABLE_NAME}({TRANS_SPOT_ID}, {TRANS_TYPE})
+WHERE {TRANS_SPOT_ID} IS NOT NULL
+  AND {TRANS_TYPE} = {TRANS_TYPE_REMAINDER_REFUND}
   AND {TRANS_STATUS} != {TRANS_STATUS_FAILED};
 """
 
@@ -1717,6 +1731,7 @@ async def init_db():
         await db.executescript(TRANS_INDEX_CLAIM_ACTIVE_PAYOUT_UNIQUE_QUERY)
         await db.executescript(TRANS_INDEX_SPOT_ACTIVE_CANCELLATION_UNIQUE_QUERY)
         await db.executescript(TRANS_INDEX_SPOT_ACTIVE_CREATION_FEE_UNIQUE_QUERY)
+        await db.executescript(TRANS_INDEX_SPOT_ACTIVE_REMAINDER_REFUND_UNIQUE_QUERY)
         await db.executescript(TRANS_INDEX_STATUS_CREATED_QUERY)
         await db.executescript(TRANS_INDEX_TYPE_STATUS_CREATED_QUERY)
         await db.executescript(TRANS_TRIGGER_SET_COMPLETED_AT_UPDATE_QUERY)

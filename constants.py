@@ -493,6 +493,9 @@ TRANS_TYPE_FILL_SPOT = 10
 # Creator cancels a SPOT and receives a refund or related movement.
 TRANS_TYPE_CANCEL_SPOT = 11
 
+# Remaining Spot funds returned after the Spot has completed.
+TRANS_TYPE_REMAINDER_REFUND = 12
+
 # Recipient receives a successful CLAIM payout.
 TRANS_TYPE_CLAIM = 20
 

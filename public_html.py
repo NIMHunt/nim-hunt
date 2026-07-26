@@ -798,6 +798,7 @@ def _cancellation_summary(transactions: list[dict[str, Any]]) -> dict[str, Any]:
         const.TRANS_TYPE_CANCEL_SPOT,
         const.TRANS_TYPE_PLAT_FEE,
         const.TRANS_TYPE_CREATION_FEE,
+        const.TRANS_TYPE_REMAINDER_REFUND,
     }
     nonfailed_outgoing_amount = sum(
         int(trans.get(schema.TRANS_AMOUNT) or 0)
@@ -856,6 +857,42 @@ def _cancellation_summary(transactions: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _remainder_refund_summary(transactions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return the latest automatic completed-Spot refund state."""
+    rows = [
+        trans
+        for trans in transactions
+        if int(trans.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_REMAINDER_REFUND
+    ]
+    rows.sort(
+        key=lambda trans: (
+            int(trans.get(schema.TRANS_CREATED_AT) or 0),
+            int(trans.get(schema.TRANS_ID) or 0),
+        ),
+        reverse=True,
+    )
+    latest = rows[0] if rows else None
+    return {
+        "has_any": bool(rows),
+        "confirmed_amount": sum(
+            int(trans.get(schema.TRANS_AMOUNT) or 0)
+            for trans in rows
+            if int(trans.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+        ),
+        "latest": (
+            {
+                "status": _transaction_status_label(latest.get(schema.TRANS_STATUS)),
+                "amount": int(latest.get(schema.TRANS_AMOUNT) or 0),
+                "to_address": latest.get(schema.TRANS_TO_ADDRESS),
+                "tx_hash": latest.get(schema.TRANS_TX_HASH),
+                "block_number": latest.get(schema.TRANS_BLOCK_NUMBER),
+            }
+            if latest is not None
+            else None
+        ),
+    }
+
+
 def _serialise_owner_spot(
     spot: dict[str, Any],
     *,
@@ -883,6 +920,7 @@ def _serialise_owner_spot(
     if effectively_complete:
         status_label = "completed"
     cancellation = _cancellation_summary(transactions)
+    remainder_refund = _remainder_refund_summary(transactions)
     cancellation_started = spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None
     # cancellation_started_at is a durable audit and claim-blocking marker. It is
     # deliberately retained after completion, so it must not override a terminal
@@ -1024,6 +1062,7 @@ def _serialise_owner_spot(
             )
         ),
         "cancellation": cancellation,
+        "remainder_refund": remainder_refund,
         "edit_href": f"{const.CREATE_SPOT_URL}/{int(spot[schema.SPOT_ID])}",
         "href": (
             f"{const.CREATE_SPOT_URL}/{int(spot[schema.SPOT_ID])}"

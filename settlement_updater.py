@@ -32,6 +32,7 @@ DEFAULT_SETTLEMENT_INTERVAL_SECONDS = int(getattr(const, "SETTLEMENT_INTERVAL_SE
 DEFAULT_MAX_SETTLEMENTS_PER_RUN = int(getattr(const, "MAX_SETTLEMENTS_PER_RUN", 50))
 DEFAULT_MAX_DURATION_CLAIMS_PER_RUN = int(getattr(const, "MAX_DURATION_CLAIMS_PER_RUN", 200))
 DEFAULT_MAX_STANDARD_PAYOUTS_PER_RUN = int(getattr(const, "MAX_STANDARD_PAYOUTS_PER_RUN", 200))
+DEFAULT_MAX_REMAINDER_REFUNDS_PER_RUN = int(getattr(const, "MAX_REMAINDER_REFUNDS_PER_RUN", 50))
 
 _SETTLEMENT_TASK: asyncio.Task | None = None
 _SETTLEMENT_STOP_EVENT: asyncio.Event | None = None
@@ -516,6 +517,292 @@ async def settle_pending_duration_claims(*, max_claims: int = DEFAULT_MAX_DURATI
     }
 
 
+async def settle_spot_remainder_if_ready(*, spot_id: int) -> RowDict:
+    """Complete one terminal Spot and return every safely-accounted unspent Luna.
+
+    The refund waits until all in-progress duration claims have resolved and all
+    claim/creation-fee obligations have confirmed. This preserves the existing
+    rule that a duration claim begun while the Spot was active may finish after
+    the public entry period closes.
+    """
+    spot_id = int(spot_id)
+    prepared: RowDict | None = None
+    spot_was_completed = False
+    should_complete = False
+
+    try:
+        async with get_db() as db:
+            async with db_access.transaction(db, immediate=True):
+                spot = await db_access.get_spot(db, spot_id=spot_id)
+                if spot is None:
+                    return {"ok": False, "spot_id": spot_id, "reason": "spot_missing"}
+                status = int(spot.get(schema.SPOT_STATUS) or -1)
+                if status in {const.SPOT_STATUS_CANCELLED, const.SPOT_STATUS_BANNED}:
+                    return {"ok": True, "spot_id": spot_id, "refunded": False, "reason": "terminal_without_refund"}
+                if spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None:
+                    return {"ok": True, "spot_id": spot_id, "refunded": False, "reason": "cancellation_managed_separately"}
+
+                pending_claims = await db_access.count_claims_by_status_for_spot(
+                    db,
+                    spot_id=spot_id,
+                    status=const.CLAIM_STATUS_PENDING,
+                )
+                if pending_claims > 0:
+                    return {
+                        "ok": True,
+                        "spot_id": spot_id,
+                        "refunded": False,
+                        "deferred": True,
+                        "reason": "pending_claims",
+                        "pending_claim_count": int(pending_claims),
+                    }
+
+                spot_is_prizedraw = await db_access.is_prizedraw(db, spot_id=spot_id)
+                if status == const.SPOT_STATUS_PUBLISHED:
+                    if spot_is_prizedraw:
+                        return {
+                            "ok": True,
+                            "spot_id": spot_id,
+                            "refunded": False,
+                            "deferred": True,
+                            "reason": "prizedraw_not_settled",
+                        }
+                    now = await _get_unixepoch(db)
+                    ends_at = _spot_absolute_ends_at(spot)
+                    max_total = int(spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) or 0)
+                    success_count = await db_access.count_claims_by_status_for_spot(
+                        db,
+                        spot_id=spot_id,
+                        status=const.CLAIM_STATUS_SUCCESS,
+                    )
+                    period_ended = ends_at is not None and int(ends_at) <= int(now)
+                    capacity_reached = max_total > 0 and int(success_count) >= max_total
+                    if not period_ended and not capacity_reached:
+                        return {"ok": True, "spot_id": spot_id, "refunded": False, "reason": "not_terminal"}
+                    should_complete = True
+                    spot[schema.SPOT_STATUS] = const.SPOT_STATUS_COMPLETED
+                elif status != const.SPOT_STATUS_COMPLETED:
+                    return {"ok": True, "spot_id": spot_id, "refunded": False, "reason": "not_terminal"}
+
+                if not spot_is_prizedraw:
+                    unpaid_claim_count = await db_access.count_successful_standard_claims_without_confirmed_payout(
+                        db,
+                        spot_id=spot_id,
+                    )
+                    if unpaid_claim_count > 0:
+                        return {
+                            "ok": True,
+                            "spot_id": spot_id,
+                            "refunded": False,
+                            "deferred": True,
+                            "reason": "claim_payouts_unconfirmed",
+                            "unconfirmed_claim_payout_count": int(unpaid_claim_count),
+                        }
+
+                transactions = await db_access.get_transactions_by_spot(
+                    db,
+                    spot_id=spot_id,
+                    limit=db_access.MAX_LIMIT,
+                )
+                blocking_types = {
+                    const.TRANS_TYPE_FILL_SPOT,
+                    const.TRANS_TYPE_CLAIM,
+                    const.TRANS_TYPE_CREATION_FEE,
+                    const.TRANS_TYPE_REMAINDER_REFUND,
+                }
+                pending_outgoing = [
+                    row
+                    for row in transactions
+                    if int(row.get(schema.TRANS_TYPE) or -1) in blocking_types
+                    and int(row.get(schema.TRANS_STATUS) if row.get(schema.TRANS_STATUS) is not None else -1)
+                    == const.TRANS_STATUS_PENDING
+                ]
+                if pending_outgoing:
+                    return {
+                        "ok": True,
+                        "spot_id": spot_id,
+                        "refunded": False,
+                        "deferred": True,
+                        "reason": "financial_transaction_pending",
+                        "pending_transaction_count": len(pending_outgoing),
+                    }
+
+                failed_deposits = [
+                    row
+                    for row in transactions
+                    if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_FILL_SPOT
+                    and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_FAILED
+                ]
+                manual_review_required = bool(failed_deposits)
+
+                confirmed_deposits = [
+                    row
+                    for row in transactions
+                    if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_FILL_SPOT
+                    and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+                ]
+                confirmed_deposit_total = sum(int(row.get(schema.TRANS_AMOUNT) or 0) for row in confirmed_deposits)
+                confirmed_claim_total = sum(
+                    int(row.get(schema.TRANS_AMOUNT) or 0)
+                    for row in transactions
+                    if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CLAIM
+                    and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+                )
+                confirmed_creation_fee_total = sum(
+                    int(row.get(schema.TRANS_AMOUNT) or 0)
+                    for row in transactions
+                    if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_CREATION_FEE
+                    and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+                )
+                expected_creation_fee = int(db_access.spot_creation_fee_amount(spot))
+                if confirmed_creation_fee_total < expected_creation_fee:
+                    return {
+                        "ok": True,
+                        "spot_id": spot_id,
+                        "refunded": False,
+                        "deferred": True,
+                        "reason": "creation_fee_unconfirmed",
+                        "expected_creation_fee": expected_creation_fee,
+                        "confirmed_creation_fee_total": confirmed_creation_fee_total,
+                    }
+
+                confirmed_refund_total = sum(
+                    int(row.get(schema.TRANS_AMOUNT) or 0)
+                    for row in transactions
+                    if int(row.get(schema.TRANS_TYPE) or -1) == const.TRANS_TYPE_REMAINDER_REFUND
+                    and int(row.get(schema.TRANS_STATUS) or -1) == const.TRANS_STATUS_CONFIRMED
+                )
+                remainder_amount = max(
+                    0,
+                    confirmed_deposit_total
+                    - confirmed_claim_total
+                    - confirmed_creation_fee_total
+                    - confirmed_refund_total,
+                )
+                if should_complete:
+                    await db_access.set_spot_status_to_completed(db, spot_id=spot_id)
+                    spot_was_completed = True
+
+                if remainder_amount <= 0:
+                    await db_access.mark_spot_remainder_settled(db, spot_id=spot_id)
+                    prepared = {
+                        "ok": True,
+                        "spot_id": spot_id,
+                        "refunded": False,
+                        "reason": "no_remainder",
+                        "remainder_amount": 0,
+                        "manual_review_required": manual_review_required,
+                        "failed_deposit_count": len(failed_deposits),
+                    }
+                else:
+                    source = next(
+                        (
+                            row
+                            for row in confirmed_deposits
+                            if str(row.get(schema.TRANS_FROM_ADDRESS) or "").strip()
+                        ),
+                        None,
+                    )
+                    if source is None:
+                        return {
+                            "ok": False,
+                            "spot_id": spot_id,
+                            "refunded": False,
+                            "reason": "confirmed_deposit_sender_missing",
+                        }
+                    prepared = {
+                        "ok": True,
+                        "spot_id": spot_id,
+                        "refunded": False,
+                        "remainder_amount": int(remainder_amount),
+                        "refund_address": str(source.get(schema.TRANS_FROM_ADDRESS) or "").strip(),
+                        "refund_source_tx_hash": str(source.get(schema.TRANS_TX_HASH) or "").strip(),
+                        "confirmed_deposit_total": confirmed_deposit_total,
+                        "confirmed_claim_total": confirmed_claim_total,
+                        "confirmed_creation_fee_total": confirmed_creation_fee_total,
+                        "confirmed_remainder_refund_total": confirmed_refund_total,
+                        "manual_review_required": manual_review_required,
+                        "failed_deposit_count": len(failed_deposits),
+                    }
+
+            if spot_was_completed:
+                await cache.notify_spot_changed(db, spot_id=spot_id)
+
+        if prepared is None or int(prepared.get("remainder_amount") or 0) <= 0:
+            return prepared or {"ok": True, "spot_id": spot_id, "refunded": False, "reason": "not_ready"}
+
+        try:
+            resolved_address = await trans_updater.resolve_nimiq_pay_payout_address(
+                str(prepared["refund_address"]),
+                source_tx_hash=str(prepared.get("refund_source_tx_hash") or "") or None,
+            )
+        except Exception as exc:
+            return {
+                **prepared,
+                "ok": True,
+                "refunded": False,
+                "deferred": True,
+                "reason": "refund_address_resolution_pending",
+                "error": repr(exc),
+            }
+
+        async with get_db() as send_db:
+            try:
+                send_result = await trans_updater.submit_spot_remainder_refund_transaction(
+                    send_db,
+                    spot_id=spot_id,
+                    to_address=resolved_address,
+                    amount=int(prepared["remainder_amount"]),
+                )
+            except RuntimeError as exc:
+                duplicate_guard_hit = "already has a non-failed remainder refund transaction" in str(exc)
+                if duplicate_guard_hit and await db_access.has_nonfailed_spot_remainder_refund_transaction(
+                    send_db,
+                    spot_id=spot_id,
+                ):
+                    return {
+                        **prepared,
+                        "ok": True,
+                        "refunded": False,
+                        "already_exists": True,
+                        "reason": "concurrent_remainder_refund_already_recorded",
+                    }
+                raise
+
+        return {
+            **prepared,
+            **send_result,
+            "ok": bool(send_result.get("ok")),
+            "refunded": bool(send_result.get("ok") and not send_result.get("already_exists")),
+            "refund_address": resolved_address,
+        }
+    except Exception as exc:
+        return {"ok": False, "spot_id": spot_id, "refunded": False, "reason": repr(exc)}
+
+
+async def settle_spot_remainders(
+    *,
+    max_spots: int = DEFAULT_MAX_REMAINDER_REFUNDS_PER_RUN,
+) -> RowDict:
+    """Complete terminal Spots and safely return their unspent funds."""
+    async with get_db() as db:
+        spot_ids = await db_access.get_spot_ids_ready_for_remainder_refund(
+            db,
+            limit=int(max_spots),
+        )
+
+    results = [await settle_spot_remainder_if_ready(spot_id=spot_id) for spot_id in spot_ids]
+    return {
+        "ok": all(bool(result.get("ok")) for result in results),
+        "checked_count": len(spot_ids),
+        "submitted_count": sum(1 for result in results if result.get("refunded")),
+        "deferred_count": sum(1 for result in results if result.get("deferred")),
+        "manual_review_count": sum(1 for result in results if result.get("manual_review_required")),
+        "failed_count": sum(1 for result in results if not result.get("ok")),
+        "results": results,
+    }
+
+
 async def retry_pending_spot_cancellations(*, limit: int = 50) -> RowDict:
     """Resume durable cancellation requests after their blockers resolve."""
     async with get_db() as db:
@@ -555,6 +842,7 @@ async def run_settlement_pass() -> RowDict:
     standard_payout_result = await retry_unpaid_standard_claim_payouts()
     prizedraw_result = await settle_ready_prizedraws()
     payout_retry_result = await retry_pending_prizedraw_payouts()
+    remainder_result = await settle_spot_remainders()
     cancellation_result = await retry_pending_spot_cancellations()
     return {
         "ok": (
@@ -562,12 +850,14 @@ async def run_settlement_pass() -> RowDict:
             and bool(standard_payout_result.get("ok"))
             and bool(prizedraw_result.get("ok"))
             and bool(payout_retry_result.get("ok"))
+            and bool(remainder_result.get("ok"))
             and bool(cancellation_result.get("ok"))
         ),
         "duration_claims": duration_result,
         "standard_claim_payouts": standard_payout_result,
         "prizedraws": prizedraw_result,
         "prizedraw_payout_retries": payout_retry_result,
+        "spot_remainder_refunds": remainder_result,
         "spot_cancellations": cancellation_result,
     }
 

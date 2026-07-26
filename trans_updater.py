@@ -234,6 +234,7 @@ _SERVER_INITIATED_TRANSACTION_TYPES = frozenset({
     const.TRANS_TYPE_CLAIM,
     const.TRANS_TYPE_PLAT_FEE,
     const.TRANS_TYPE_CREATION_FEE,
+    const.TRANS_TYPE_REMAINDER_REFUND,
 })
 
 
@@ -1698,6 +1699,7 @@ async def mark_trans_as_failed(db, trans: RowDict, *, reason: str | None = None)
         const.TRANS_TYPE_CANCEL_SPOT,
         const.TRANS_TYPE_PLAT_FEE,
         const.TRANS_TYPE_CREATION_FEE,
+        const.TRANS_TYPE_REMAINDER_REFUND,
     }:
         await cache.notify_spot_changed(db, spot_id=trans.get(schema.TRANS_SPOT_ID))
 
@@ -2259,6 +2261,42 @@ async def submit_spot_refund_transaction(
             "user_id": int(spot[schema.SPOT_CREATED_BY]),
             "spot_id": int(spot_id),
         },
+    )
+    return {**result, "spot_id": int(spot_id)}
+
+
+async def submit_spot_remainder_refund_transaction(
+    db,
+    *,
+    spot_id: int,
+    to_address: str,
+    amount: int,
+) -> RowDict:
+    """Return confirmed unspent funds after a Spot has become terminal."""
+    amount = int(amount)
+    if amount <= 0:
+        return {"ok": True, "skipped": True, "reason": "zero_amount", "trans_id": None}
+
+    spot = await db_access.get_spot(db, spot_id=int(spot_id))
+    if spot is None:
+        raise ValueError(f"spot id={spot_id} does not exist")
+    if int(spot.get(schema.SPOT_STATUS) or -1) != const.SPOT_STATUS_COMPLETED:
+        raise ValueError("remainder refunds require a completed Spot")
+
+    result = await _submit_recorded_chain_send(
+        db,
+        spot=spot,
+        to_address=to_address,
+        amount=amount,
+        memo=build_transaction_description("Unused Spot Funds", spot.get(schema.SPOT_TITLE)),
+        intent_kind="spot_remainder_refund",
+        intent_primary_id=int(spot_id),
+        create_transaction=db_access.create_spot_remainder_refund_transaction,
+        create_transaction_kwargs={
+            "user_id": int(spot[schema.SPOT_CREATED_BY]),
+            "spot_id": int(spot_id),
+        },
+        serialize_intent=True,
     )
     return {**result, "spot_id": int(spot_id)}
 

@@ -44,7 +44,8 @@ class PrizedrawSettlementIntegrationTest(unittest.IsolatedAsyncioTestCase):
             yield object()
 
         @asynccontextmanager
-        async def fake_transaction(db):
+        async def fake_transaction(db, *, immediate=False):
+            self.assertTrue(immediate)
             yield
 
         spot_published = {

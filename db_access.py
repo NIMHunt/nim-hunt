@@ -3758,6 +3758,53 @@ async def create_spot_refund_transaction(
     )
 
 
+async def has_nonfailed_spot_remainder_refund_transaction(db, *, spot_id: int) -> bool:
+    cur = await db.execute(
+        f"""
+        SELECT 1
+        FROM {schema.TRANS_TABLE_NAME}
+        WHERE {schema.TRANS_SPOT_ID} = ?
+          AND {schema.TRANS_TYPE} = ?
+          AND {schema.TRANS_STATUS} != ?
+        LIMIT 1;
+        """,
+        (int(spot_id), const.TRANS_TYPE_REMAINDER_REFUND, const.TRANS_STATUS_FAILED),
+    )
+    return await cur.fetchone() is not None
+
+
+async def create_spot_remainder_refund_transaction(
+    db,
+    *,
+    user_id: int,
+    spot_id: int,
+    amount: int,
+    from_address: str,
+    to_address: str,
+    tx_hash: str,
+) -> int:
+    if await has_nonfailed_spot_remainder_refund_transaction(db, spot_id=int(spot_id)):
+        raise RuntimeError(f"Spot id={spot_id} already has a non-failed remainder refund transaction")
+    try:
+        return await _create_transaction(
+            db,
+            user_id=user_id,
+            spot_id=spot_id,
+            claim_id=None,
+            trans_type=const.TRANS_TYPE_REMAINDER_REFUND,
+            amount=amount,
+            from_address=from_address,
+            to_address=to_address,
+            tx_hash=tx_hash,
+        )
+    except sqlite3.IntegrityError as exc:
+        if await has_nonfailed_spot_remainder_refund_transaction(db, spot_id=int(spot_id)):
+            raise RuntimeError(
+                f"Spot id={spot_id} already has a non-failed remainder refund transaction"
+            ) from exc
+        raise
+
+
 async def create_claim_transaction(
     db,
     *,
@@ -4404,6 +4451,41 @@ async def get_platform_dashboard_counts(db) -> RowDict:
     return dict(row)
 
 
+SPOT_REMAINDER_SETTLED_METADATA_PREFIX = "spot_remainder_settled:"
+
+
+def _spot_remainder_settled_metadata_key(spot_id: int) -> str:
+    return f"{SPOT_REMAINDER_SETTLED_METADATA_PREFIX}{int(spot_id)}"
+
+
+async def is_spot_remainder_settled(db, *, spot_id: int) -> bool:
+    cur = await db.execute(
+        f"""
+        SELECT 1
+        FROM {schema.APP_METADATA_TABLE_NAME}
+        WHERE {schema.APP_METADATA_KEY} = ?
+        LIMIT 1;
+        """,
+        (_spot_remainder_settled_metadata_key(spot_id),),
+    )
+    return await cur.fetchone() is not None
+
+
+async def mark_spot_remainder_settled(db, *, spot_id: int) -> None:
+    await db.execute(
+        f"""
+        INSERT INTO {schema.APP_METADATA_TABLE_NAME} (
+            {schema.APP_METADATA_KEY},
+            {schema.APP_METADATA_VALUE}
+        )
+        VALUES (?, CAST(unixepoch() AS TEXT))
+        ON CONFLICT ({schema.APP_METADATA_KEY}) DO UPDATE SET
+            {schema.APP_METADATA_VALUE} = excluded.{schema.APP_METADATA_VALUE};
+        """,
+        (_spot_remainder_settled_metadata_key(spot_id),),
+    )
+
+
 async def get_spot_financial_summary(db, *, spot_id: int) -> RowDict:
     """Return transaction totals grouped by type/status for a SPOT."""
     rows = await db.execute_fetchall(
@@ -4426,6 +4508,111 @@ async def get_spot_financial_summary(db, *, spot_id: int) -> RowDict:
         "trans_count": int(r["trans_count"]),
         "total_amount": int(r["total_amount"]),
     } for r in rows}
+
+
+async def count_successful_standard_claims_without_confirmed_payout(
+    db,
+    *,
+    spot_id: int,
+) -> int:
+    """Count successful Standard claims whose reward has not confirmed yet."""
+    cur = await db.execute(
+        f"""
+        SELECT COUNT(*) AS claim_count
+        FROM {schema.CLAIM_TABLE_NAME} c
+        LEFT JOIN {schema.PRIZEDRAW_TABLE_NAME} pd
+            ON pd.{schema.PRIZEDRAW_SPOT_ID} = c.{schema.CLAIM_SPOT_ID}
+        WHERE c.{schema.CLAIM_SPOT_ID} = ?
+          AND c.{schema.CLAIM_STATUS} = ?
+          AND pd.{schema.PRIZEDRAW_SPOT_ID} IS NULL
+          AND NOT EXISTS (
+                SELECT 1
+                FROM {schema.TRANS_TABLE_NAME} t
+                WHERE t.{schema.TRANS_CLAIM_ID} = c.{schema.CLAIM_ID}
+                  AND t.{schema.TRANS_TYPE} = ?
+                  AND t.{schema.TRANS_STATUS} = ?
+          );
+        """,
+        (
+            int(spot_id),
+            const.CLAIM_STATUS_SUCCESS,
+            const.TRANS_TYPE_CLAIM,
+            const.TRANS_STATUS_CONFIRMED,
+        ),
+    )
+    row = await cur.fetchone()
+    return int(row["claim_count"] or 0) if row is not None else 0
+
+
+async def get_spot_ids_ready_for_remainder_refund(
+    db,
+    *,
+    now: int | None = None,
+    limit: int = DEFAULT_LIMIT,
+) -> list[int]:
+    """Return terminal Spots whose pending claims no longer need protection.
+
+    Standard duration claims deliberately do not reserve capacity and may finish
+    after the public entry period closes. They therefore keep the Spot out of
+    this queue until every pending claim has succeeded or failed. Completed
+    Prizedraw winners likewise remain pending until their payouts confirm.
+    """
+    if now is None:
+        now = await get_unixepoch(db)
+    rows = await db.execute_fetchall(
+        f"""
+        WITH claim_counts AS (
+            SELECT
+                {schema.CLAIM_SPOT_ID} AS spot_id,
+                SUM(CASE WHEN {schema.CLAIM_STATUS} = {const.CLAIM_STATUS_PENDING} THEN 1 ELSE 0 END) AS pending_count,
+                SUM(CASE WHEN {schema.CLAIM_STATUS} = {const.CLAIM_STATUS_SUCCESS} THEN 1 ELSE 0 END) AS success_count
+            FROM {schema.CLAIM_TABLE_NAME}
+            GROUP BY {schema.CLAIM_SPOT_ID}
+        )
+        SELECT s.{schema.SPOT_ID} AS spot_id
+        FROM {schema.SPOT_TABLE_NAME} s
+        LEFT JOIN {schema.PRIZEDRAW_TABLE_NAME} pd
+            ON pd.{schema.PRIZEDRAW_SPOT_ID} = s.{schema.SPOT_ID}
+        LEFT JOIN claim_counts cc
+            ON cc.spot_id = s.{schema.SPOT_ID}
+        WHERE s.{schema.SPOT_CANCELLATION_STARTED_AT} IS NULL
+          AND COALESCE(cc.pending_count, 0) = 0
+          AND NOT EXISTS (
+                SELECT 1
+                FROM {schema.APP_METADATA_TABLE_NAME} metadata
+                WHERE metadata.{schema.APP_METADATA_KEY} = (
+                    '{SPOT_REMAINDER_SETTLED_METADATA_PREFIX}' || CAST(s.{schema.SPOT_ID} AS TEXT)
+                )
+          )
+          AND (
+                s.{schema.SPOT_STATUS} = ?
+                OR (
+                    s.{schema.SPOT_STATUS} = ?
+                    AND pd.{schema.PRIZEDRAW_SPOT_ID} IS NULL
+                    AND (
+                        (
+                            s.{schema.SPOT_STARTS_AT} IS NOT NULL
+                            AND s.{schema.SPOT_ENDS_AT} IS NOT NULL
+                            AND (s.{schema.SPOT_STARTS_AT} + s.{schema.SPOT_ENDS_AT}) <= ?
+                        )
+                        OR (
+                            s.{schema.SPOT_MAX_TOTAL_CLAIMS} > 0
+                            AND COALESCE(cc.success_count, 0) >= s.{schema.SPOT_MAX_TOTAL_CLAIMS}
+                        )
+                    )
+                )
+          )
+        ORDER BY s.{schema.SPOT_ID} ASC
+        LIMIT ?;
+        """,
+        (
+            const.SPOT_STATUS_COMPLETED,
+            const.SPOT_STATUS_PUBLISHED,
+            int(now),
+            _clamp_limit(limit),
+        ),
+    )
+    return [int(row["spot_id"]) for row in rows]
 
 
 async def get_due_spots_to_complete(

@@ -487,12 +487,29 @@ async def x_healthz() -> JSONResponse:
 
 @app.get("/transaction-healthz", include_in_schema=False)
 async def transaction_healthz() -> JSONResponse:
-    """Return secret-free transaction-refresher diagnostics."""
+    """Return secret-free financial-worker diagnostics.
+
+    Ordinary pending chain transactions are healthy. A stopped/failed worker or
+    a local outbox intent without a chain hash needs operator attention, so this
+    dedicated endpoint reports HTTP 503 instead of presenting a false green
+    status. Railway continues to use the lightweight ``/healthz`` endpoint.
+    """
+    diagnostics = await funding_flow_diagnostics()
+    refresher = diagnostics.get("refresher") or {}
+    settlement = diagnostics.get("settlement") or {}
+    ok = bool(
+        refresher.get("running")
+        and refresher.get("healthy")
+        and settlement.get("running")
+        and settlement.get("healthy")
+        and int(diagnostics.get("local_intent_count") or 0) == 0
+    )
     return JSONResponse(
         {
-            "ok": True,
-            "transactions": await funding_flow_diagnostics(),
-        }
+            "ok": ok,
+            "transactions": diagnostics,
+        },
+        status_code=200 if ok else 503,
     )
 
 

@@ -8,12 +8,12 @@ on:
       - .github/mnemonic-cleanup-trigger
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  cleanup:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
 
     steps:
       - name: Check out pull-request branch
@@ -26,64 +26,25 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
 
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v6
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: helpers/package-lock.json
-
-      - name: Install dependencies
+      - name: Run cleanup diagnostically
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt -r requirements-dev.txt
-          npm ci --prefix helpers
-
-      - name: Apply cleanup and record diagnostics
-        env:
-          TARGET_BRANCH: ${{ github.head_ref }}
-        run: |
+          set +e
           git show origin/main:scripts/mnemonic_cleanup.py > /tmp/mnemonic_cleanup.py
-          python /tmp/mnemonic_cleanup.py
-          # GitHub restricts workflow-file updates made by a workflow token. The
-          # obsolete CI environment line is removed separately through the repo API.
-          git checkout -- .github/workflows/ci.yml
-          git config user.name 'NIMHunt'
-          git config user.email '300551717+NIMHunt@users.noreply.github.com'
-          git add -A
-          git commit -m 'Apply mnemonic cleanup'
-          git push origin HEAD:"${TARGET_BRANCH}"
+          python /tmp/mnemonic_cleanup.py > /tmp/cleanup.log 2>&1
+          echo "$?" > /tmp/cleanup-status.txt
+          git diff --binary > /tmp/cleanup.patch
+          cp .github/mnemonic-cleanup-report.txt /tmp/mnemonic-cleanup-report.txt 2>/dev/null || true
+          exit 0
 
-      - name: Require an empty diagnostic report
-        run: |
-          if [ -s .github/mnemonic-cleanup-report.txt ]; then
-            cat .github/mnemonic-cleanup-report.txt
-            exit 1
-          fi
-
-      - name: Run complete verification
-        run: |
-          python -m pytest -q
-          npm test --prefix helpers
-          ruff check .
-          python -m compileall -q *.py tests
-          for file in static/*.js; do node --check --input-type=module < "$file"; done
-          for file in helpers/*.mjs; do node --check "$file"; done
-          for file in *.sh; do bash -n "$file"; done
-          python -m pip check
-          python -m pip_audit --progress-spinner off
-          npm audit --omit=dev --prefix helpers
-
-      - name: Finalise verified cleanup
-        env:
-          TARGET_BRANCH: ${{ github.head_ref }}
-        run: |
-          rm -f .github/mnemonic-cleanup-report.txt .github/mnemonic-cleanup-trigger
-          git add -A
-          git commit -m 'Verify mnemonic cleanup'
-          git push origin HEAD:"${TARGET_BRANCH}"
+      - name: Upload diagnostic output
+        uses: actions/upload-artifact@v4
+        with:
+          name: mnemonic-cleanup-diagnostics
+          path: |
+            /tmp/cleanup.log
+            /tmp/cleanup-status.txt
+            /tmp/cleanup.patch
+            /tmp/mnemonic-cleanup-report.txt
+          if-no-files-found: error
+          retention-days: 1

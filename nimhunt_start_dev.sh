@@ -57,14 +57,21 @@ if [ ! -d "$NIMIQ_CORE_PATH" ]; then
     exit 1
 fi
 
+if [ -z "${NIMHUNT_NIMIQ_MNEMONIC:-}" ]; then
+    echo "NIMHUNT_NIMIQ_MNEMONIC is not set."
+    echo "Export a dedicated TestAlbatross mnemonic before starting NimHunt."
+    echo "The repository no longer contains a built-in development mnemonic."
+    read -r -p "Press Enter to close..." _
+    exit 1
+fi
+
 source venv/bin/activate
 
 export NIMHUNT_DEPLOYMENT_MODE="${NIMHUNT_DEPLOYMENT_MODE:-development}"
 
-# Development/TestAlbatross settings.
-# Replace the default-test-mnemonic setting with NIMHUNT_NIMIQ_MNEMONIC before using real funds.
+# Development/TestAlbatross settings. The signing mnemonic must be supplied
+# explicitly through NIMHUNT_NIMIQ_MNEMONIC and must never be committed.
 export NIMHUNT_NIMIQ_NETWORK="${NIMHUNT_NIMIQ_NETWORK:-TestAlbatross}"
-export NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC="${NIMHUNT_NIMIQ_ALLOW_DEFAULT_TEST_MNEMONIC:-1}"
 export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND="${NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND:-node \"${HELPER_PATH}\"}"
 export NIMHUNT_NIMIQ_SEND_COMMAND="${NIMHUNT_NIMIQ_SEND_COMMAND:-node \"${HELPER_PATH}\"}"
 

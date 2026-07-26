@@ -1,7 +1,7 @@
 """Preserve Nimiq Pay's user-facing return address for Spot refunds.
 
 Nimiq Pay can spend through a temporary HTLC even though ``listAccounts()``
-returns the user's ordinary account address. The chain sender is authoritative
+returns the user's ordinary account address.  The chain sender is authoritative
 for proving that a deposit happened, but it is not a safe refund destination.
 This hook stores the address shared by Nimiq Pay alongside each submitted
 deposit hash and uses it for cancellation and end-of-Spot remainder refunds.
@@ -83,6 +83,7 @@ async def _remember_return_address(
         existing_for_spot = wallet.normalise_nimiq_address(
             existing_for_spot,
             field_name="stored Nimiq Pay return address",
+            allow_dev_placeholder=bool(getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)),
         )
         if existing_for_spot != return_address:
             raise ValueError(
@@ -103,6 +104,7 @@ async def _remember_return_address(
         existing_address = wallet.normalise_nimiq_address(
             str(existing_hash["return_address"]),
             field_name="stored Nimiq Pay return address",
+            allow_dev_placeholder=bool(getattr(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False)),
         )
         if int(existing_hash["spot_id"]) != int(spot_id) or existing_address != return_address:
             raise ValueError("this transaction hash is already attached to a different return address")

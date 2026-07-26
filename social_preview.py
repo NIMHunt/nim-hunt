@@ -13,7 +13,12 @@ from fastapi import status
 
 import constants as const
 import database as schema
-from social_card_images import CARD_VERSION, get_spot_by_ref, public_spot_ref
+from social_card_images import (
+    CARD_VERSION,
+    get_spot_by_ref,
+    public_spot_ref,
+    spot_card_revision,
+)
 from social_card_images import router as router
 
 DEFAULT_BASE_URL = "https://nimhunt.app"
@@ -43,8 +48,9 @@ def public_url(path: str) -> str:
     return f"{public_base_url()}{path if path.startswith('/') else '/' + path}"
 
 
-def image_url(path: str) -> str:
-    return f"{public_url(path)}?v={CARD_VERSION}"
+def image_url(path: str, *, revision: str | None = None) -> str:
+    version = CARD_VERSION if not revision else f"{CARD_VERSION}-{revision}"
+    return f"{public_url(path)}?v={version}"
 
 
 def compact(value: object, fallback: str) -> str:
@@ -151,7 +157,10 @@ def spot_metadata(spot: dict[str, Any]) -> SocialMetadata:
         f"NimHunt: {title}",
         description,
         public_url(f"{const.SPOT_PAGE_URL_PREFIX}/{ref}"),
-        image_url(f"/social/spot/{ref}.png"),
+        image_url(
+            f"/social/spot/{ref}.png",
+            revision=spot_card_revision(spot),
+        ),
         f"Map showing {title} and its {radius}-metre claim radius.",
     )
 

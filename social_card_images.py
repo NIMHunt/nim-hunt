@@ -69,6 +69,35 @@ def public_spot_ref(spot: dict[str, Any]) -> str:
     return str(spot.get(schema.SPOT_LINK) or spot[schema.SPOT_ID])
 
 
+def spot_card_revision(spot: dict[str, Any]) -> str:
+    """Return a stable revision for every input that changes the map card.
+
+    Drafts are not rendered publicly, but their location and radius can change.
+    Deriving both the public image URL and local cache key from these inputs means
+    the first card requested after publication always represents the latest draft
+    values, without fetching map tiles after every private save.
+    """
+
+    def coordinate(value: object) -> float | None:
+        if value is None:
+            return None
+        return round(float(value), 7)
+
+    payload = {
+        "lat": coordinate(spot.get(schema.SPOT_LAT)),
+        "long": coordinate(spot.get(schema.SPOT_LONG)),
+        "radius": max(1, int(spot.get(schema.SPOT_RADIUS) or 25)),
+        "is_prizedraw": spot.get(schema.PRIZEDRAW_PRIZE_COUNT) is not None,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def spot_card_cache_key(spot: dict[str, Any]) -> str:
+    """Return the cache key for the Spot's current map-card revision."""
+    return f"spot:{public_spot_ref(spot)}:{spot_card_revision(spot)}"
+
+
 def cache_root(env: str, default: str) -> Path:
     path = Path(os.getenv(env, f"/tmp/{default}")).expanduser()
     path.mkdir(parents=True, exist_ok=True)
@@ -409,11 +438,10 @@ async def spot_card(request: Request, ref: str) -> Response:
         now = await db_access.get_unixepoch(db)
     if spot is None or not spot_is_public(spot, now):
         raise HTTPException(status_code=404)
-    ref = public_spot_ref(spot)
     is_prizedraw = spot.get(schema.PRIZEDRAW_PRIZE_COUNT) is not None
     data = await asyncio.to_thread(
         cached_card,
-        f"spot:{ref}",
+        spot_card_cache_key(spot),
         lambda: render_spot_card(spot, is_prizedraw),
     )
     return png_response(request, data)

@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "templates"
 STATIC = ROOT / "static"
-X_SHARE_VERSION = "x-share-v3-20260725"
+X_SHARE_VERSION = "x-share-v4-20260726"
 EXPECTED_TEMPLATES = {
     "find_spots.html",
     "my_spots.html",
@@ -45,6 +45,9 @@ def test_x_share_uses_official_web_intent_and_correct_row_url() -> None:
 def test_x_share_link_is_inserted_after_public_link_copy_control() -> None:
     source = (STATIC / "x_share.js").read_text(encoding="utf-8")
 
+    assert "if (!rowIsShareable(row)) continue" in source
+    assert "url.pathname.startsWith('/spot/')" in source
+    assert "return isIndividualClaimPage() || Boolean(publishedSpotLinkForRow(row))" in source
     assert "copyButton.after(createXShareLink(shareUrlForRow(row)))" in source
     assert "row.querySelector('.spot-copy-button')" in source
     assert "row.querySelector('.spot-x-share-link')" in source

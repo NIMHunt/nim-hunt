@@ -48,11 +48,21 @@ function isIndividualClaimPage() {
     return Boolean(document.body.dataset.claimId);
 }
 
+function publishedSpotLinkForRow(row) {
+    const spotHref = row.querySelector('.spot-link-anchor')?.href;
+    if (!spotHref) return null;
+
+    const url = new URL(spotHref, window.location.origin);
+    return url.pathname.startsWith('/spot/') ? url : null;
+}
+
+function rowIsShareable(row) {
+    return isIndividualClaimPage() || Boolean(publishedSpotLinkForRow(row));
+}
+
 function shareUrlForRow(row) {
     if (isIndividualClaimPage()) return canonicalPageUrl();
-
-    const spotHref = row.querySelector('.spot-link-anchor')?.href;
-    return cleanAbsoluteUrl(spotHref || canonicalPageUrl());
+    return cleanAbsoluteUrl(publishedSpotLinkForRow(row));
 }
 
 function shareLabel() {
@@ -78,6 +88,7 @@ function addXShareLinks(root = document) {
 
     for (const row of rows) {
         if (row.querySelector('.spot-x-share-link')) continue;
+        if (!rowIsShareable(row)) continue;
 
         const copyButton = row.querySelector('.spot-copy-button');
         if (!copyButton) continue;

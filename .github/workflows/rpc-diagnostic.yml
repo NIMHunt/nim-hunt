@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/fix-mainnet-rpc-startup
+  pull_request:
 
 permissions:
   contents: read

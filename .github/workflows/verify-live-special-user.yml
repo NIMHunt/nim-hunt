@@ -20,4 +20,4 @@ jobs:
         env:
           BASE_URL: https://nimhunt.app
           SPOT_SLUG: GLqKYswoYdo
-        run: curl -fsSL https://raw.githubusercontent.com/NIMHunt/nim-hunt/agent/verify-live-special-user/.github/verify_live_special_user.py | python
+        run: curl -fsSL https://raw.githubusercontent.com/NIMHunt/nim-hunt/b8448341aaba682f4c9b921b942be4b3e820fd27/.github/verify_live_special_user.py | python

@@ -1067,7 +1067,7 @@ h2 {
     display: inline-flex;
     align-items: center;
     gap: 0.24em;
-    vertical-align: middle;
+    vertical-align: baseline;
 }
 
 .special-user-display-name.is-special-user {

@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/verify-live-special-user
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -46,7 +49,7 @@ jobs:
           print('FIND new asset version:', 'special-user-badge-v1-20260727' in find_page)
 
           spot_ui = fetch('/static/spot_ui.js?v=special-user-badge-v1-20260727')
-          for marker in ('createUserDisplayName', 'nq-hexagon', 'This is a special user', "nq-purple"):
+          for marker in ('createUserDisplayName', 'nq-hexagon', 'This is a special user', 'nq-purple'):
               print(f'SPOT_UI contains {marker!r}:', marker in spot_ui)
 
           find_js = fetch('/static/find_spots.js?v=special-user-badge-v1-20260727')

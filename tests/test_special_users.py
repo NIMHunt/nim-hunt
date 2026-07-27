@@ -15,20 +15,20 @@ def _spot(created_by: int) -> dict:
     }
 
 
-def test_special_user_allow_list_is_immutable_and_initially_contains_only_user_zero():
-    assert const.SPECIAL_USER_IDS == frozenset({0})
+def test_special_user_allow_list_is_immutable_and_contains_live_operator_user():
+    assert const.SPECIAL_USER_IDS == frozenset({1})
 
 
 def test_map_spot_serialiser_marks_only_allow_listed_creator():
-    special = public_html._serialise_spot_for_map(_spot(0), now=1)
-    ordinary = public_html._serialise_spot_for_map(_spot(1), now=1)
+    special = public_html._serialise_spot_for_map(_spot(1), now=1)
+    ordinary = public_html._serialise_spot_for_map(_spot(0), now=1)
     assert special["creator_is_special"] is True
     assert ordinary["creator_is_special"] is False
 
 
 def test_detail_spot_serialiser_marks_only_allow_listed_creator():
-    special = public_html._serialise_public_spot_for_detail(_spot(0), now=1)
-    ordinary = public_html._serialise_public_spot_for_detail(_spot(1), now=1)
+    special = public_html._serialise_public_spot_for_detail(_spot(1), now=1)
+    ordinary = public_html._serialise_public_spot_for_detail(_spot(0), now=1)
     assert special["creator_is_special"] is True
     assert ordinary["creator_is_special"] is False
 

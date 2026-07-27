@@ -160,7 +160,7 @@ TEST_USER_ID = 0
 # Presentation-only allow-list for public display-name highlighting.
 # Membership grants no permissions and bypasses no account or payment checks.
 # Keep this immutable until a future administrative mechanism replaces it.
-SPECIAL_USER_IDS = frozenset({0})
+SPECIAL_USER_IDS = frozenset({1})
 
 # Display-name validation. Kept in constants so frontend and backend use the
 # same simple rule, and so the rule can be expanded later in one place.

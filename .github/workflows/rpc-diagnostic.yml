@@ -1,0 +1,72 @@
+name: RPC diagnostic
+
+on:
+  push:
+    branches:
+      - agent/fix-mainnet-rpc-startup
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Probe public RPC response shapes
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.error
+          import urllib.request
+
+          endpoints = {
+              "mainnet": "https://rpc.nimiqwatch.com/",
+              "testnet": "https://rpc.testnet.nimiqwatch.com/",
+          }
+          calls = (
+              ("getNetworkId", []),
+              ("getLatestBlock", [False]),
+              ("getBlockNumber", []),
+          )
+          for label, url in endpoints.items():
+              print(f"ENDPOINT {label} {url}")
+              for method, params in calls:
+                  payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
+                  request = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+                  try:
+                      with urllib.request.urlopen(request, timeout=20) as response:
+                          body = response.read().decode()
+                          print(method, "HTTP", response.status, body[:1500])
+                  except urllib.error.HTTPError as exc:
+                      print(method, "HTTP", exc.code, exc.read().decode()[:1500])
+          PY
+      - name: Run current NimHunt mainnet RPC startup proof
+        env:
+          NIMHUNT_DEPLOYMENT_MODE: production
+          NIMHUNT_DB_PATH: /tmp/nimhunt-rpc-diagnostic.db
+          NIMHUNT_NIMIQ_NETWORK: MainAlbatross
+          NIMHUNT_NIMIQ_NETWORK_ID: "24"
+          NIMHUNT_NIMIQ_RPC_URL: https://rpc.nimiqwatch.com/
+          NIMHUNT_NIMIQ_HUB_URL: https://hub.nimiq.com
+          NIMHUNT_NIMIQ_MNEMONIC: diagnostic-only-not-used
+          NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND: node /app/helpers/nimiq_helper.mjs
+          NIMHUNT_NIMIQ_SEND_COMMAND: node /app/helpers/nimiq_helper.mjs
+          NIMHUNT_SPOT_FEE_ADDRESS: NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF
+        run: |
+          python - <<'PY'
+          import asyncio
+          import main
+
+          try:
+              asyncio.run(main.verify_public_rpc_network())
+          except Exception as exc:
+              print(type(exc).__name__ + ": " + str(exc))
+              raise
+          PY

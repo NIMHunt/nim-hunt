@@ -186,7 +186,7 @@ function buildMySpotsTextEnglish({ appName = DEFAULT_APP_NAME, nimiqPayUrl = DEF
         draftDeposit: {
             ready: 'Ready',
             partial: (amountText) => `Partial Deposit - ${amountText}`,
-            processingFee: 'Creation Fee Processing',
+            processingFee: 'Fee Processing',
             missing: 'No Deposit',
         },
         ownerActions: {

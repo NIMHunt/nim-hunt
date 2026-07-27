@@ -92,22 +92,27 @@ jobs:
         run: |
           python - <<'PY' >> rpc-diagnostic.txt
           import asyncio
+          import traceback
           import main
 
           async def run():
-              print("FULL_PRODUCTION_STARTUP")
+              print("FULL_PRODUCTION_STARTUP", flush=True)
               try:
                   main.validate_deployment_safety()
-                  print("deployment_safety=ok")
+                  print("deployment_safety=ok", flush=True)
                   main.verify_public_signing_access()
-                  print("signer_validation=ok")
+                  print("signer_validation=ok", flush=True)
                   await main.verify_public_rpc_network()
-                  print("rpc_network=ok")
+                  print("rpc_network=ok", flush=True)
                   await main.startup()
-                  print("full_startup=ok")
+                  print("full_startup=ok", flush=True)
+              except Exception as exc:
+                  print(f"full_startup_error={type(exc).__name__}: {exc}", flush=True)
+                  print(traceback.format_exc(), flush=True)
+                  raise
               finally:
                   await main.shutdown()
-                  print("shutdown=ok")
+                  print("shutdown=ok", flush=True)
 
           asyncio.run(run())
           PY

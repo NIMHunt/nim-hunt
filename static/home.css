@@ -898,6 +898,7 @@ h2 {
 }
 
 .spot-badge.is-depositing,
+.spot-badge.is-processing,
 .spot-badge.is-deposited,
 .spot-badge.is-cancelling {
     background: var(--nimiq-gold, #ffc435);

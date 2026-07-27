@@ -42,7 +42,25 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(const.TEMPLATES_DIR))
 logger = logging.getLogger(__name__)
 
-_ASSET_VERSION = "spot-requirements-v1-20260725"
+_CREATION_FEE_PROCESSING_MESSAGE = (
+    f"Your deposit has been confirmed. Please wait a moment while "
+    f"{const.APP_NAME} processes it."
+)
+
+
+def _creation_fee_processing_response(meta: dict[str, Any]) -> JSONResponse:
+    return JSONResponse(
+        {
+            **meta,
+            "ok": False,
+            "code": "creation_fee_processing",
+            "message": _CREATION_FEE_PROCESSING_MESSAGE,
+        },
+        status_code=status.HTTP_409_CONFLICT,
+    )
+
+
+_ASSET_VERSION = "creation-fee-processing-v1-20260727"
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ALLOWED_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$")
@@ -954,18 +972,22 @@ def _serialise_owner_spot(
     )
     minimum_payout_ok = total_value >= minimum_payout * payout_divisor
     fully_funded = bool(deposit.get("funding_complete"))
-    ready_to_publish = fully_funded
+    creation_fee_confirmed = bool(deposit.get("fee_paid"))
+    ready_to_publish = fully_funded and creation_fee_confirmed
 
     publish_block_reason = None
     publish_block_message = None
-    if ready_to_publish and draft_end_time_elapsed:
+    if fully_funded and draft_end_time_elapsed:
         publish_block_reason = "end_time_elapsed"
         publish_block_message = "The configured end time has already elapsed."
-    elif ready_to_publish and not minimum_payout_ok:
+    elif fully_funded and not minimum_payout_ok:
         publish_block_reason = "minimum_payout_too_low"
         kind = "prize" if is_prizedraw else "claim"
         minimum_nim = int(minimum_payout / const.LUNA_PER_NIM)
         publish_block_message = f"Per {kind} payout must be at least {minimum_nim} NIM."
+    elif fully_funded and not creation_fee_confirmed:
+        publish_block_reason = "creation_fee_processing"
+        publish_block_message = _CREATION_FEE_PROCESSING_MESSAGE
 
     return {
         "id": int(spot[schema.SPOT_ID]),
@@ -1003,7 +1025,13 @@ def _serialise_owner_spot(
                     "deposited"
                     if status_label == "draft"
                     and bool(deposit.get("funding_complete"))
-                    else status_label
+                    and bool(deposit.get("fee_paid"))
+                    else (
+                        "processing"
+                        if status_label == "draft"
+                        and bool(deposit.get("funding_complete"))
+                        else status_label
+                    )
                 )
             )
         ),
@@ -3025,6 +3053,26 @@ async def my_spots_publish_api(spot_id: int, payload: HomeSessionRequest) -> JSO
                     },
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 )
+
+            # Return a precise transient message when the creator deposit is
+            # confirmed but the internal creation-fee transfer is still settling.
+            owner_summary = await db_access.get_spot_owner_summary(
+                db,
+                spot_id=spot_id,
+            )
+            if owner_summary is not None:
+                owner_transactions = await db_access.get_transactions_by_spot(
+                    db,
+                    spot_id=spot_id,
+                    limit=50,
+                )
+                owner_view = _serialise_owner_spot(
+                    owner_summary,
+                    now=checked_at,
+                    transactions=owner_transactions,
+                )
+                if owner_view.get("publish_block_reason") == "creation_fee_processing":
+                    return _creation_fee_processing_response(meta)
 
             # Avoid censoring or penalising a draft which could not have been
             # published for ordinary completeness/funding reasons anyway.

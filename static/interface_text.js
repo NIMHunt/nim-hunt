@@ -52,6 +52,7 @@ const SPOT_TEXT_EN = {
     status: {
         draft: 'Draft',
         depositing: 'Depositing',
+        processing: 'Processing',
         deposited: 'Deposited',
         active: 'Active',
         upcoming: 'Upcoming',

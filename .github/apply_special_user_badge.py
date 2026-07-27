@@ -189,6 +189,16 @@ for path in ("tests/test_map_list_hover_sync.py", "tests/test_marker_hover_outli
         '_ASSET_VERSION = "special-user-badge-v1-20260727"',
     )
 replace_once(
+    "tests/test_marker_hover_outline.py",
+    'assert "spot_ui.js?v=spot-requirements-v1-20260725" in my_spots',
+    'assert "spot_ui.js?v=special-user-badge-v1-20260727" in my_spots',
+)
+replace_once(
+    "tests/test_marker_hover_outline.py",
+    'assert "spot_ui.js?v=spot-requirements-v1-20260725" in my_claims',
+    'assert "spot_ui.js?v=special-user-badge-v1-20260727" in my_claims',
+)
+replace_once(
     "tests/test_spot_requirement_icons.py",
     'assert "spot_ui.js?v=spot-requirements-v1-20260725" in source',
     'assert "spot_ui.js?v=special-user-badge-v1-20260727" in source',

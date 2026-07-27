@@ -909,7 +909,7 @@ async def create_spot(
     deposit_record = await _generate_unique_spot_deposit_record(db)
     creation_fee = configured_spot_creation_fee(is_prizedraw=bool(is_prizedraw))
     creation_fee_address = str(
-        getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "") or ""
+        getattr(const, "SPOT_FEE_ADDRESS", "") or ""
     ).strip()
     if not creation_fee_address:
         raise ValueError("platform fee address must be configured before creating spots")

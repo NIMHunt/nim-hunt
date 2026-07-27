@@ -24,6 +24,24 @@ def _env_int(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer") from exc
 
 
+def _env_address_with_legacy_alias(
+    name: str,
+    legacy_name: str,
+    default: str,
+) -> str:
+    """Read a preferred address setting with a conflict-safe legacy alias."""
+    preferred = os.getenv(name, "").strip()
+    legacy = os.getenv(legacy_name, "").strip()
+
+    if preferred and legacy:
+        preferred_key = "".join(preferred.upper().split())
+        legacy_key = "".join(legacy.upper().split())
+        if preferred_key != legacy_key:
+            raise ValueError(f"{name} conflicts with legacy {legacy_name}")
+
+    return preferred or legacy or str(default).strip()
+
+
 def _env_nim_amount(name: str, default_nim: str, *, luna_per_nim: int) -> int:
     """Read a non-negative NIM amount and convert it exactly to Luna."""
     raw_value = os.getenv(name, default_nim).strip()
@@ -281,10 +299,11 @@ SPOT_CANCELLATION_FEE = _env_nim_amount(
     "500",
     luna_per_nim=LUNA_PER_NIM,
 )
-SPOT_CANCELLATION_FEE_ADDRESS = os.getenv(
+SPOT_FEE_ADDRESS = _env_address_with_legacy_alias(
+    "NIMHUNT_SPOT_FEE_ADDRESS",
     "NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS",
     DEV_PLATFORM_FEE_ADDRESS,
-).strip()
+)
 
 # Draft SPOT defaults used when a creator has only entered the initial title.
 # These keep the row valid while the full Create Spot form is still incomplete.

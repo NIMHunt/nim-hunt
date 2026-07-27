@@ -352,10 +352,10 @@ async def funding_flow_diagnostics() -> RowDict:
             "external_signer_enabled": external_signer,
             "signer_configured": mnemonic_configured or external_signer,
             "shared_creation_cancellation_fee_address_configured": bool(
-                str(getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "")).strip()
+                str(getattr(const, "SPOT_FEE_ADDRESS", "")).strip()
             ),
             "shared_creation_cancellation_fee_address": str(
-                getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "")
+                getattr(const, "SPOT_FEE_ADDRESS", "")
             ).strip() or None,
         },
         "refresher": {

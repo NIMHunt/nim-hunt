@@ -816,7 +816,7 @@ async def retry_pending_spot_cancellations(*, limit: int = 50) -> RowDict:
                     db,
                     spot_id=int(spot_id),
                     cancellation_fee=getattr(const, "SPOT_CANCELLATION_FEE", 0),
-                    fee_address=getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", ""),
+                    fee_address=getattr(const, "SPOT_FEE_ADDRESS", ""),
                 )
             results.append(result)
         except Exception as exc:

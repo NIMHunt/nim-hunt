@@ -871,7 +871,7 @@ def _cancellation_summary(transactions: list[dict[str, Any]]) -> dict[str, Any]:
         "refund_amount": refund_amount,
         "remaining_lost": remaining_lost,
         "refund_transaction": refund_transaction,
-        "fee_address": getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", ""),
+        "fee_address": getattr(const, "SPOT_FEE_ADDRESS", ""),
     }
 
 
@@ -3147,7 +3147,7 @@ async def my_spots_cancel_api(spot_id: int, payload: HomeSessionRequest) -> JSON
                 db,
                 spot_id=spot_id,
                 cancellation_fee=getattr(const, "SPOT_CANCELLATION_FEE", 0),
-                fee_address=getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", ""),
+                fee_address=getattr(const, "SPOT_FEE_ADDRESS", ""),
             )
             await db.commit()
         except ValueError as exc:

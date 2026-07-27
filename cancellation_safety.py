@@ -107,7 +107,7 @@ async def _snapshot_cancellation_policy(
     )
     configured_address = str(
         fee_address
-        or getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "")
+        or getattr(const, "SPOT_FEE_ADDRESS", "")
     ).strip()
     clean_address = wallet.normalise_nimiq_address(
         configured_address,

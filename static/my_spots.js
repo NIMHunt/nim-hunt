@@ -497,6 +497,7 @@ function draftDepositText(spot) {
     const deposit = spot.deposit || {};
     const status = deposit.status || 'missing';
 
+    if (deposit.funding_complete && !deposit.fee_paid) return TEXT.draftDeposit.processingFee;
     if (status === 'ready') return TEXT.draftDeposit.ready;
     if (status === 'partial') return TEXT.draftDeposit.partial(nimFromLunaText(deposit.amount));
     if (status === 'processing') return TEXT.draftDeposit.processingFee;
@@ -504,7 +505,9 @@ function draftDepositText(spot) {
 }
 
 function draftDepositClass(spot) {
-    const status = spot.deposit?.status || 'missing';
+    const deposit = spot.deposit || {};
+    const status = deposit.status || 'missing';
+    if (deposit.funding_complete && !deposit.fee_paid) return 'is-partial';
     if (status === 'ready') return 'is-ready';
     if (status === 'partial' || status === 'processing') return 'is-partial';
     return 'is-missing';

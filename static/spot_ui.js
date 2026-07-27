@@ -6,6 +6,7 @@ const SPOT_TEXT = getSpotText();
 const STATUS_CLASS_NAMES = new Set([
     'draft',
     'depositing',
+    'processing',
     'deposited',
     'active',
     'upcoming',

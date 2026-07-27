@@ -48,7 +48,7 @@ def test_requirement_icons_are_used_in_lists_detail_pages_and_map_popups() -> No
     assert "appendSpotTitleWithLock(title, spot);" in claim_detail
 
     for source in (find_spots, my_spots, my_claims, spot_detail, claim_detail):
-        assert "spot_ui.js?v=spot-requirements-v1-20260725" in source
+        assert "spot_ui.js?v=special-user-badge-v1-20260727" in source
 
 
 def test_requirement_icon_css_is_generic_and_supports_pairs() -> None:

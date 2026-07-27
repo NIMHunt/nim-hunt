@@ -1,8 +1,9 @@
 import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { getCommonText, getReportReasonOptions, makeSpotDetailText } from './interface_text.js?v=single-open-details-v1-20260722';
+import { getCommonText, getReportReasonOptions, makeSpotDetailText } from './interface_text.js?v=special-user-badge-v1-20260727';
 import { formatNimFromLuna } from './nim_format.js';
 import {
     appendBulletLine,
+    createUserDisplayName,
     appendDetailDescription,
     appendSpotRequirementIcons,
     appendSpotTitleWithLock,
@@ -12,7 +13,7 @@ import {
     highestTimeUnitText,
     spotScheduleTooltip,
     unixToText,
-} from './spot_ui.js?v=spot-requirements-v1-20260725';
+} from './spot_ui.js?v=special-user-badge-v1-20260727';
 import {
     createNoticePresenter,
     getLanguage,
@@ -934,7 +935,11 @@ function buildSpotDetail(spot) {
     }
 
     appendBulletLine(lines, buildSpotLinkControl(spot));
-    appendBulletLine(lines, `Created by ${creator}`);
+    appendBulletLine(
+        lines,
+        'Created by ',
+        createUserDisplayName(creator, { isSpecial: Boolean(spot.creator_is_special) }),
+    );
     lines.append(buildOwnerClaimCodesLine());
     detail.append(lines);
     detail.append(buildReportControl(spot));

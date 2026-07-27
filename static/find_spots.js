@@ -1,7 +1,8 @@
 import { init, requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=single-open-details-v1-20260722';
+import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=special-user-badge-v1-20260727';
 import {
     appendBulletLine,
+    createUserDisplayName,
     appendDetailDescription,
     appendSpotTitleWithLock,
     buildSpotLinkControl,
@@ -12,7 +13,7 @@ import {
     metresToText,
     spotScheduleTooltip,
     unixToText,
-} from './spot_ui.js?v=spot-requirements-v1-20260725';
+} from './spot_ui.js?v=special-user-badge-v1-20260727';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { formatNimFromLuna } from './nim_format.js';
 import {
@@ -951,7 +952,7 @@ function attachUnavailableClaimTooltip(target, status, spot) {
 
 function eventStartedOnInteractiveElement(event) {
     const target = event?.target;
-    return Boolean(target?.closest?.('a, button, input, textarea, select, .spot-copy-button, .spot-report-button'));
+    return Boolean(target?.closest?.('a, button, input, textarea, select, .spot-copy-button, .spot-report-button, .special-user-badge'));
 }
 
 async function refreshClaimStatusesForSpots(spots) {
@@ -1338,7 +1339,11 @@ function buildSpotDetail(spot) {
     }
 
     appendBulletLine(lines, buildSpotLinkControl(spot));
-    appendBulletLine(lines, `Created by ${creator}`);
+    appendBulletLine(
+        lines,
+        'Created by ',
+        createUserDisplayName(creator, { isSpecial: Boolean(spot.creator_is_special) }),
+    );
     if (Number(spot.claim_code_count || 0) > 0) {
         lines.append(buildOwnerClaimCodesLineForSpot(spot));
     }

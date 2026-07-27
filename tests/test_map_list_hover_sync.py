@@ -66,4 +66,4 @@ def test_blue_outline_and_description_spacing_are_intentional_shared_rules():
 
 def test_asset_version_is_bumped():
     public_html = source("public_html.py")
-    assert '_ASSET_VERSION = "creation-fee-processing-v1-20260727"' in public_html
+    assert '_ASSET_VERSION = "special-user-badge-v1-20260727"' in public_html

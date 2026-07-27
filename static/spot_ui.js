@@ -1,4 +1,4 @@
-import { getSpotText } from './interface_text.js?v=polish-live-v1-20260720';
+import { getSpotText } from './interface_text.js?v=special-user-badge-v1-20260727';
 import { formatNimFromLuna } from './nim_format.js';
 
 const SPOT_TEXT = getSpotText();
@@ -237,6 +237,30 @@ export function createNimiqInlineIcon(iconName) {
     svg.append(use);
 
     return svg;
+}
+
+export function createUserDisplayName(displayName, { isSpecial = false } = {}) {
+    const wrap = document.createElement('span');
+    wrap.className = 'special-user-display-name';
+
+    const name = document.createElement('span');
+    name.className = 'special-user-name';
+    name.textContent = String(displayName || 'unknown creator');
+    wrap.append(name);
+
+    if (!isSpecial) return wrap;
+
+    wrap.classList.add('is-special-user', 'nq-purple');
+    const badge = document.createElement('span');
+    const tooltip = SPOT_TEXT.specialUserTooltip || 'This is a special user';
+    badge.className = 'special-user-badge';
+    badge.dataset.tooltip = tooltip;
+    badge.setAttribute('aria-label', tooltip);
+    badge.tabIndex = 0;
+    badge.append(createNimiqInlineIcon('nq-hexagon'));
+    attachRequirementTooltip(badge);
+    wrap.append(badge);
+    return wrap;
 }
 
 export function setCopyButtonIcon(button, iconName) {

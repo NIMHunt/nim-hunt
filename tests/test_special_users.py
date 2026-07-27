@@ -39,6 +39,7 @@ def test_special_user_frontend_uses_shared_purple_hexagon_with_requested_tooltip
     find_spots = (root / "static" / "find_spots.js").read_text(encoding="utf-8")
     spot_detail = (root / "static" / "spot_detail.js").read_text(encoding="utf-8")
     interface_text = (root / "static" / "interface_text.js").read_text(encoding="utf-8")
+    home_css = (root / "static" / "home.css").read_text(encoding="utf-8")
     icon_sprite = (root / "static" / "nimiq-style.icons.svg").read_text(encoding="utf-8")
 
     assert "createUserDisplayName" in spot_ui
@@ -48,4 +49,5 @@ def test_special_user_frontend_uses_shared_purple_hexagon_with_requested_tooltip
     assert "createUserDisplayName" in find_spots
     assert "createUserDisplayName" in spot_detail
     assert ".special-user-badge" in find_spots
+    assert "vertical-align: baseline;" in home_css
     assert 'id="nq-hexagon"' in icon_sprite

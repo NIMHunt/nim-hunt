@@ -45,8 +45,8 @@ jobs:
           home = fetch('/')
           print('HOME new asset version:', 'special-user-badge-v1-20260727' in home)
 
-          find_page = fetch('/find')
-          print('FIND new asset version:', 'special-user-badge-v1-20260727' in find_page)
+          spots_page = fetch('/spots')
+          print('SPOTS new asset version:', 'special-user-badge-v1-20260727' in spots_page)
 
           spot_ui = fetch('/static/spot_ui.js?v=special-user-badge-v1-20260727')
           for marker in ('createUserDisplayName', 'nq-hexagon', 'This is a special user', 'nq-purple'):

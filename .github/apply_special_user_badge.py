@@ -56,14 +56,6 @@ replace_once(
 )
 replace_in_section(
     "public_html.py",
-    "def _public_user(",
-    "def _payload_field_names(",
-    '        "id": int(row[schema.USER_ID]),\n',
-    '        "id": int(row[schema.USER_ID]),\n'
-    '        "is_special": _is_special_user_id(row[schema.USER_ID]),\n',
-)
-replace_in_section(
-    "public_html.py",
     "def _serialise_spot_for_map(",
     "async def _get_public_spot_detail_row(",
     '        "created_by": int(spot.get(schema.SPOT_CREATED_BY) or 0),\n',
@@ -118,17 +110,26 @@ replace_once(
     "export function setCopyButtonIcon(button, iconName) {",
 )
 
+spot_ui_consumers = (
+    "static/find_spots.js",
+    "static/my_spots.js",
+    "static/my_claims.js",
+    "static/spot_detail.js",
+    "static/claim_detail.js",
+)
+for path in spot_ui_consumers:
+    replace_once(
+        path,
+        "./spot_ui.js?v=spot-requirements-v1-20260725",
+        "./spot_ui.js?v=special-user-badge-v1-20260727",
+    )
+
 for path in ("static/find_spots.js", "static/spot_detail.js"):
     replace_once(path, "    appendBulletLine,\n", "    appendBulletLine,\n    createUserDisplayName,\n")
     replace_once(
         path,
         "./interface_text.js?v=single-open-details-v1-20260722",
         "./interface_text.js?v=special-user-badge-v1-20260727",
-    )
-    replace_once(
-        path,
-        "./spot_ui.js?v=spot-requirements-v1-20260725",
-        "./spot_ui.js?v=special-user-badge-v1-20260727",
     )
     replace_once(
         path,
@@ -139,6 +140,12 @@ for path in ("static/find_spots.js", "static/spot_detail.js"):
         "        createUserDisplayName(creator, { isSpecial: Boolean(spot.creator_is_special) }),\n"
         "    );",
     )
+
+replace_once(
+    "static/find_spots.js",
+    "return Boolean(target?.closest?.('a, button, input, textarea, select, .spot-copy-button, .spot-report-button'));",
+    "return Boolean(target?.closest?.('a, button, input, textarea, select, .spot-copy-button, .spot-report-button, .special-user-badge'));",
+)
 
 replace_once(
     "static/home.css",
@@ -175,7 +182,19 @@ replace_once(
     "}\n\n",
 )
 
+for path in ("tests/test_map_list_hover_sync.py", "tests/test_marker_hover_outline.py"):
+    replace_once(
+        path,
+        '_ASSET_VERSION = "creation-fee-processing-v1-20260727"',
+        '_ASSET_VERSION = "special-user-badge-v1-20260727"',
+    )
+replace_once(
+    "tests/test_spot_requirement_icons.py",
+    'assert "spot_ui.js?v=spot-requirements-v1-20260725" in source',
+    'assert "spot_ui.js?v=special-user-badge-v1-20260727" in source',
+)
+
 Path("tests/test_special_users.py").write_text(
-    '''from pathlib import Path\n\nimport constants as const\nimport database as schema\nimport public_html\n\n\ndef _spot(created_by: int) -> dict:\n    return {\n        schema.SPOT_ID: 42,\n        schema.SPOT_CREATED_BY: created_by,\n        schema.SPOT_TITLE: "Special-user test Spot",\n        schema.SPOT_LAT: 51.5,\n        schema.SPOT_LONG: -0.1,\n    }\n\n\ndef test_special_user_allow_list_is_immutable_and_initially_contains_only_user_zero():\n    assert const.SPECIAL_USER_IDS == frozenset({0})\n\n\ndef test_public_user_exposes_presentation_only_special_flag():\n    row = {\n        schema.USER_ID: 0,\n        schema.USER_DISPLAY_NAME: "NimHunt Guy",\n        schema.USER_STATUS: const.USER_STATUS_ACTIVE,\n        schema.USER_CREATED_AT: 1,\n        schema.USER_LAST_SEEN_AT: 1,\n    }\n    assert public_html._public_user(row)["is_special"] is True\n    row[schema.USER_ID] = 1\n    assert public_html._public_user(row)["is_special"] is False\n\n\ndef test_map_spot_serialiser_marks_only_allow_listed_creator():\n    special = public_html._serialise_spot_for_map(_spot(0), now=1)\n    ordinary = public_html._serialise_spot_for_map(_spot(1), now=1)\n    assert special["creator_is_special"] is True\n    assert ordinary["creator_is_special"] is False\n\n\ndef test_detail_spot_serialiser_marks_only_allow_listed_creator():\n    special = public_html._serialise_public_spot_for_detail(_spot(0), now=1)\n    ordinary = public_html._serialise_public_spot_for_detail(_spot(1), now=1)\n    assert special["creator_is_special"] is True\n    assert ordinary["creator_is_special"] is False\n\n\ndef test_special_user_frontend_uses_shared_purple_hexagon_with_requested_tooltip():\n    root = Path(__file__).resolve().parents[1]\n    spot_ui = (root / "static" / "spot_ui.js").read_text(encoding="utf-8")\n    find_spots = (root / "static" / "find_spots.js").read_text(encoding="utf-8")\n    spot_detail = (root / "static" / "spot_detail.js").read_text(encoding="utf-8")\n    interface_text = (root / "static" / "interface_text.js").read_text(encoding="utf-8")\n    icon_sprite = (root / "static" / "nimiq-style.icons.svg").read_text(encoding="utf-8")\n\n    assert "createUserDisplayName" in spot_ui\n    assert "nq-hexagon" in spot_ui\n    assert "nq-purple" in spot_ui\n    assert "This is a special user" in interface_text\n    assert "createUserDisplayName" in find_spots\n    assert "createUserDisplayName" in spot_detail\n    assert 'id="nq-hexagon"' in icon_sprite\n''',
+    '''from pathlib import Path\n\nimport constants as const\nimport database as schema\nimport public_html\n\n\ndef _spot(created_by: int) -> dict:\n    return {\n        schema.SPOT_ID: 42,\n        schema.SPOT_CREATED_BY: created_by,\n        schema.SPOT_TITLE: "Special-user test Spot",\n        schema.SPOT_LAT: 51.5,\n        schema.SPOT_LONG: -0.1,\n    }\n\n\ndef test_special_user_allow_list_is_immutable_and_initially_contains_only_user_zero():\n    assert const.SPECIAL_USER_IDS == frozenset({0})\n\n\ndef test_map_spot_serialiser_marks_only_allow_listed_creator():\n    special = public_html._serialise_spot_for_map(_spot(0), now=1)\n    ordinary = public_html._serialise_spot_for_map(_spot(1), now=1)\n    assert special["creator_is_special"] is True\n    assert ordinary["creator_is_special"] is False\n\n\ndef test_detail_spot_serialiser_marks_only_allow_listed_creator():\n    special = public_html._serialise_public_spot_for_detail(_spot(0), now=1)\n    ordinary = public_html._serialise_public_spot_for_detail(_spot(1), now=1)\n    assert special["creator_is_special"] is True\n    assert ordinary["creator_is_special"] is False\n\n\ndef test_special_user_frontend_uses_shared_purple_hexagon_with_requested_tooltip():\n    root = Path(__file__).resolve().parents[1]\n    spot_ui = (root / "static" / "spot_ui.js").read_text(encoding="utf-8")\n    find_spots = (root / "static" / "find_spots.js").read_text(encoding="utf-8")\n    spot_detail = (root / "static" / "spot_detail.js").read_text(encoding="utf-8")\n    interface_text = (root / "static" / "interface_text.js").read_text(encoding="utf-8")\n    icon_sprite = (root / "static" / "nimiq-style.icons.svg").read_text(encoding="utf-8")\n\n    assert "createUserDisplayName" in spot_ui\n    assert "nq-hexagon" in spot_ui\n    assert "nq-purple" in spot_ui\n    assert "This is a special user" in interface_text\n    assert "createUserDisplayName" in find_spots\n    assert "createUserDisplayName" in spot_detail\n    assert ".special-user-badge" in find_spots\n    assert 'id="nq-hexagon"' in icon_sprite\n''',
     encoding="utf-8",
 )

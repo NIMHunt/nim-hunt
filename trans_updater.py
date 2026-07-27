@@ -2038,9 +2038,9 @@ async def submit_platform_fee_transaction(
     if spot is None:
         raise ValueError(f"spot id={spot_id} does not exist")
 
-    clean_fee_address = str(fee_address or getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "")).strip()
+    clean_fee_address = str(fee_address or getattr(const, "SPOT_FEE_ADDRESS", "")).strip()
     if not clean_fee_address:
-        raise ValueError("SPOT_CANCELLATION_FEE_ADDRESS is not configured")
+        raise ValueError("NIMHUNT_SPOT_FEE_ADDRESS is not configured")
 
     result = await _submit_recorded_chain_send(
         db,
@@ -2483,7 +2483,7 @@ async def submit_spot_cancellation_transactions(
                 "fee_amount": 0,
                 "refund_amount": 0,
                 "refund_address": None,
-                "fee_address": fee_address or getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", ""),
+                "fee_address": fee_address or getattr(const, "SPOT_FEE_ADDRESS", ""),
             }
 
         confirmed_claim_total = sum(
@@ -2557,7 +2557,7 @@ async def submit_spot_cancellation_transactions(
             "fee_amount": fee_amount,
             "refund_amount": refund_amount,
             "refund_address": refund_address,
-            "fee_address": fee_address or getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", ""),
+            "fee_address": fee_address or getattr(const, "SPOT_FEE_ADDRESS", ""),
         }
 
         if remaining_amount <= 0:

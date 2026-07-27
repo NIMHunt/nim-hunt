@@ -29,7 +29,7 @@ SAFE_PRODUCTION_SETTINGS = {
     "NIMIQ_NETWORK_ID": 24,
     "NIMIQ_RPC_URL": "https://rpc.nimiqwatch.com",
     "NIMIQ_HUB_URL": "https://hub.nimiq.com",
-    "SPOT_CANCELLATION_FEE_ADDRESS": "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF",
+    "SPOT_FEE_ADDRESS": "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF",
 }
 
 
@@ -84,7 +84,7 @@ class ProductionSafetyValidationTest(unittest.TestCase):
             NIMIQ_NETWORK_ID=5,
             NIMIQ_RPC_URL="https://rpc.testnet.nimiqwatch.com/",
             NIMIQ_HUB_URL="https://hub.nimiq-testnet.com",
-            SPOT_CANCELLATION_FEE_ADDRESS="NQ00 NIMHUNT DEV CANCELLATION FEE POOL",
+            SPOT_FEE_ADDRESS="NQ00 NIMHUNT DEV CANCELLATION FEE POOL",
         ):
             main.validate_deployment_safety()
 
@@ -159,14 +159,14 @@ class ProductionSafetyValidationTest(unittest.TestCase):
                 main.validate_deployment_safety()
 
     def test_production_refuses_malformed_fee_address(self):
-        with patched_settings(SPOT_CANCELLATION_FEE_ADDRESS="NQ12 NOT A REAL ADDRESS"):
+        with patched_settings(SPOT_FEE_ADDRESS="NQ12 NOT A REAL ADDRESS"):
             with self.assertRaisesRegex(RuntimeError, "operator-controlled address"):
                 main.validate_deployment_safety()
 
     def test_production_refuses_testnet_hub_and_dev_fee_address(self):
         with patched_settings(
             NIMIQ_HUB_URL="https://hub.nimiq-testnet.com",
-            SPOT_CANCELLATION_FEE_ADDRESS="NQ00 NIMHUNT DEV CANCELLATION FEE POOL",
+            SPOT_FEE_ADDRESS="NQ00 NIMHUNT DEV CANCELLATION FEE POOL",
         ):
             with self.assertRaisesRegex(RuntimeError, "NIMIQ_HUB_URL"):
                 main.validate_deployment_safety()
@@ -203,7 +203,7 @@ class ProductionSafetyValidationTest(unittest.TestCase):
             "import constants; "
             "print(constants.NIMIQ_NETWORK, constants.NIMIQ_NETWORK_ID, "
             "constants.NIMIQ_RPC_URL, constants.NIMIQ_HUB_URL, "
-            "constants.SPOT_CANCELLATION_FEE_ADDRESS)"
+            "constants.SPOT_FEE_ADDRESS)"
         )
         environment = os.environ.copy()
         environment.update(
@@ -212,7 +212,7 @@ class ProductionSafetyValidationTest(unittest.TestCase):
                 "NIMHUNT_NIMIQ_NETWORK": "MainAlbatross",
                 "NIMHUNT_NIMIQ_RPC_URL": "https://rpc.example.invalid",
                 "NIMHUNT_NIMIQ_HUB_URL": "https://hub.nimiq.com",
-                "NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS": "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF",
+                "NIMHUNT_SPOT_FEE_ADDRESS": "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF",
             }
         )
         result = subprocess.run(

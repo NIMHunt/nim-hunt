@@ -76,7 +76,7 @@ export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND="${NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMM
 export NIMHUNT_NIMIQ_SEND_COMMAND="${NIMHUNT_NIMIQ_SEND_COMMAND:-node \"${HELPER_PATH}\"}"
 
 # Optional: set a real TestAlbatross fee address in your shell before launching.
-# export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS="NQ.. your fee address .."
+# export NIMHUNT_SPOT_FEE_ADDRESS="NQ.. your fee address .."
 
 echo "Starting NimHunt"
 echo "Project: ${PROJECT_DIR}"

@@ -194,16 +194,16 @@ def validate_deployment_safety() -> None:
             "Spot funding targets do not reserve network fees"
         )
 
-    fee_address = str(getattr(const, "SPOT_CANCELLATION_FEE_ADDRESS", "")).strip()
+    fee_address = str(getattr(const, "SPOT_FEE_ADDRESS", "")).strip()
     try:
         normalised_fee_address = wallet.normalise_nimiq_address(
             fee_address,
-            field_name="SPOT_CANCELLATION_FEE_ADDRESS",
+            field_name="NIMHUNT_SPOT_FEE_ADDRESS",
             allow_dev_placeholder=False,
         )
     except ValueError:
         unsafe.append(
-            "SPOT_CANCELLATION_FEE_ADDRESS must be a valid operator-controlled address"
+            "NIMHUNT_SPOT_FEE_ADDRESS must be a valid operator-controlled address"
         )
     else:
         dev_fee_address = str(getattr(const, "DEV_PLATFORM_FEE_ADDRESS", "")).strip()
@@ -218,7 +218,7 @@ def validate_deployment_safety() -> None:
                 normalised_dev_fee_address = ""
             if normalised_fee_address == normalised_dev_fee_address:
                 unsafe.append(
-                    "SPOT_CANCELLATION_FEE_ADDRESS must not use the public development fee address"
+                    "NIMHUNT_SPOT_FEE_ADDRESS must not use the public development fee address"
                 )
 
     if unsafe:

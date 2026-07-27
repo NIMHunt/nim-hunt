@@ -42,7 +42,7 @@ class SpotCreationFeeFixture(unittest.IsolatedAsyncioTestCase):
         total_value = const.MIN_SPOT_TOTAL_VALUE if total_value is None else int(total_value)
         with mock.patch.object(const, "STANDARD_SPOT_CREATION_FEE", fee), mock.patch.object(
             const,
-            "SPOT_CANCELLATION_FEE_ADDRESS",
+            "SPOT_FEE_ADDRESS",
             const.DEV_PLATFORM_FEE_ADDRESS,
         ):
             async with schema.get_db() as db:
@@ -70,7 +70,7 @@ class SpotCreationFeeFixture(unittest.IsolatedAsyncioTestCase):
     async def create_prizedraw_spot(self, *, fee: int) -> int:
         with mock.patch.object(const, "PRIZEDRAW_SPOT_CREATION_FEE", int(fee)), mock.patch.object(
             const,
-            "SPOT_CANCELLATION_FEE_ADDRESS",
+            "SPOT_FEE_ADDRESS",
             const.DEV_PLATFORM_FEE_ADDRESS,
         ):
             async with schema.get_db() as db:
@@ -182,7 +182,7 @@ class CreationFeeSnapshotTests(SpotCreationFeeFixture):
 
         with mock.patch.object(const, "STANDARD_SPOT_CREATION_FEE", 999_999), mock.patch.object(
             const,
-            "SPOT_CANCELLATION_FEE_ADDRESS",
+            "SPOT_FEE_ADDRESS",
             "NQ52 J5R7 4U5Y 5XDL YKJ2 96ME 3AQ9 V7DP 8MX8",
         ):
             unchanged = await self.get_spot(standard_id)

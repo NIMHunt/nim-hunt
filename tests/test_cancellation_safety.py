@@ -30,7 +30,7 @@ class CancellationSafetyTest(IsolatedAsyncioTestCase):
                         else cancellation_fee
                     ),
                     "fee_address": str(
-                        fee_address or const.SPOT_CANCELLATION_FEE_ADDRESS
+                        fee_address or const.SPOT_FEE_ADDRESS
                     ),
                 },
                 False,

@@ -480,14 +480,20 @@ so later environment changes cannot alter a cancellation already in progress.
 Set the checksummed Nimiq address that receives both creation and cancellation fees:
 
 ```bash
-export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ45 ... real address ...'
+export NIMHUNT_SPOT_FEE_ADDRESS='NQ45 ... real address ...'
 ```
 
-The variable retains its historical name for compatibility. The development
-default is a real TestAlbatross address belonging to a public test wallet, so it is
-not operator-controlled. Both public modes explicitly reject that address and
-require a different checksum-valid address controlled by the operator.
-The destination is also snapshotted onto each new Spot for its creation fee.
+`NIMHUNT_SPOT_FEE_ADDRESS` is the preferred name. The former
+`NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS` remains a compatibility alias for an
+existing deployment. If both variables are set, they must identify the same
+address; conflicting values stop startup rather than risking a misdirected fee.
+Update the hosting variable to the new name, then remove the old one.
+
+The development default is a real TestAlbatross address belonging to a public
+test wallet, so it is not operator-controlled. Both public modes explicitly
+reject that address and require a different checksum-valid address controlled by
+the operator. The destination is also snapshotted onto each new Spot for its
+creation fee.
 
 ## Environment variable reference
 
@@ -501,7 +507,7 @@ The destination is also snapshotted onto each new Spot for its creation fee.
 | `NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM` | `200` | one-time creation fee for Standard Spots, in NIM |
 | `NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM` | `200` | one-time creation fee for Prizedraws, in NIM |
 | `NIMHUNT_SPOT_CANCELLATION_FEE_NIM` | `500` | cancellation fee amount in NIM; snapshotted when cancellation starts |
-| `NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS` | public TestAlbatross development address | shared creation/cancellation fee recipient; public modes require an operator address |
+| `NIMHUNT_SPOT_FEE_ADDRESS` | public TestAlbatross development address | shared creation/cancellation fee recipient; public modes require an operator address |
 
 ### Nimiq network and RPC
 
@@ -595,7 +601,7 @@ export NIMHUNT_NIMIQ_SEND_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
 export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=200
 export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
 export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
-export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ... operator testnet fee address ...'
+export NIMHUNT_SPOT_FEE_ADDRESS='NQ... operator testnet fee address ...'
 ```
 
 This mode is public software using test NIM: it has production-style safety and
@@ -623,7 +629,7 @@ export NIMHUNT_NIMIQ_SEND_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
 export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=200
 export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
 export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
-export NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS='NQ... operator mainnet fee address ...'
+export NIMHUNT_SPOT_FEE_ADDRESS='NQ... operator mainnet fee address ...'
 ```
 
 Start outside Railway with one worker:
@@ -709,7 +715,7 @@ NIMHUNT_NIMIQ_SEND_COMMAND=node /app/helpers/nimiq_helper.mjs
 NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=200
 NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
 NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
-NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS=OPERATOR_TESTNET_NQ_ADDRESS
+NIMHUNT_SPOT_FEE_ADDRESS=OPERATOR_TESTNET_NQ_ADDRESS
 ```
 
 Do not set `NIMHUNT_PRODUCTION` or `NIMHUNT_DEV_MASTER_SEED`.
@@ -734,7 +740,7 @@ NIMHUNT_NIMIQ_SEND_COMMAND=node /app/helpers/nimiq_helper.mjs
 NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=200
 NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
 NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
-NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS=OPERATOR_MAINNET_NQ_ADDRESS
+NIMHUNT_SPOT_FEE_ADDRESS=OPERATOR_MAINNET_NQ_ADDRESS
 ```
 
 Generate a public Railway domain and keep the service continuously running. Do not

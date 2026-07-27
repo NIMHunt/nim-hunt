@@ -35,6 +35,7 @@ def clean_environment() -> dict[str, str]:
         "NIMHUNT_DEV_MASTER_SEED",
         "NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM",
         "NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM",
+        "NIMHUNT_SPOT_FEE_ADDRESS",
         "NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS",
         "NIMHUNT_DB_PATH",
     ):
@@ -65,7 +66,7 @@ def valid_public_environment(mode: str) -> dict[str, str]:
             "NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND": "node /app/helpers/nimiq_helper.mjs",
             "NIMHUNT_NIMIQ_SEND_COMMAND": "node /app/helpers/nimiq_helper.mjs",
             "NIMHUNT_NIMIQ_MNEMONIC": "private operator mnemonic words",
-            "NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS": VALID_FEE_ADDRESS,
+            "NIMHUNT_SPOT_FEE_ADDRESS": VALID_FEE_ADDRESS,
             "NIMHUNT_DB_PATH": "/srv/nimhunt/records.db",
         }
     )
@@ -148,6 +149,32 @@ class DeploymentModeParsingTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "0 250000")
 
+    def test_legacy_fee_address_variable_remains_a_compatible_alias(self):
+        environment = clean_environment()
+        environment["NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS"] = VALID_FEE_ADDRESS
+        result = run_python(
+            "import constants as c; print(c.SPOT_FEE_ADDRESS)",
+            environment,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), VALID_FEE_ADDRESS)
+
+    def test_conflicting_fee_address_variables_fail_closed(self):
+        environment = clean_environment()
+        environment.update(
+            {
+                "NIMHUNT_SPOT_FEE_ADDRESS": VALID_FEE_ADDRESS,
+                "NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS": const.DEV_PLATFORM_FEE_ADDRESS,
+            }
+        )
+        result = run_python("import constants", environment)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "NIMHUNT_SPOT_FEE_ADDRESS conflicts with legacy "
+            "NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS",
+            result.stderr,
+        )
+
     def test_conflicting_legacy_and_preferred_settings_fail(self):
         environment = clean_environment()
         environment.update(
@@ -206,7 +233,7 @@ class PublicDeploymentValidationTest(unittest.TestCase):
             mock.patch.object(const, "DEFAULT_TO_TEST_USER", False),
             mock.patch.object(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", False),
             mock.patch.object(const, "ALLOW_DEV_WALLET_SENDS", False),
-            mock.patch.object(const, "SPOT_CANCELLATION_FEE_ADDRESS", VALID_FEE_ADDRESS),
+            mock.patch.object(const, "SPOT_FEE_ADDRESS", VALID_FEE_ADDRESS),
             mock.patch.object(main.database, "DB_PATH", "/srv/nimhunt/records.db"),
             mock.patch.dict(
                 os.environ,
@@ -224,7 +251,7 @@ class PublicDeploymentValidationTest(unittest.TestCase):
 
     def test_public_testnet_rejects_public_development_fee_address(self):
         environment = valid_public_environment("public-testnet")
-        environment["NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS"] = const.DEV_PLATFORM_FEE_ADDRESS
+        environment["NIMHUNT_SPOT_FEE_ADDRESS"] = const.DEV_PLATFORM_FEE_ADDRESS
         result = run_python("import main; main.validate_deployment_safety()", environment)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("public development fee address", result.stderr)
@@ -270,7 +297,7 @@ class PublicDeploymentValidationTest(unittest.TestCase):
             mock.patch.object(const, "DEFAULT_TO_TEST_USER", False),
             mock.patch.object(const, "ALLOW_DEV_WALLET_PLACEHOLDERS", True),
             mock.patch.object(const, "ALLOW_DEV_WALLET_SENDS", True),
-            mock.patch.object(const, "SPOT_CANCELLATION_FEE_ADDRESS", VALID_FEE_ADDRESS),
+            mock.patch.object(const, "SPOT_FEE_ADDRESS", VALID_FEE_ADDRESS),
             mock.patch.object(main.database, "DB_PATH", "/srv/nimhunt/records.db"),
             mock.patch.dict(
                 os.environ,

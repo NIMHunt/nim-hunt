@@ -16,9 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
       - name: Probe public deployment
         env:
           BASE_URL: https://nimhunt.app
           SPOT_SLUG: GLqKYswoYdo
-        run: python .github/verify_live_special_user.py
+        run: curl -fsSL https://raw.githubusercontent.com/NIMHunt/nim-hunt/agent/verify-live-special-user/.github/verify_live_special_user.py | python

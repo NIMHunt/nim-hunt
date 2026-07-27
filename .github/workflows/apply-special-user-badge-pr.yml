@@ -39,7 +39,16 @@ jobs:
       - name: Run focused tests
         run: python -m pytest -q tests/test_special_users.py
       - name: Run full Python tests
-        run: python -m pytest -q
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest -q 2>&1 | tee full-tests.log
+      - name: Upload full-test log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: special-user-full-tests
+          path: full-tests.log
       - name: Run Node tests
         run: npm test --prefix helpers
       - name: Run lint and syntax checks

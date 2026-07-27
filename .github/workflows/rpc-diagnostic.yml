@@ -84,7 +84,7 @@ jobs:
           NIMHUNT_NIMIQ_NETWORK_ID: "24"
           NIMHUNT_NIMIQ_RPC_URL: https://rpc.nimiqwatch.com/
           NIMHUNT_NIMIQ_HUB_URL: https://hub.nimiq.com
-          NIMHUNT_NIMIQ_MNEMONIC: abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about
+          NIMHUNT_NIMIQ_MNEMONIC: legal winner thank year wave sausage worth useful legal winner thank yellow
           NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND: node helpers/nimiq_helper.mjs
           NIMHUNT_NIMIQ_SEND_COMMAND: node helpers/nimiq_helper.mjs
           NIMHUNT_SPOT_FEE_ADDRESS: NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF

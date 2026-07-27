@@ -60,7 +60,7 @@ def _creation_fee_processing_response(meta: dict[str, Any]) -> JSONResponse:
     )
 
 
-_ASSET_VERSION = "creation-fee-processing-v1-20260727"
+_ASSET_VERSION = "special-user-badge-v1-20260727"
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ALLOWED_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$")
@@ -200,6 +200,14 @@ def _clean_language(language: str | None) -> str | None:
 
 def _valid_device_id_hash(value: str | None) -> bool:
     return bool(value and _DEVICE_ID_RE.fullmatch(value.strip()))
+
+
+def _is_special_user_id(value: Any) -> bool:
+    """Return whether a user receives the presentation-only special marker."""
+    try:
+        return int(value) in const.SPECIAL_USER_IDS
+    except (TypeError, ValueError):
+        return False
 
 
 def _public_user(row: dict[str, Any]) -> dict[str, Any]:
@@ -421,6 +429,7 @@ def _serialise_spot_for_map(
     return {
         "id": spot_id,
         "created_by": int(spot.get(schema.SPOT_CREATED_BY) or 0),
+        "creator_is_special": _is_special_user_id(spot.get(schema.SPOT_CREATED_BY)),
         "link": link,
         "title": spot.get(schema.SPOT_TITLE) or "NimHunt Spot",
         "description": spot.get(schema.SPOT_DESC),
@@ -511,6 +520,7 @@ def _serialise_public_spot_for_detail(spot: dict[str, Any], *, now: int) -> dict
     return {
         "id": spot_id,
         "created_by": int(spot.get(schema.SPOT_CREATED_BY) or 0),
+        "creator_is_special": _is_special_user_id(spot.get(schema.SPOT_CREATED_BY)),
         "link": link,
         "title": spot.get(schema.SPOT_TITLE) or "NimHunt Spot",
         "description": spot.get(schema.SPOT_DESC),

@@ -1063,6 +1063,40 @@ h2 {
     font-weight: 900;
 }
 
+.special-user-display-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.24em;
+    vertical-align: middle;
+}
+
+.special-user-display-name.is-special-user {
+    font-weight: 900;
+}
+
+.special-user-badge {
+    width: 1em;
+    height: 1em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+}
+
+.special-user-badge .nq-icon {
+    width: 0.92em;
+    height: 0.92em;
+    display: block;
+    color: currentColor;
+    fill: currentColor;
+}
+
+.special-user-badge:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
 .spot-detail-link-row {
     display: inline-flex;
     align-items: center;

@@ -157,6 +157,11 @@ DEFAULT_TO_TEST_USER = TEST_FEATURES_ENABLED
 # PRIMARY KEY value of 0, so this is safe for the test dataset.
 TEST_USER_ID = 0
 
+# Presentation-only allow-list for public display-name highlighting.
+# Membership grants no permissions and bypasses no account or payment checks.
+# Keep this immutable until a future administrative mechanism replaces it.
+SPECIAL_USER_IDS = frozenset({0})
+
 # Display-name validation. Kept in constants so frontend and backend use the
 # same simple rule, and so the rule can be expanded later in one place.
 DISPLAY_NAME_MIN_CHARS = 3

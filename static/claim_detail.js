@@ -12,7 +12,7 @@ import {
     buildSpotLinkControl,
     nimFromLunaText,
     unixToText,
-} from './spot_ui.js?v=spot-requirements-v1-20260725';
+} from './spot_ui.js?v=special-user-badge-v1-20260727';
 
 const APP_NAME = document.body.dataset.appName || 'NimHunt';
 const NIMIQ_PAY_URL = document.body.dataset.nimiqPayUrl || 'https://nimpay.app';

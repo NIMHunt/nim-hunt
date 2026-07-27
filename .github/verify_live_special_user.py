@@ -2,6 +2,7 @@ import html
 import json
 import os
 import re
+import urllib.error
 import urllib.request
 
 base = os.environ.get("BASE_URL", "https://nimhunt.app").rstrip("/")
@@ -31,28 +32,31 @@ find_js = fetch("/static/find_spots.js?v=special-user-badge-v1-20260727")
 for marker in ("createUserDisplayName", "creator_is_special", ".special-user-badge"):
     print(f"FIND_JS contains {marker!r}:", marker in find_js)
 
-spot_page = fetch(f"/spot/{slug}")
-match = re.search(r'<script[^>]+id=["\']spot-data["\'][^>]*>(.*?)</script>', spot_page, re.S | re.I)
-if not match:
-    print("SPOT_PAGE spot-data: NOT FOUND")
-else:
-    data = json.loads(html.unescape(match.group(1)).strip())
-    selected = {
-        key: data.get(key)
-        for key in ("id", "link", "title", "created_by", "creator_display_name", "creator_is_special")
-    }
-    print("SPOT_PAGE selected data:", json.dumps(selected, sort_keys=True))
-
 api = fetch("/api/spots/initial?include_active=true&include_upcoming=true&include_prizedraws=true")
 payload = json.loads(api)
 spots = payload.get("spots", []) if isinstance(payload, dict) else []
-selected_spots = [
+summaries = [
     {
         key: spot.get(key)
         for key in ("id", "link", "title", "created_by", "creator_display_name", "creator_is_special")
     }
     for spot in spots
-    if spot.get("link") == slug or spot.get("title") == "Kryptostadt Represent!"
 ]
-print("INITIAL_API matching spots:", json.dumps(selected_spots, sort_keys=True))
+print("INITIAL_API spot summaries:", json.dumps(summaries, sort_keys=True))
 print("INITIAL_API total spots:", len(spots))
+
+try:
+    spot_page = fetch(f"/spot/{slug}")
+except urllib.error.HTTPError as exc:
+    print(f"SPOT_PAGE {slug}: HTTP {exc.code}")
+else:
+    match = re.search(r'<script[^>]+id=["\']spot-data["\'][^>]*>(.*?)</script>', spot_page, re.S | re.I)
+    if not match:
+        print("SPOT_PAGE spot-data: NOT FOUND")
+    else:
+        data = json.loads(html.unescape(match.group(1)).strip())
+        selected = {
+            key: data.get(key)
+            for key in ("id", "link", "title", "created_by", "creator_display_name", "creator_is_special")
+        }
+        print("SPOT_PAGE selected data:", json.dumps(selected, sort_keys=True))

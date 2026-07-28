@@ -86,6 +86,8 @@ def test_find_spots_exposes_retry_status_without_backend_changes():
     assert 'class="nq-button map-location-status"' in template
     assert 'class="filter-toggle map-location-status"' not in template
     assert "Location Blocked. Retry?" in interface_text
+    assert "setLocationControlState('success'" not in find_spots
+    assert "els.locationStatus.hidden = true" in find_spots
     assert '.map-location-status.nq-button[data-location-state="permission_denied"]' in css
     location_css = css[
         css.index("/* Use Nimiq button styling directly.") :

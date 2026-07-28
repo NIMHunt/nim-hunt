@@ -323,7 +323,7 @@ async function refreshUserLocation({ showFailureNotice = false, recenter = false
             accuracy: location.accuracy,
             isReal: true,
         });
-        setLocationControlState('success', { hideAfterMs: 1000 });
+        if (els.locationStatus) els.locationStatus.hidden = true;
 
         if (state.map) {
             setMapInteractionEnabled(false);

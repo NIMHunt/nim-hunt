@@ -87,7 +87,14 @@ def test_find_spots_exposes_retry_status_without_backend_changes():
     assert 'class="nq-button map-location-status"' not in template
     assert "Location Blocked. Retry?" in interface_text
     assert '.map-location-status.filter-toggle[data-location-state="permission_denied"]' in css
-    assert "background: var(--nh-danger);" in css
+    location_css = css[css.index("/* Reuse the filter-toggle dimensions and typography exactly."):]
+
+    assert "background: var(--nh-danger);" in location_css
+    assert "min-width: 0 !important;" not in location_css
+    assert "min-height: 2.7rem;" not in location_css
+    assert "padding: 0.62rem 1rem;" not in location_css
+    assert "font-size: 1rem;" not in location_css
+    assert "opacity: 1;" in location_css
     assert "/api/claim/" not in (ROOT / "static" / "location_utils.js").read_text(
         encoding="utf-8"
     )

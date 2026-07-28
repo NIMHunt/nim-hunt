@@ -3637,25 +3637,22 @@ h2 {
     position: relative;
 }
 
-/* Reuse the existing filter-toggle pill styling; these rules only position
-   and compact the control for use over the map. */
+/* Reuse the filter-toggle dimensions and typography exactly. These rules
+   only position the pill over the map, normalise the button element, and set
+   its state colours. */
 .map-location-status.filter-toggle {
     position: absolute !important;
     z-index: 700;
     left: 50%;
     bottom: 14px;
-    width: auto !important;
-    min-width: 0 !important;
-    height: auto;
-    min-height: 2.7rem;
     margin: 0 !important;
-    padding: 0.62rem 1rem;
-    border: 1px solid rgba(31, 35, 72, 0.12);
-    background: rgba(255, 255, 255, 0.96);
+    border: 0;
+    background: #ffffff;
     color: var(--nh-text);
-    box-shadow: 0 8px 22px rgba(31, 35, 72, 0.18);
-    font-size: 1rem;
-    white-space: nowrap;
+    box-shadow: 0 0 32px rgba(31, 35, 72, 0.18);
+    font-family: inherit;
+    font-size: inherit;
+    opacity: 1;
     transform: translateX(-50%);
 }
 
@@ -3664,7 +3661,7 @@ h2 {
 }
 
 .map-location-status.filter-toggle:disabled {
-    opacity: 0.88;
+    opacity: 1;
     cursor: default;
 }
 

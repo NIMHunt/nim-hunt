@@ -3629,3 +3629,43 @@ h2 {
     flex: 0 0 auto;
 }
 
+/* -----------------------------
+   Resilient mobile location control
+   ----------------------------- */
+
+.map-location-shell {
+    position: relative;
+}
+
+/* Use Nimiq button styling directly. These rules only place the control over
+   the map, let it expand to its message, and colour the blocked state. */
+.map-location-status.nq-button {
+    position: absolute !important;
+    z-index: 700;
+    left: 0;
+    right: 0;
+    bottom: 14px;
+    width: max-content !important;
+    max-width: calc(100% - 28px);
+    margin: 0 auto !important;
+    white-space: nowrap;
+}
+
+.map-location-status.nq-button[hidden] {
+    display: none !important;
+}
+
+.map-location-status.nq-button:disabled {
+    opacity: 1;
+    cursor: default;
+}
+
+.map-location-status.nq-button.is-retry {
+    cursor: pointer;
+}
+
+.map-location-status.nq-button[data-location-state="permission_denied"] {
+    background: var(--nh-danger) !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 32px rgba(217, 68, 68, 0.22) !important;
+}

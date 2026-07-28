@@ -81,8 +81,14 @@ def test_find_spots_exposes_retry_status_without_backend_changes():
 
     assert "requestResilientLocation" in find_spots
     assert "maybeRetryLocationOnResume" in find_spots
+    interface_text = (ROOT / "static" / "interface_text.js").read_text(encoding="utf-8")
+
     assert "find-location-status" in template
-    assert "map-location-status" in css
+    assert 'class="filter-toggle map-location-status"' in template
+    assert 'class="nq-button map-location-status"' not in template
+    assert "Location Blocked. Retry?" in interface_text
+    assert '.map-location-status.filter-toggle[data-location-state="permission_denied"]' in css
+    assert "background: var(--nh-danger);" in css
     assert "/api/claim/" not in (ROOT / "static" / "location_utils.js").read_text(
         encoding="utf-8"
     )

@@ -543,7 +543,7 @@ export function makeFindSpotsText({
             fallback: 'Still finding location…',
             success: 'Location found',
             retry: 'Retry Location',
-            permissionDenied: 'Location blocked — Retry',
+            permissionDenied: 'Location Blocked. Retry?',
             unsupported: 'Location unavailable',
         },
         notices: {

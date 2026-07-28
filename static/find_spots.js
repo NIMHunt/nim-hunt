@@ -267,7 +267,7 @@ function locationControlText(kind) {
         requesting: text.requesting || 'Finding location…',
         fallback: text.fallback || 'Still finding location…',
         success: text.success || 'Location found',
-        permission_denied: text.permissionDenied || 'Location blocked — Retry',
+        permission_denied: text.permissionDenied || 'Location Blocked. Retry?',
         unsupported: text.unsupported || 'Location unavailable',
         position_unavailable: text.retry || 'Retry Location',
         timeout: text.retry || 'Retry Location',

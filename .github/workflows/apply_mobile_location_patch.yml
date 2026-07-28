@@ -56,11 +56,14 @@ jobs:
       - name: Run Node tests
         run: npm test --prefix helpers
 
-      - name: Run syntax and lint checks
-        run: |
-          ruff check tests/test_location_resilience.py
-          python -m compileall -q *.py tests
-          for file in static/*.js; do node --check --input-type=module < "$file"; done
+      - name: Lint focused Python test
+        run: ruff check tests/test_location_resilience.py
+
+      - name: Compile Python
+        run: python -m compileall -q *.py tests
+
+      - name: Check JavaScript syntax
+        run: for file in static/*.js; do node --check --input-type=module < "$file"; done
 
       - name: Commit patch
         run: |

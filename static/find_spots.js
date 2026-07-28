@@ -1,5 +1,6 @@
 import { init, requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
-import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=special-user-badge-v1-20260727';
+import { requestResilientLocation } from './location_utils.js?v=mobile-location-v1-20260728';
+import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=mobile-location-v1-20260728';
 import {
     appendBulletLine,
     createUserDisplayName,
@@ -60,6 +61,9 @@ const state = {
     liveRefreshInFlight: false,
     cancelSpot: null,
     cancelInProgress: false,
+    locationRequestInFlight: false,
+    lastLocationRequestAt: 0,
+    locationStatusTimerId: null,
 };
 
 const APP_NAME = document.body.dataset.appName || 'NimHunt';
@@ -69,6 +73,7 @@ const MAX_MAP_INIT_SPOTS = Number.parseInt(document.body.dataset.maxMapInitSpots
 const MAX_MAP_ZOOM_OUT = Number.parseInt(document.body.dataset.maxMapZoomOut || '11', 10);
 const MAX_SPOT_RADIUS_METRES = Number.parseFloat(document.body.dataset.maxSpotRadiusMetres || '1000');
 const MAP_LIST_SCROLL_DURATION_MS = 420;
+const LOCATION_RESUME_RETRY_COOLDOWN_MS = 10000;
 const CREATE_SPOT_URL = document.body.dataset.createSpotUrl || '/create';
 const CLAIM_CAPTCHA_MIN = Number.parseInt(document.body.dataset.claimCaptchaMin || '1', 10);
 const CLAIM_CAPTCHA_MAX = Number.parseInt(document.body.dataset.claimCaptchaMax || '9', 10);
@@ -95,6 +100,7 @@ const els = {
     noticeOk: document.getElementById('notice-ok'),
 
     map: document.getElementById('spot-map'),
+    locationStatus: document.getElementById('find-location-status'),
     filterActive: document.getElementById('filter-active'),
     filterUpcoming: document.getElementById('filter-upcoming'),
     filterPrizedraws: document.getElementById('filter-prizedraws'),
@@ -255,29 +261,92 @@ function syncReportConfirmTooltipState() {
     wrap.classList.toggle('is-tooltip-locked', reportBlockedByMissingDevice() && els.reportConfirm.disabled);
 }
 
-function requestLocation() {
-    return new Promise((resolve) => {
-        if (!navigator.geolocation) {
-            resolve(null);
-            return;
+function locationControlText(kind) {
+    const text = UI_COPY.locationStatus || {};
+    const values = {
+        requesting: text.requesting || 'Finding location…',
+        fallback: text.fallback || 'Still finding location…',
+        success: text.success || 'Location found',
+        permission_denied: text.permissionDenied || 'Location blocked — Retry',
+        unsupported: text.unsupported || 'Location unavailable',
+        position_unavailable: text.retry || 'Retry Location',
+        timeout: text.retry || 'Retry Location',
+    };
+    return values[kind] || text.retry || 'Retry Location';
+}
+
+function setLocationControlState(kind, { hideAfterMs = 0 } = {}) {
+    const control = els.locationStatus;
+    if (!control) return;
+
+    if (state.locationStatusTimerId) {
+        window.clearTimeout(state.locationStatusTimerId);
+        state.locationStatusTimerId = null;
+    }
+
+    const retryable = ['permission_denied', 'position_unavailable', 'timeout'].includes(kind);
+    control.textContent = locationControlText(kind);
+    control.disabled = !retryable;
+    control.hidden = false;
+    control.dataset.locationState = kind;
+    control.classList.toggle('is-retry', retryable);
+
+    if (hideAfterMs > 0) {
+        state.locationStatusTimerId = window.setTimeout(() => {
+            control.hidden = true;
+            state.locationStatusTimerId = null;
+        }, hideAfterMs);
+    }
+}
+
+async function refreshUserLocation({ showFailureNotice = false, recenter = false } = {}) {
+    if (state.locationRequestInFlight) return null;
+
+    state.locationRequestInFlight = true;
+    state.lastLocationRequestAt = Date.now();
+    try {
+        const result = await requestResilientLocation({
+            onStatus: (kind) => setLocationControlState(kind),
+        });
+
+        if (!result.ok) {
+            setLocationControlState(result.kind || 'position_unavailable');
+            if (showFailureNotice) showNotice(UI_COPY.notices.locationUnavailable);
+            return null;
         }
 
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                resolve({
-                    lat: pos.coords.latitude,
-                    long: pos.coords.longitude,
-                    accuracy: pos.coords.accuracy,
-                });
-            },
-            () => resolve(null),
-            {
-                enableHighAccuracy: true,
-                timeout: 8000,
-                maximumAge: 60000,
+        const location = result.location;
+        const hadLocation = state.hasUserLocation;
+        setRecordedLocation({
+            lat: location.lat,
+            long: location.long,
+            accuracy: location.accuracy,
+            isReal: true,
+        });
+        setLocationControlState('success', { hideAfterMs: 1000 });
+
+        if (state.map) {
+            setMapInteractionEnabled(false);
+            if (recenter || !hadLocation) {
+                state.map.setView(
+                    [location.lat, location.long],
+                    Math.max(14, state.map.getZoom()),
+                    { animate: false },
+                );
+            } else {
+                await refreshVisibleSpots();
             }
-        );
-    });
+        }
+        return location;
+    } finally {
+        state.locationRequestInFlight = false;
+    }
+}
+
+function maybeRetryLocationOnResume() {
+    if (state.testLocationMode || state.hasUserLocation || state.locationRequestInFlight) return;
+    if (Date.now() - state.lastLocationRequestAt < LOCATION_RESUME_RETRY_COOLDOWN_MS) return;
+    void refreshUserLocation({ recenter: true });
 }
 
 function getFilterParams() {
@@ -1861,12 +1930,7 @@ async function initFindSpots() {
     identifyReportUser();
     els.listTitle.textContent = UI_COPY.status.listTitle;
 
-    const location = await requestLocation();
-    if (location) {
-        setRecordedLocation({ lat: location.lat, long: location.long, accuracy: location.accuracy, isReal: true });
-    } else {
-        showNotice(UI_COPY.notices.locationUnavailable);
-    }
+    await refreshUserLocation({ showFailureNotice: true });
 
     setupMap();
 
@@ -1876,6 +1940,11 @@ async function initFindSpots() {
     await refreshVisibleSpots();
     scheduleLiveRefresh();
 }
+
+els.locationStatus?.addEventListener('click', () => {
+    if (els.locationStatus.disabled) return;
+    void refreshUserLocation({ recenter: true });
+});
 
 els.noticeOk.addEventListener('click', () => {
     els.noticeBackdrop.hidden = true;
@@ -1970,12 +2039,14 @@ updateFilterToggleState();
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
         void runLiveRefresh();
+        maybeRetryLocationOnResume();
     } else {
         stopLiveRefresh();
     }
 });
 window.addEventListener('pageshow', () => {
     if (state.map) void runLiveRefresh();
+    maybeRetryLocationOnResume();
 });
 window.addEventListener('beforeunload', stopLiveRefresh);
 

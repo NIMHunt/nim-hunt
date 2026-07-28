@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="{{ google_font_muli }}">
     <link rel="stylesheet" href="{{ nimiq_style_cdn }}">
     <link rel="stylesheet" href="{{ leaflet_css_url }}">
-    <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-ui-polish-v1-20260704') }}">
+    <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-ui-polish-v1-20260704') }}-mobile-location-v1-20260728">
     <link rel="stylesheet" href="/static/x_share.css?v=x-share-v4-20260726">
 </head>
 <body
@@ -115,7 +115,10 @@
         </header>
 
         <section class="map-card" aria-label="Spot map" data-i18n-aria-label="findSpots.mapAria">
-            <div id="spot-map" class="spot-map"></div>
+            <div class="map-location-shell">
+                <div id="spot-map" class="spot-map"></div>
+                <button id="find-location-status" class="nq-button map-location-status" type="button" aria-live="polite" hidden>Finding location…</button>
+            </div>
         </section>
 
         <section class="spot-list-card" aria-label="Spots" data-i18n-aria-label="findSpots.listAria">
@@ -151,7 +154,7 @@
     <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
     <script src="{{ leaflet_js_url }}"></script>
     <script src="/static/map_zoom_guard.js?v=success-code-map-zoom-v1-20260721"></script>
-    <script type="module" src="/static/find_spots.js?v={{ asset_version | default('claim-ui-polish-v1-20260704') }}-claim-live-v2-20260720"></script>
+    <script type="module" src="/static/find_spots.js?v={{ asset_version | default('claim-ui-polish-v1-20260704') }}-mobile-location-v1-20260728"></script>
     <script type="module" src="/static/claim_code_policy_ui.js?v=success-code-map-zoom-v1-20260721"></script>
     <script type="module" src="/static/x_share.js?v=x-share-v4-20260726"></script>
 </body>

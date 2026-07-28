@@ -538,6 +538,14 @@ export function makeFindSpotsText({
     language = getPreferredLanguage(),
 } = {}) {
     const english = {
+        locationStatus: {
+            requesting: 'Finding location…',
+            fallback: 'Still finding location…',
+            success: 'Location found',
+            retry: 'Retry Location',
+            permissionDenied: 'Location blocked — Retry',
+            unsupported: 'Location unavailable',
+        },
         notices: {
             locationUnavailable: {
                 title: 'Location unavailable',

@@ -51,7 +51,24 @@ jobs:
         run: python -m pytest -q tests/test_location_resilience.py
 
       - name: Run full Python tests
-        run: python -m pytest -q
+        shell: bash
+        run: |
+          set +e
+          python -m pytest -q > pytest-full.log 2>&1
+          status=$?
+          cat pytest-full.log
+          echo "PYTEST_STATUS=$status" >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Upload full-test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-test-output
+          path: pytest-full.log
+
+      - name: Fail if full Python tests failed
+        run: test "$PYTEST_STATUS" -eq 0
 
       - name: Run Node tests
         run: npm test --prefix helpers

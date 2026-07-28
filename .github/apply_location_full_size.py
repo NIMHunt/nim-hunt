@@ -115,12 +115,14 @@ test = test_path.read_text(encoding="utf-8")
 needle = '''    assert "background: var(--nh-danger);" in css
     assert "/api/claim/" not in (ROOT / "static" / "location_utils.js").read_text(
 '''
-replacement = '''    assert "background: var(--nh-danger);" in css
-    assert "min-width: 0 !important;" not in css
-    assert "min-height: 2.7rem;" not in css
-    assert "padding: 0.62rem 1rem;" not in css
-    assert "font-size: 1rem;" not in css
-    assert "opacity: 1;" in css
+replacement = '''    location_css = css[css.index("/* Reuse the filter-toggle dimensions and typography exactly."):]
+
+    assert "background: var(--nh-danger);" in location_css
+    assert "min-width: 0 !important;" not in location_css
+    assert "min-height: 2.7rem;" not in location_css
+    assert "padding: 0.62rem 1rem;" not in location_css
+    assert "font-size: 1rem;" not in location_css
+    assert "opacity: 1;" in location_css
     assert "/api/claim/" not in (ROOT / "static" / "location_utils.js").read_text(
 '''
 if test.count(needle) != 1:

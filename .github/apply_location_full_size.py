@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# This helper exists only to apply and validate the requested PR correction.
 ROOT = Path(__file__).resolve().parents[1]
 
 css_path = ROOT / "static" / "home.css"

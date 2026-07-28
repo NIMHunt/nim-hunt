@@ -82,6 +82,10 @@ def test_find_spots_exposes_retry_status_without_backend_changes():
 
     assert "requestResilientLocation" in find_spots
     assert "maybeRetryLocationOnResume" in find_spots
+    assert "LOCATION_REQUEST_STATUS_DELAY_MS = 150" in find_spots
+    assert "showLocationRequestStatus" in find_spots
+    assert "onStatus: (kind) => showLocationRequestStatus(kind)" in find_spots
+    assert "clearLocationRequestStatusDelay();" in find_spots
     assert "find-location-status" in template
     assert 'class="nq-button map-location-status"' in template
     assert 'class="filter-toggle map-location-status"' not in template

@@ -64,6 +64,7 @@ const state = {
     locationRequestInFlight: false,
     lastLocationRequestAt: 0,
     locationStatusTimerId: null,
+    locationRequestStatusDelayTimerId: null,
 };
 
 const APP_NAME = document.body.dataset.appName || 'NimHunt';
@@ -74,6 +75,7 @@ const MAX_MAP_ZOOM_OUT = Number.parseInt(document.body.dataset.maxMapZoomOut || 
 const MAX_SPOT_RADIUS_METRES = Number.parseFloat(document.body.dataset.maxSpotRadiusMetres || '1000');
 const MAP_LIST_SCROLL_DURATION_MS = 420;
 const LOCATION_RESUME_RETRY_COOLDOWN_MS = 10000;
+const LOCATION_REQUEST_STATUS_DELAY_MS = 150;
 const CREATE_SPOT_URL = document.body.dataset.createSpotUrl || '/create';
 const CLAIM_CAPTCHA_MIN = Number.parseInt(document.body.dataset.claimCaptchaMin || '1', 10);
 const CLAIM_CAPTCHA_MAX = Number.parseInt(document.body.dataset.claimCaptchaMax || '9', 10);
@@ -261,6 +263,26 @@ function syncReportConfirmTooltipState() {
     wrap.classList.toggle('is-tooltip-locked', reportBlockedByMissingDevice() && els.reportConfirm.disabled);
 }
 
+function clearLocationRequestStatusDelay() {
+    if (!state.locationRequestStatusDelayTimerId) return;
+    window.clearTimeout(state.locationRequestStatusDelayTimerId);
+    state.locationRequestStatusDelayTimerId = null;
+}
+
+function showLocationRequestStatus(kind) {
+    if (kind === 'requesting') {
+        clearLocationRequestStatusDelay();
+        state.locationRequestStatusDelayTimerId = window.setTimeout(() => {
+            state.locationRequestStatusDelayTimerId = null;
+            setLocationControlState(kind);
+        }, LOCATION_REQUEST_STATUS_DELAY_MS);
+        return;
+    }
+
+    clearLocationRequestStatusDelay();
+    setLocationControlState(kind);
+}
+
 function locationControlText(kind) {
     const text = UI_COPY.locationStatus || {};
     const values = {
@@ -306,11 +328,11 @@ async function refreshUserLocation({ showFailureNotice = false, recenter = false
     state.lastLocationRequestAt = Date.now();
     try {
         const result = await requestResilientLocation({
-            onStatus: (kind) => setLocationControlState(kind),
+            onStatus: (kind) => showLocationRequestStatus(kind),
         });
 
         if (!result.ok) {
-            setLocationControlState(result.kind || 'position_unavailable');
+            showLocationRequestStatus(result.kind || 'position_unavailable');
             if (showFailureNotice) showNotice(UI_COPY.notices.locationUnavailable);
             return null;
         }
@@ -323,6 +345,7 @@ async function refreshUserLocation({ showFailureNotice = false, recenter = false
             accuracy: location.accuracy,
             isReal: true,
         });
+        clearLocationRequestStatusDelay();
         if (els.locationStatus) els.locationStatus.hidden = true;
 
         if (state.map) {

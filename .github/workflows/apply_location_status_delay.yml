@@ -1,0 +1,75 @@
+name: Apply location status delay
+
+on:
+  push:
+    branches:
+      - agent/resilient-mobile-location
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out patch branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/resilient-mobile-location
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: helpers/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          npm ci --prefix helpers
+
+      - name: Apply status delay
+        run: python .github/apply_location_status_delay.py
+
+      - name: Run focused location tests
+        run: python -m pytest -q tests/test_location_resilience.py
+
+      - name: Run full Python tests
+        run: python -m pytest -q
+
+      - name: Run Node tests
+        run: npm test --prefix helpers
+
+      - name: Run syntax and lint checks
+        run: |
+          ruff check tests/test_location_resilience.py
+          python -m compileall -q *.py tests
+          for file in static/*.js; do node --check --input-type=module < "$file"; done
+
+      - name: Commit correction
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add static/find_spots.js templates/find_spots.html tests/test_location_resilience.py
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Delay initial location status display"
+          git push

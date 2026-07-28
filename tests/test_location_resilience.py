@@ -78,11 +78,10 @@ def test_find_spots_exposes_retry_status_without_backend_changes():
     find_spots = (ROOT / "static" / "find_spots.js").read_text(encoding="utf-8")
     template = (ROOT / "templates" / "find_spots.html").read_text(encoding="utf-8")
     css = (ROOT / "static" / "home.css").read_text(encoding="utf-8")
+    interface_text = (ROOT / "static" / "interface_text.js").read_text(encoding="utf-8")
 
     assert "requestResilientLocation" in find_spots
     assert "maybeRetryLocationOnResume" in find_spots
-    interface_text = (ROOT / "static" / "interface_text.js").read_text(encoding="utf-8")
-
     assert "find-location-status" in template
     assert 'class="filter-toggle map-location-status"' in template
     assert 'class="nq-button map-location-status"' not in template

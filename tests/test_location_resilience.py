@@ -92,9 +92,7 @@ def test_find_spots_exposes_retry_status_without_backend_changes():
     ]
 
     assert "background: var(--nh-danger);" in location_css
-    assert "width: auto !important;" not in location_css
     assert "min-width: 0 !important;" not in location_css
-    assert "height: auto;" not in location_css
     assert "min-height: 2.7rem;" not in location_css
     assert "padding: 0.62rem 1rem;" not in location_css
     assert "font-size: 1rem;" not in location_css

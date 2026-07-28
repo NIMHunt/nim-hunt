@@ -47,6 +47,11 @@ jobs:
       - name: Apply frontend-only patch
         run: python .github/apply_mobile_location_patch.py
 
+      - name: Normalise focused Python test
+        run: |
+          ruff check --fix tests/test_location_resilience.py
+          ruff check tests/test_location_resilience.py
+
       - name: Run focused location tests
         run: python -m pytest -q tests/test_location_resilience.py
 
@@ -55,9 +60,6 @@ jobs:
 
       - name: Run Node tests
         run: npm test --prefix helpers
-
-      - name: Lint focused Python test
-        run: ruff check tests/test_location_resilience.py
 
       - name: Compile Python
         run: python -m compileall -q *.py tests

@@ -45,7 +45,9 @@ jobs:
           npm ci --prefix helpers
 
       - name: Apply requested styling
-        run: python .github/apply_nq_location_button.py
+        run: |
+          python .github/apply_nq_location_button.py
+          python .github/bump_location_css_version.py
 
       - name: Run focused location tests
         run: python -m pytest -q tests/test_location_resilience.py

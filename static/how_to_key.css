@@ -1,0 +1,53 @@
+.how-to-spot-key {
+    margin: 0 0 clamp(2.25rem, 9vw, 3.5rem);
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.how-to-spot-key-title {
+    margin: 0;
+    color: var(--nh-text);
+    font-size: 2rem;
+    font-weight: 900;
+    line-height: 1.2;
+    text-align: center;
+}
+
+.how-to-spot-key-items {
+    display: flex;
+    flex-direction: column;
+    gap: 1.15rem;
+}
+
+.how-to-spot-key-item {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 2.4rem minmax(0, 1fr);
+    align-items: start;
+    gap: 0.9rem;
+}
+
+.how-to-spot-key-icon {
+    width: 2.4rem;
+    height: 2.4rem;
+    display: grid;
+    place-items: center;
+    color: var(--nh-text);
+}
+
+.how-to-spot-key-icon svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    fill: currentColor;
+}
+
+.how-to-spot-key-copy {
+    margin: 0;
+    color: var(--nh-text);
+    font-size: 1.25rem;
+    font-weight: 800;
+    line-height: 1.45;
+    text-align: left;
+}

@@ -1,71 +1,165 @@
 <section class="how-to-guide" aria-label="How to use NimHunt">
-    <section class="how-to-location-box" aria-labelledby="how-to-location-title">
-        <h3 id="how-to-location-title" class="how-to-section-title">Allow precise location</h3>
-        <p class="how-to-location-copy">
-            NimHunt needs access to your location to show nearby Spots and confirm that you are inside a Spot when you claim. Keep precise location switched on, then choose the option that allows access while you are using the app.
-        </p>
+    <section class="project-disclaimer-note how-to-location-box nq-button gold action-button primary-action" aria-labelledby="how-to-location-title">
+        <div class="how-to-location-layout">
+            <div class="how-to-location-copy-column">
+                <h3 id="how-to-location-title" class="action-title project-disclaimer-title how-to-location-title">
+                    <svg class="project-disclaimer-icon" viewBox="0 0 17 16" aria-hidden="true" focusable="false"><use href="/static/nimiq-style.icons.svg#nq-alert-triangle"></use></svg>
+                    <span>Please Allow Precise Location!</span>
+                    <svg class="project-disclaimer-icon" viewBox="0 0 17 16" aria-hidden="true" focusable="false"><use href="/static/nimiq-style.icons.svg#nq-alert-triangle"></use></svg>
+                </h3>
 
-        <div class="how-to-permission-grid">
-            <figure class="how-to-permission-example">
-                <figcaption class="nq-label">iOS</figcaption>
-                <img
-                    src="/static/images/how-to/ios-location-permission.svg?v=how-to-v1-20260729"
-                    alt="iOS location notice with Allow While Using App as the recommended choice."
-                    width="230"
-                    height="239"
-                >
-            </figure>
+                <p class="action-detail how-to-location-copy">
+                    NimHunt needs access to your location to show nearby Spots and confirm that you are inside a Spot when you claim. Keep precise location switched on, then choose the option that allows access while you are using the app.
+                </p>
+            </div>
 
-            <figure class="how-to-permission-example">
-                <figcaption class="nq-label">Android</figcaption>
-                <img
-                    src="/static/images/how-to/android-location-permission.svg?v=how-to-v1-20260729"
-                    alt="Android location notice with precise location enabled and While using the app as the recommended choice."
-                    width="250"
-                    height="274"
-                >
-            </figure>
+            <div class="how-to-location-example-column">
+                <div class="how-to-platform-switch" role="tablist" aria-label="Location permission example">
+                    <button
+                        id="how-to-platform-ios"
+                        class="how-to-platform-button is-selected"
+                        type="button"
+                        role="tab"
+                        aria-selected="true"
+                        aria-controls="how-to-permission-ios"
+                        data-how-to-platform="ios"
+                    >iOS</button>
+                    <button
+                        id="how-to-platform-android"
+                        class="how-to-platform-button"
+                        type="button"
+                        role="tab"
+                        aria-selected="false"
+                        aria-controls="how-to-permission-android"
+                        tabindex="-1"
+                        data-how-to-platform="android"
+                    >Android</button>
+                </div>
+
+                <div class="how-to-permission-stage">
+                    <figure
+                        id="how-to-permission-ios"
+                        class="how-to-permission-example"
+                        role="tabpanel"
+                        aria-labelledby="how-to-platform-ios"
+                        data-how-to-permission="ios"
+                    >
+                        <img
+                            src="/static/images/how-to/warning-ios.png?v=how-to-user-images-v1"
+                            alt="iOS location notice with Allow While Using App as the recommended choice."
+                            width="573"
+                            height="595"
+                        >
+                    </figure>
+
+                    <figure
+                        id="how-to-permission-android"
+                        class="how-to-permission-example"
+                        role="tabpanel"
+                        aria-labelledby="how-to-platform-android"
+                        data-how-to-permission="android"
+                        hidden
+                    >
+                        <img
+                            src="/static/images/how-to/warning-android.png?v=how-to-user-images-v1"
+                            alt="Android location notice with precise location enabled and While using the app as the recommended choice."
+                            width="858"
+                            height="938"
+                        >
+                    </figure>
+                </div>
+            </div>
         </div>
     </section>
 
     <div class="how-to-story" aria-label="Finding and claiming a Spot">
         <section class="how-to-step">
-            <div class="how-to-step-visual" aria-hidden="true">
-                <span class="how-to-user-marker"></span>
+            <div class="how-to-step-visual">
+                <span
+                    class="how-to-marker-example"
+                    tabindex="0"
+                    role="img"
+                    aria-label="Your location marker"
+                    aria-describedby="how-to-user-tooltip"
+                >
+                    <span class="how-to-user-marker" aria-hidden="true"></span>
+                    <span id="how-to-user-tooltip" class="how-to-map-tooltip leaflet-tooltip leaflet-tooltip-top map-spot-title-tooltip" role="tooltip">Hello!</span>
+                </span>
             </div>
             <p class="how-to-step-copy">This is you. Say hello!</p>
         </section>
 
         <section class="how-to-step how-to-step-reversed">
-            <p class="how-to-step-copy">This is a Spot. This is where you can find some NIM</p>
-            <div class="how-to-step-visual" aria-hidden="true">
-                <span class="how-to-spot-radius">
-                    <span class="how-to-spot-marker"></span>
+            <p class="how-to-step-copy">This is a Spot. This is where you can find some NIM.</p>
+            <div class="how-to-step-visual">
+                <span
+                    class="how-to-marker-example"
+                    tabindex="0"
+                    role="img"
+                    aria-label="Example Spot marker and claim radius"
+                    aria-describedby="how-to-spot-tooltip"
+                >
+                    <span class="how-to-spot-radius" aria-hidden="true">
+                        <span class="how-to-spot-marker"></span>
+                    </span>
+                    <span id="how-to-spot-tooltip" class="how-to-map-tooltip leaflet-tooltip leaflet-tooltip-top map-spot-title-tooltip" role="tooltip">Example Spot</span>
                 </span>
             </div>
         </section>
 
         <section class="how-to-step">
             <div class="how-to-step-visual">
-                <span class="nq-button-pill spot-claim-button is-standard how-to-claim-button" role="img" aria-label="Claim button">CLAIM</span>
+                <button class="nq-button-pill spot-claim-button is-standard how-to-claim-button" type="button">CLAIM</button>
             </div>
-            <p class="how-to-step-copy">When you move onto a Spot you can click this button to receive some NIM</p>
+            <p class="how-to-step-copy">When you move onto a Spot, you can click this button to receive some NIM.</p>
+        </section>
+
+        <section class="how-to-step how-to-step-reversed">
+            <p class="how-to-step-copy">If your claim is valid, the NIM will enter your account immediately.</p>
+            <div class="how-to-step-visual" aria-hidden="true">
+                <svg class="how-to-payment-icon" viewBox="0 0 150 149" focusable="false">
+                    <use href="/static/nimiq-style.icons.svg#nq-under-payment"></use>
+                </svg>
+            </div>
         </section>
     </div>
 
+    <section class="how-to-spot-key" aria-labelledby="how-to-spot-key-title">
+        <h3 id="how-to-spot-key-title" class="how-to-spot-key-title">Spot Key</h3>
+        <div class="how-to-spot-key-items">
+            <div class="how-to-spot-key-item">
+                <span class="how-to-spot-key-icon" aria-hidden="true">
+                    <svg viewBox="0 0 98 123" focusable="false">
+                        <use href="/static/nimiq-style.icons.svg#nq-stopwatch"></use>
+                    </svg>
+                </span>
+                <p class="how-to-spot-key-copy">These Spots require you to remain within their area for a certain amount of time before you can claim.</p>
+            </div>
+
+            <div class="how-to-spot-key-item">
+                <span class="how-to-spot-key-icon" aria-hidden="true">
+                    <svg viewBox="0 0 32 47" focusable="false">
+                        <use href="/static/nimiq-style.icons.svg#nq-lock-locked"></use>
+                    </svg>
+                </span>
+                <p class="how-to-spot-key-copy">These Spots require a private code for you to make a claim.</p>
+            </div>
+        </div>
+    </section>
+
     <figure class="how-to-find-spots-figure">
-        <div
-            class="how-to-find-spots-shot"
-            role="img"
-            aria-label="The Find Spots page showing the user's position, several Spots, their claim radii, filters and a list of nearby Spots."
-        >
-            <img src="/static/images/how-to/find-spots-1.svg?v=how-to-v1-20260729" alt="" width="440" height="106" loading="lazy" decoding="async">
-            <img src="/static/images/how-to/find-spots-2.svg?v=how-to-v1-20260729" alt="" width="440" height="105" loading="lazy" decoding="async">
-            <img src="/static/images/how-to/find-spots-3.svg?v=how-to-v1-20260729" alt="" width="440" height="105" loading="lazy" decoding="async">
-            <img src="/static/images/how-to/find-spots-4.svg?v=how-to-v1-20260729" alt="" width="440" height="106" loading="lazy" decoding="async">
-            <img src="/static/images/how-to/find-spots-5.svg?v=how-to-v1-20260729" alt="" width="440" height="106" loading="lazy" decoding="async">
-            <img src="/static/images/how-to/find-spots-6.svg?v=how-to-v1-20260729" alt="" width="440" height="105" loading="lazy" decoding="async">
+        <div class="how-to-find-spots-shot">
+            <img
+                src="/static/images/how-to/example.png?v=how-to-user-images-v1"
+                alt="The Find Spots page showing the user's position, several Spots, their claim radii, filters and a list of nearby Spots."
+                width="703"
+                height="1015"
+                loading="lazy"
+                decoding="async"
+            >
         </div>
         <figcaption class="sr-only">Find Spots page example</figcaption>
     </figure>
+
+    <p class="how-to-closing-copy">Get started by clicking “Find Spots” below. Happy Hunting!</p>
 </section>

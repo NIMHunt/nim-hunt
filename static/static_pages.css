@@ -83,64 +83,142 @@
     flex-direction: column;
 }
 
+/* This panel reuses the Home disclaimer presentation but is not itself a
+   control. Only the platform tabs inside it are interactive. */
 .how-to-location-box {
+    --how-to-location-font-size: 2rem;
+
     min-width: 0;
-    padding: clamp(1.15rem, 5vw, 1.7rem);
-    border: 2px solid rgba(233, 164, 0, 0.82);
-    border-radius: 24px;
-    background: transparent;
+    width: 100%;
+    align-items: stretch !important;
+    cursor: default !important;
+    font-size: var(--how-to-location-font-size);
+    pointer-events: auto;
+    text-align: initial !important;
+    box-shadow: 0 0 32px rgba(233, 164, 0, 0.18) !important;
+    transition: box-shadow 160ms ease !important;
 }
 
-.how-to-section-title {
-    margin: 0 0 0.65rem;
-    color: var(--nh-text);
-    font-size: 1.25rem;
-    font-weight: 900;
-    line-height: 1.2;
+.nq-style .how-to-location-box,
+.nq-style .how-to-location-box:hover,
+.nq-style .how-to-location-box:focus,
+.nq-style .how-to-location-box:focus-within,
+.nq-style .how-to-location-box:active {
+    transform: none !important;
+}
+
+.nq-style .how-to-location-box:hover,
+.nq-style .how-to-location-box:focus-within,
+.nq-style .how-to-location-box:active {
+    box-shadow: 0 0 32px rgba(233, 164, 0, 0.34) !important;
+}
+
+.how-to-location-layout {
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+    align-items: center;
+    gap: clamp(1rem, 4vw, 1.6rem);
+}
+
+.how-to-location-copy-column,
+.how-to-location-example-column {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.how-to-location-title {
+    width: 100%;
+    margin: 0 !important;
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    line-height: 1.08;
     text-align: center;
 }
 
 .how-to-location-copy {
-    max-width: 40rem;
-    margin: 0 auto;
+    width: 100%;
+    margin: 0.9rem 0 0;
     color: var(--nh-text);
-    font-size: 1rem;
-    font-weight: 800;
-    line-height: 1.5;
-    text-align: center;
+    font-weight: 700;
+    line-height: 1.45;
+    text-align: center !important;
 }
 
-.how-to-permission-grid {
-    min-width: 0;
-    margin-top: 1.55rem;
+.how-to-location-title,
+.how-to-location-copy,
+.how-to-platform-button {
+    font-size: var(--how-to-location-font-size) !important;
+}
+
+.how-to-platform-switch {
+    width: 100%;
+    margin: 0 0 0.9rem;
+    padding: 0.3rem;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
-    gap: clamp(0.55rem, 3vw, 1.15rem);
+    gap: 0.25rem;
+    border: 1px solid rgba(31, 35, 72, 0.11);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.48);
+    box-shadow: inset 0 1px 2px rgba(31, 35, 72, 0.08);
 }
 
-.how-to-permission-example {
+.how-to-platform-button {
     min-width: 0;
     margin: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.55rem;
-}
-
-.how-to-permission-example figcaption {
+    padding: 0.58rem 0.75rem;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
     color: var(--nh-text);
-    font-size: 1rem;
+    cursor: pointer !important;
+    font-family: inherit;
     font-weight: 900;
     line-height: 1;
     text-align: center;
 }
 
+.how-to-platform-button.is-selected {
+    background: #ffffff;
+    box-shadow: 0 6px 16px rgba(31, 35, 72, 0.16);
+}
+
+.how-to-platform-button:focus-visible {
+    outline: 3px solid rgba(5, 130, 202, 0.36);
+    outline-offset: 2px;
+}
+
+.how-to-permission-stage {
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    place-items: center;
+}
+
+.how-to-permission-example {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    display: grid;
+    place-items: center;
+}
+
+.how-to-permission-example[hidden] {
+    display: none;
+}
+
 .how-to-permission-example img {
     display: block;
     width: 100%;
+    max-width: none;
     height: auto;
-    max-height: 17rem;
     object-fit: contain;
     border-radius: 20px;
 }
@@ -172,37 +250,79 @@
     place-items: center;
 }
 
-.how-to-step-copy {
-    margin: 0;
-    color: var(--nh-text);
-    font-size: clamp(1.05rem, 4.3vw, 1.35rem);
-    font-weight: 900;
-    line-height: 1.42;
-    text-align: left;
+.nq-style .how-to-story .how-to-step > .how-to-step-copy {
+    margin: 0 !important;
+    color: var(--nh-text) !important;
+    font-size: 2rem !important;
+    font-weight: 900 !important;
+    line-height: 1.42 !important;
+    opacity: 1 !important;
+    text-align: center !important;
 }
 
-.how-to-step-reversed .how-to-step-copy {
-    text-align: right;
-}
-
-.how-to-user-marker {
-    width: 5.8rem;
-    height: 5.8rem;
+.how-to-marker-example {
+    position: relative;
     display: grid;
     place-items: center;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.78);
-    box-shadow: 0 12px 30px rgba(31, 35, 72, 0.14);
+    cursor: help;
+    outline: none;
 }
 
-.how-to-user-marker::after {
-    width: 1.8rem;
-    height: 1.8rem;
-    border: 0.34rem solid #ffffff;
-    border-radius: 50%;
-    background: #080808;
-    box-shadow: 0 3px 10px rgba(31, 35, 72, 0.28);
+.how-to-marker-example:focus-visible {
+    outline: 3px solid rgba(5, 130, 202, 0.42);
+    outline-offset: 0.55rem;
+}
+
+.how-to-marker-tooltip {
+    position: absolute;
+    z-index: 10;
+    left: 50%;
+    bottom: calc(100% + 0.8rem);
+    padding: 0.55rem 0.75rem;
+    border-radius: 10px;
+    background: rgba(31, 35, 72, 0.96);
+    color: #ffffff;
+    box-shadow: 0 10px 28px rgba(31, 35, 72, 0.26);
+    font-size: 1.1rem;
+    font-weight: 800;
+    line-height: 1.2;
+    opacity: 0;
+    pointer-events: none;
+    text-align: center;
+    transform: translate(-50%, 0.35rem);
+    transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
+    visibility: hidden;
+    white-space: nowrap;
+}
+
+.how-to-marker-tooltip::after {
     content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    border: 7px solid transparent;
+    border-top-color: rgba(31, 35, 72, 0.96);
+    transform: translateX(-50%);
+}
+
+.how-to-marker-example:hover .how-to-marker-tooltip,
+.how-to-marker-example:focus .how-to-marker-tooltip,
+.how-to-marker-example:focus-within .how-to-marker-tooltip {
+    opacity: 1;
+    transform: translate(-50%, 0);
+    visibility: visible;
+}
+
+/* The actual map uses one solid Leaflet circleMarker: radius 12, dark border,
+   dark fill and no surrounding accuracy/radius halo. */
+.how-to-user-marker {
+    width: 3rem;
+    height: 3rem;
+    border: 0.22rem solid #1f2348;
+    border-radius: 50%;
+    background: #1f2348;
+    opacity: 0.92;
 }
 
 .how-to-spot-radius {
@@ -224,17 +344,55 @@
     box-shadow: 0 5px 14px rgba(31, 35, 72, 0.28);
 }
 
-.how-to-claim-button {
-    pointer-events: none;
+/* This is a real button, but its click is demonstrative rather than a claim. */
+.nq-style button.spot-claim-button.how-to-claim-button.nq-button-pill {
+    min-width: 8.5rem;
+    margin: 0;
+    padding: 0.8rem 1.55rem;
+    border: 0;
+    border-radius: 999px;
+    background: var(--nh-success) !important;
+    background-image: none !important;
+    color: #ffffff !important;
+    box-shadow: 0 10px 24px rgba(31, 35, 72, 0.20) !important;
+    cursor: pointer !important;
+    font: inherit;
+    font-size: 1.25rem;
+    font-weight: 900;
+    line-height: 1;
+    transform: translateY(0) !important;
+    transition: box-shadow 140ms ease, filter 140ms ease, transform 140ms ease !important;
     user-select: none;
 }
 
-.how-to-claim-button,
-.how-to-claim-button:hover,
-.how-to-claim-button:focus,
-.how-to-claim-button:active {
-    cursor: default !important;
-    transform: none !important;
+.nq-style button.spot-claim-button.how-to-claim-button.nq-button-pill:hover {
+    box-shadow: 0 14px 30px rgba(31, 35, 72, 0.28) !important;
+    filter: brightness(1.04);
+    transform: translateY(-2px) !important;
+}
+
+.nq-style button.spot-claim-button.how-to-claim-button.nq-button-pill:active {
+    box-shadow: 0 6px 14px rgba(31, 35, 72, 0.20) !important;
+    filter: brightness(0.94);
+    transform: translateY(1px) scale(0.98) !important;
+}
+
+.nq-style button.spot-claim-button.how-to-claim-button.nq-button-pill:focus-visible {
+    outline: 3px solid rgba(33, 188, 165, 0.42);
+    outline-offset: 4px;
+}
+
+.nq-style button.spot-claim-button.how-to-claim-button::before,
+.nq-style button.spot-claim-button.how-to-claim-button::after {
+    display: none !important;
+    content: none !important;
+}
+
+.how-to-payment-icon {
+    width: min(100%, 10rem);
+    height: auto;
+    color: #ffc435;
+    filter: drop-shadow(0 10px 18px rgba(31, 35, 72, 0.18));
 }
 
 .how-to-find-spots-figure {
@@ -259,13 +417,39 @@
     margin: 0;
 }
 
+.how-to-closing-copy {
+    margin: clamp(2.5rem, 10vw, 4rem) 0 0;
+    color: var(--nh-text);
+    font-size: 2rem;
+    font-weight: 900;
+    line-height: 1.42;
+    text-align: center;
+}
+
 @media (max-width: 390px) {
     .home-information-links a {
         font-size: 1.05rem;
     }
 
     .how-to-location-box {
-        padding-inline: 0.9rem;
+        padding-inline: 0.9rem !important;
+    }
+
+    .how-to-location-layout {
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+        gap: 0.8rem;
+    }
+
+    .how-to-location-title {
+        gap: 0.3rem;
+    }
+
+    .how-to-platform-button {
+        padding-inline: 0.45rem;
+    }
+
+    .how-to-permission-example img {
+        border-radius: 16px;
     }
 
     .how-to-step,
@@ -278,19 +462,32 @@
         grid-template-columns: minmax(0, 1.24fr) minmax(6.5rem, 0.76fr);
     }
 
-    .how-to-user-marker {
-        width: 5rem;
-        height: 5rem;
-    }
-
     .how-to-spot-radius {
         width: 7.3rem;
         height: 7.3rem;
     }
 }
 
+@media (max-width: 330px) {
+    .how-to-location-layout {
+        grid-template-columns: 1fr;
+        gap: 1.4rem;
+    }
+
+    .how-to-location-copy {
+        max-width: 24rem;
+    }
+
+    .how-to-permission-example img {
+        width: 100%;
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
-    .how-to-claim-button {
+    .how-to-location-box,
+    .how-to-marker-tooltip,
+    .how-to-claim-button,
+    .how-to-platform-button {
         transition: none !important;
     }
 }

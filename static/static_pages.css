@@ -83,36 +83,58 @@
     flex-direction: column;
 }
 
-/* Reuse the real Home disclaimer banner rather than approximating it. The
-   only behavioural difference is that this version contains an interactive
-   platform switch, so pointer events must remain available. */
+/* This panel deliberately reuses the real Home disclaimer banner. It remains
+   interactive because its right-hand side contains the platform switch. */
 .how-to-location-box {
     min-width: 0;
     width: 100%;
-    align-items: center !important;
+    align-items: stretch !important;
     pointer-events: auto;
-    text-align: center !important;
+    text-align: initial !important;
+}
+
+.how-to-location-layout {
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+    align-items: center;
+    gap: clamp(1rem, 4vw, 1.6rem);
+}
+
+.how-to-location-copy-column,
+.how-to-location-example-column {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 
 .how-to-location-title {
     width: 100%;
     margin: 0 !important;
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
     justify-content: center;
+    gap: 0.45rem;
+    font-size: clamp(1.2rem, 4.2vw, 1.65rem) !important;
+    line-height: 1.08;
     text-align: center;
 }
 
 .how-to-location-copy {
     width: 100%;
-    max-width: 38rem;
-    margin: 0.9rem auto 0;
-    font-size: 1.2rem !important;
+    margin: 0.9rem 0 0;
+    color: var(--nh-text);
+    font-size: 1.1rem !important;
     font-weight: 700;
     line-height: 1.45;
     text-align: center !important;
 }
 
 .how-to-platform-switch {
-    margin-top: 1.4rem;
+    margin: 0 0 0.9rem;
     padding: 0.3rem;
     display: inline-grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -124,16 +146,16 @@
 }
 
 .how-to-platform-button {
-    min-width: 7rem;
+    min-width: 5.7rem;
     margin: 0;
-    padding: 0.62rem 1rem;
+    padding: 0.58rem 0.75rem;
     border: 0;
     border-radius: 999px;
     background: transparent;
     color: var(--nh-text);
     cursor: pointer !important;
     font: inherit;
-    font-size: 1.1rem;
+    font-size: 1rem;
     font-weight: 900;
     line-height: 1;
     text-align: center;
@@ -152,7 +174,6 @@
 .how-to-permission-stage {
     width: 100%;
     min-width: 0;
-    margin-top: 1.35rem;
     display: grid;
     place-items: center;
 }
@@ -171,7 +192,7 @@
 
 .how-to-permission-example img {
     display: block;
-    width: min(100%, 22rem);
+    width: min(100%, 15rem);
     height: auto;
     object-fit: contain;
     border-radius: 20px;
@@ -204,17 +225,14 @@
     place-items: center;
 }
 
-.how-to-step-copy {
+.how-to-step-copy,
+.how-to-step-reversed .how-to-step-copy {
     margin: 0;
     color: var(--nh-text);
     font-size: clamp(1.05rem, 4.3vw, 1.35rem);
     font-weight: 900;
     line-height: 1.42;
-    text-align: left;
-}
-
-.how-to-step-reversed .how-to-step-copy {
-    text-align: right;
+    text-align: center;
 }
 
 /* The actual map uses one solid Leaflet circleMarker: radius 12, dark border,
@@ -247,25 +265,73 @@
     box-shadow: 0 5px 14px rgba(31, 35, 72, 0.28);
 }
 
-.how-to-claim-button {
+/* home.css gives real claim pills a white background through a more-specific
+   selector. This demonstrative pill intentionally reverses that treatment. */
+.nq-style .spot-claim-button.how-to-claim-button.nq-button-pill,
+.nq-style .spot-claim-button.how-to-claim-button.nq-button-pill:hover,
+.nq-style .spot-claim-button.how-to-claim-button.nq-button-pill:focus,
+.nq-style .spot-claim-button.how-to-claim-button.nq-button-pill:active {
+    background: var(--nh-success) !important;
+    background-image: none !important;
+    color: #ffffff !important;
+    box-shadow: 0 10px 24px rgba(31, 35, 72, 0.20) !important;
+    cursor: default !important;
     pointer-events: none;
+    transform: none !important;
     user-select: none;
 }
 
-.how-to-claim-button,
-.how-to-claim-button:hover,
-.how-to-claim-button:focus,
-.how-to-claim-button:active {
-    background: var(--nh-success) !important;
-    color: #ffffff !important;
-    cursor: default !important;
-    transform: none !important;
+.nq-style .spot-claim-button.how-to-claim-button::before,
+.nq-style .spot-claim-button.how-to-claim-button::after {
+    display: none !important;
+    content: none !important;
 }
 
-.how-to-confetti {
-    font-size: clamp(4rem, 18vw, 6rem);
-    line-height: 1;
-    filter: drop-shadow(0 10px 18px rgba(31, 35, 72, 0.16));
+.how-to-confetti-art {
+    width: min(100%, 8.5rem);
+    height: auto;
+    overflow: visible;
+    filter: drop-shadow(0 10px 18px rgba(31, 35, 72, 0.18));
+}
+
+.how-to-confetti-cone {
+    fill: #ffc435;
+    stroke: #1f2348;
+    stroke-width: 5;
+    stroke-linejoin: round;
+}
+
+.how-to-confetti-fold {
+    fill: #f39b22;
+    opacity: 0.78;
+}
+
+.how-to-confetti-streamer {
+    fill: none;
+    stroke-width: 7;
+    stroke-linecap: round;
+}
+
+.how-to-confetti-piece.is-green,
+.how-to-confetti-streamer.is-green {
+    fill: #21bca5;
+    stroke: #21bca5;
+}
+
+.how-to-confetti-piece.is-blue,
+.how-to-confetti-streamer.is-blue {
+    fill: #0582ca;
+    stroke: #0582ca;
+}
+
+.how-to-confetti-piece.is-red,
+.how-to-confetti-streamer.is-red {
+    fill: #d94444;
+    stroke: #d94444;
+}
+
+.how-to-confetti-piece.is-gold {
+    fill: #ffc435;
 }
 
 .how-to-find-spots-figure {
@@ -276,6 +342,7 @@
 .how-to-find-spots-shot {
     width: 100%;
     max-width: 440px;
+    min-height: 10rem;
     margin: 0 auto;
     overflow: hidden;
     border-radius: 25px;
@@ -290,6 +357,20 @@
     margin: 0;
 }
 
+.how-to-find-spots-shot img[hidden],
+.how-to-image-error[hidden] {
+    display: none;
+}
+
+.how-to-image-error {
+    margin: 2rem 1rem;
+    color: var(--nh-muted);
+    font-size: 1rem;
+    font-weight: 800;
+    line-height: 1.4;
+    text-align: center;
+}
+
 @media (max-width: 390px) {
     .home-information-links a {
         font-size: 1.05rem;
@@ -299,13 +380,29 @@
         padding-inline: 0.9rem !important;
     }
 
+    .how-to-location-layout {
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+        gap: 0.8rem;
+    }
+
+    .how-to-location-title {
+        gap: 0.3rem;
+        font-size: 1.12rem !important;
+    }
+
     .how-to-location-copy {
-        font-size: 1.1rem !important;
+        font-size: 0.98rem !important;
+        line-height: 1.4;
     }
 
     .how-to-platform-button {
-        min-width: 6.2rem;
-        padding-inline: 0.8rem;
+        min-width: 4.7rem;
+        padding-inline: 0.55rem;
+        font-size: 0.9rem;
+    }
+
+    .how-to-permission-example img {
+        border-radius: 16px;
     }
 
     .how-to-step,
@@ -321,6 +418,21 @@
     .how-to-spot-radius {
         width: 7.3rem;
         height: 7.3rem;
+    }
+}
+
+@media (max-width: 330px) {
+    .how-to-location-layout {
+        grid-template-columns: 1fr;
+        gap: 1.4rem;
+    }
+
+    .how-to-location-copy {
+        max-width: 24rem;
+    }
+
+    .how-to-permission-example img {
+        width: min(100%, 18rem);
     }
 }
 

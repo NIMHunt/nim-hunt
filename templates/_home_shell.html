@@ -12,6 +12,9 @@
     <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-polish-v2-20260704') }}">
     <link rel="stylesheet" href="/static/disclaimer_button.css?v=disclaimer-button-v3-20260722">
     <link rel="stylesheet" href="/static/static_pages.css?v=home-information-v9-how-to-interactions-20260729">
+    {% if information_view | default('') == 'how-to' %}
+    <link rel="stylesheet" href="/static/how_to_key.css?v=spot-key-v1-20260729">
+    {% endif %}
 </head>
 <body class="nq-style"
     data-app-name="{{ app_name | default('NimHunt') }}"
@@ -69,7 +72,7 @@
             {% if information_view | default('') in ('about', 'how-to', 'roadmap') %}
             <div id="home-information-content" class="home-information-content" aria-labelledby="home-information-title">
                 <h2 id="home-information-title" class="nq-label static-page-title" data-static-page-title>
-                    {% if information_view == 'about' %}About{% elif information_view == 'how-to' %}How To{% else %}Roadmap{% endif %}
+                    {% if information_view == 'about' %}About{% elif information_view == 'how-to' %}Starter Guide{% else %}Roadmap{% endif %}
                 </h2>
                 {% if information_view == 'how-to' %}
                     {% include "_how_to_content.html" %}

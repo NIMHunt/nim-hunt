@@ -1,0 +1,48 @@
+/*
+ * Starter Guide marker tooltips.
+ *
+ * Their visual surface comes from the real map tooltip rule in home.css:
+ * `.leaflet-tooltip.map-spot-title-tooltip`. This file only positions and
+ * reveals that shared presentation outside Leaflet.
+ */
+.how-to-marker-example {
+    cursor: default !important;
+}
+
+.how-to-map-tooltip {
+    position: absolute;
+    z-index: 10;
+    left: 50%;
+    bottom: calc(100% + 0.8rem);
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+    text-align: center;
+    transform: translate(-50%, 0.35rem);
+    transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
+    visibility: hidden;
+}
+
+.how-to-map-tooltip::before {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    border: 7px solid transparent;
+    border-top-color: rgba(255, 255, 255, 0.96);
+    transform: translateX(-50%);
+}
+
+.how-to-marker-example:hover .how-to-map-tooltip,
+.how-to-marker-example:focus .how-to-map-tooltip,
+.how-to-marker-example:focus-within .how-to-map-tooltip {
+    opacity: 1;
+    transform: translate(-50%, 0);
+    visibility: visible;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .how-to-map-tooltip {
+        transition: none;
+    }
+}

@@ -1,11 +1,6 @@
-from pathlib import Path
-
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
 def _read(relative_path: str) -> str:
-    return (ROOT / relative_path).read_text(encoding="utf-8")
+    with open(relative_path, encoding="utf-8") as source:
+        return source.read()
 
 
 def test_how_to_heading_is_starter_guide_without_renaming_navigation_link() -> None:

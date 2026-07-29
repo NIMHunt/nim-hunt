@@ -29,6 +29,11 @@
         const response = await nativeFetch(...args);
         if (requestPath(args[0]) !== '/api/home/session') return response;
 
+        // This wrapper exists only to observe the one Home-session response.
+        // Restore the native function immediately so every later request follows
+        // NimHunt's ordinary fetch path without another interception layer.
+        window.fetch = nativeFetch;
+
         let data = null;
         try {
             data = await response.clone().json();

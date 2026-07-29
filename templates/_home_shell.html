@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-polish-v2-20260704') }}">
     <link rel="stylesheet" href="/static/disclaimer_button.css?v=disclaimer-button-v3-20260722">
     <link rel="stylesheet" href="/static/static_pages.css?v=home-information-v9-how-to-interactions-20260729">
+    <link rel="stylesheet" href="/static/home_information_polish.css?v=first-visit-guide-v1-20260729">
     {% if information_view | default('') == 'how-to' %}
     <link rel="stylesheet" href="/static/how_to_key.css?v=spot-key-v2-map-tooltip-20260729">
     {% endif %}
@@ -22,6 +23,7 @@
     data-display-name-min="{{ display_name_min | default(3) }}"
     data-display-name-max="{{ display_name_max | default(18) }}"
     data-home-information-view="{{ information_view | default('') }}"
+    data-test-features-enabled="{{ 'true' if test_features_enabled | default(false) else 'false' }}"
 >
     {% if show_notice | default(true) %}
     <div id="notice-backdrop" class="notice-backdrop" hidden>
@@ -29,7 +31,10 @@
             <h2 id="notice-title">{{ app_name | default('NimHunt') }} notice</h2>
             <p id="notice-body" data-i18n="common.noticeBody">Something needs your attention.</p>
             <a id="notice-link" class="notice-link" data-i18n="common.readMore" hidden>Read more</a>
-            <button id="notice-ok" class="nq-button light-blue" data-i18n="common.ok">OK</button>
+            <div class="notice-actions">
+                <button id="notice-ok" class="nq-button light-blue" data-i18n="common.ok">OK</button>
+                <a id="notice-guide" class="notice-guide-button" href="/?view=how-to" hidden>See Guide</a>
+            </div>
         </section>
     </div>
     {% endif %}
@@ -184,6 +189,7 @@
     {% endif %}
 
     {% if home_script_src is defined and home_script_src %}
+    <script src="/static/first_visit_guide.js?v=first-visit-guide-v1-20260729"></script>
     <script type="module" src="{{ home_script_src }}"></script>
     {% endif %}
 </body>

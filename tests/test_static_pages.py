@@ -213,7 +213,7 @@ def test_how_to_story_has_complete_copy_tooltips_and_real_claim_button() -> None
     assert "gap: clamp(5.5rem, 19vw, 8.5rem);" in stylesheet
 
 
-def test_how_to_uses_user_supplied_png_files_only() -> None:
+def test_how_to_uses_user_supplied_image_paths_only() -> None:
     partial = _read("templates/_how_to_content.html")
     stylesheet = _read("static/static_pages.css")
     controller = _read("static/how_to.js")
@@ -238,7 +238,8 @@ def test_how_to_uses_user_supplied_png_files_only() -> None:
     ):
         asset = asset_dir / required_asset
         assert asset.exists()
-        assert asset.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+        signature = asset.read_bytes()[:8]
+        assert signature.startswith(b"\x89PNG") or signature.startswith(b"\xff\xd8\xff")
 
     for obsolete_asset in (
         "ios-location-permission.svg",

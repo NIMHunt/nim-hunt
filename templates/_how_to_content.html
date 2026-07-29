@@ -1,13 +1,45 @@
 <section class="how-to-guide" aria-label="How to use NimHunt">
-    <section class="how-to-location-box" aria-labelledby="how-to-location-title">
-        <h3 id="how-to-location-title" class="how-to-section-title">Allow precise location</h3>
-        <p class="how-to-location-copy">
+    <section class="project-disclaimer-note how-to-location-box nq-button gold action-button primary-action" aria-labelledby="how-to-location-title">
+        <h3 id="how-to-location-title" class="action-title project-disclaimer-title how-to-location-title">
+            <svg class="project-disclaimer-icon" viewBox="0 0 17 16" aria-hidden="true" focusable="false"><use href="/static/nimiq-style.icons.svg#nq-alert-triangle"></use></svg>
+            <span>Please Allow Precise Location!</span>
+            <svg class="project-disclaimer-icon" viewBox="0 0 17 16" aria-hidden="true" focusable="false"><use href="/static/nimiq-style.icons.svg#nq-alert-triangle"></use></svg>
+        </h3>
+
+        <p class="action-detail how-to-location-copy">
             NimHunt needs access to your location to show nearby Spots and confirm that you are inside a Spot when you claim. Keep precise location switched on, then choose the option that allows access while you are using the app.
         </p>
 
-        <div class="how-to-permission-grid">
-            <figure class="how-to-permission-example">
-                <figcaption class="nq-label">iOS</figcaption>
+        <div class="how-to-platform-switch" role="tablist" aria-label="Location permission example">
+            <button
+                id="how-to-platform-ios"
+                class="how-to-platform-button is-selected"
+                type="button"
+                role="tab"
+                aria-selected="true"
+                aria-controls="how-to-permission-ios"
+                data-how-to-platform="ios"
+            >iOS</button>
+            <button
+                id="how-to-platform-android"
+                class="how-to-platform-button"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="how-to-permission-android"
+                tabindex="-1"
+                data-how-to-platform="android"
+            >Android</button>
+        </div>
+
+        <div class="how-to-permission-stage">
+            <figure
+                id="how-to-permission-ios"
+                class="how-to-permission-example"
+                role="tabpanel"
+                aria-labelledby="how-to-platform-ios"
+                data-how-to-permission="ios"
+            >
                 <img
                     src="/static/images/how-to/ios-location-permission.svg?v=how-to-v1-20260729"
                     alt="iOS location notice with Allow While Using App as the recommended choice."
@@ -16,8 +48,14 @@
                 >
             </figure>
 
-            <figure class="how-to-permission-example">
-                <figcaption class="nq-label">Android</figcaption>
+            <figure
+                id="how-to-permission-android"
+                class="how-to-permission-example"
+                role="tabpanel"
+                aria-labelledby="how-to-platform-android"
+                data-how-to-permission="android"
+                hidden
+            >
                 <img
                     src="/static/images/how-to/android-location-permission.svg?v=how-to-v1-20260729"
                     alt="Android location notice with precise location enabled and While using the app as the recommended choice."
@@ -50,6 +88,13 @@
                 <span class="nq-button-pill spot-claim-button is-standard how-to-claim-button" role="img" aria-label="Claim button">CLAIM</span>
             </div>
             <p class="how-to-step-copy">When you move onto a Spot you can click this button to receive some NIM</p>
+        </section>
+
+        <section class="how-to-step how-to-step-reversed">
+            <p class="how-to-step-copy">If your claim is valid, the NIM will enter your account immediately.</p>
+            <div class="how-to-step-visual" aria-hidden="true">
+                <span class="how-to-confetti">🎉</span>
+            </div>
         </section>
     </div>
 

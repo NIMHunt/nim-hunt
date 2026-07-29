@@ -86,11 +86,23 @@
 /* This panel deliberately reuses the real Home disclaimer banner. It remains
    interactive because its right-hand side contains the platform switch. */
 .how-to-location-box {
+    --how-to-location-font-size: 2rem;
+
     min-width: 0;
     width: 100%;
     align-items: stretch !important;
+    cursor: default !important;
+    font-size: var(--how-to-location-font-size);
     pointer-events: auto;
     text-align: initial !important;
+    transition: none !important;
+}
+
+.nq-style .how-to-location-box,
+.nq-style .how-to-location-box:hover,
+.nq-style .how-to-location-box:focus,
+.nq-style .how-to-location-box:active {
+    transform: none !important;
 }
 
 .how-to-location-layout {
@@ -118,7 +130,6 @@
     align-items: center;
     justify-content: center;
     gap: 0.45rem;
-    font-size: clamp(1.2rem, 4.2vw, 1.65rem) !important;
     line-height: 1.08;
     text-align: center;
 }
@@ -127,16 +138,22 @@
     width: 100%;
     margin: 0.9rem 0 0;
     color: var(--nh-text);
-    font-size: 1.1rem !important;
     font-weight: 700;
     line-height: 1.45;
     text-align: center !important;
 }
 
+.how-to-location-title,
+.how-to-location-copy,
+.how-to-platform-button {
+    font-size: var(--how-to-location-font-size) !important;
+}
+
 .how-to-platform-switch {
+    width: 100%;
     margin: 0 0 0.9rem;
     padding: 0.3rem;
-    display: inline-grid;
+    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.25rem;
     border: 1px solid rgba(31, 35, 72, 0.11);
@@ -146,7 +163,7 @@
 }
 
 .how-to-platform-button {
-    min-width: 5.7rem;
+    min-width: 0;
     margin: 0;
     padding: 0.58rem 0.75rem;
     border: 0;
@@ -154,8 +171,7 @@
     background: transparent;
     color: var(--nh-text);
     cursor: pointer !important;
-    font: inherit;
-    font-size: 1rem;
+    font-family: inherit;
     font-weight: 900;
     line-height: 1;
     text-align: center;
@@ -192,7 +208,8 @@
 
 .how-to-permission-example img {
     display: block;
-    width: min(100%, 15rem);
+    width: 100%;
+    max-width: none;
     height: auto;
     object-fit: contain;
     border-radius: 20px;
@@ -225,14 +242,14 @@
     place-items: center;
 }
 
-.how-to-step-copy,
-.how-to-step-reversed .how-to-step-copy {
-    margin: 0;
-    color: var(--nh-text);
-    font-size: clamp(1.05rem, 4.3vw, 1.35rem);
-    font-weight: 900;
-    line-height: 1.42;
-    text-align: center;
+.nq-style .how-to-story .how-to-step > .how-to-step-copy {
+    margin: 0 !important;
+    color: var(--nh-text) !important;
+    font-size: 2rem !important;
+    font-weight: 900 !important;
+    line-height: 1.42 !important;
+    opacity: 1 !important;
+    text-align: center !important;
 }
 
 /* The actual map uses one solid Leaflet circleMarker: radius 12, dark border,
@@ -287,51 +304,11 @@
     content: none !important;
 }
 
-.how-to-confetti-art {
-    width: min(100%, 8.5rem);
+.how-to-payment-icon {
+    width: min(100%, 10rem);
     height: auto;
-    overflow: visible;
+    color: var(--nh-success);
     filter: drop-shadow(0 10px 18px rgba(31, 35, 72, 0.18));
-}
-
-.how-to-confetti-cone {
-    fill: #ffc435;
-    stroke: #1f2348;
-    stroke-width: 5;
-    stroke-linejoin: round;
-}
-
-.how-to-confetti-fold {
-    fill: #f39b22;
-    opacity: 0.78;
-}
-
-.how-to-confetti-streamer {
-    fill: none;
-    stroke-width: 7;
-    stroke-linecap: round;
-}
-
-.how-to-confetti-piece.is-green,
-.how-to-confetti-streamer.is-green {
-    fill: #21bca5;
-    stroke: #21bca5;
-}
-
-.how-to-confetti-piece.is-blue,
-.how-to-confetti-streamer.is-blue {
-    fill: #0582ca;
-    stroke: #0582ca;
-}
-
-.how-to-confetti-piece.is-red,
-.how-to-confetti-streamer.is-red {
-    fill: #d94444;
-    stroke: #d94444;
-}
-
-.how-to-confetti-piece.is-gold {
-    fill: #ffc435;
 }
 
 .how-to-find-spots-figure {
@@ -342,7 +319,6 @@
 .how-to-find-spots-shot {
     width: 100%;
     max-width: 440px;
-    min-height: 10rem;
     margin: 0 auto;
     overflow: hidden;
     border-radius: 25px;
@@ -355,20 +331,6 @@
     width: 100%;
     height: auto;
     margin: 0;
-}
-
-.how-to-find-spots-shot img[hidden],
-.how-to-image-error[hidden] {
-    display: none;
-}
-
-.how-to-image-error {
-    margin: 2rem 1rem;
-    color: var(--nh-muted);
-    font-size: 1rem;
-    font-weight: 800;
-    line-height: 1.4;
-    text-align: center;
 }
 
 @media (max-width: 390px) {
@@ -387,18 +349,10 @@
 
     .how-to-location-title {
         gap: 0.3rem;
-        font-size: 1.12rem !important;
-    }
-
-    .how-to-location-copy {
-        font-size: 0.98rem !important;
-        line-height: 1.4;
     }
 
     .how-to-platform-button {
-        min-width: 4.7rem;
-        padding-inline: 0.55rem;
-        font-size: 0.9rem;
+        padding-inline: 0.45rem;
     }
 
     .how-to-permission-example img {
@@ -432,7 +386,7 @@
     }
 
     .how-to-permission-example img {
-        width: min(100%, 18rem);
+        width: 100%;
     }
 }
 

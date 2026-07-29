@@ -172,9 +172,11 @@ def test_how_to_location_panel_uses_one_uniform_size_and_stable_shadow() -> None
     assert "innerHTML" not in controller
 
 
-def test_how_to_story_has_complete_copy_tooltips_and_real_claim_button() -> None:
+def test_how_to_story_has_complete_copy_shared_map_tooltips_and_real_claim_button() -> None:
     partial = _read("templates/_how_to_content.html")
     stylesheet = _read("static/static_pages.css")
+    home_stylesheet = _read("static/home.css")
+    tooltip_stylesheet = _read("static/how_to_map_tooltip.css")
 
     assert "This is you. Say hello!" in partial
     assert "This is a Spot. This is where you can find some NIM." in partial
@@ -182,8 +184,13 @@ def test_how_to_story_has_complete_copy_tooltips_and_real_claim_button() -> None
     assert "If your claim is valid, the NIM will enter your account immediately." in partial
     assert "Get started by clicking “Find Spots” below. Happy Hunting!" in partial
 
-    assert 'class="how-to-marker-tooltip" role="tooltip">Hello!</span>' in partial
-    assert 'class="how-to-marker-tooltip" role="tooltip">Example Spot</span>' in partial
+    shared_tooltip_classes = (
+        'class="how-to-map-tooltip leaflet-tooltip leaflet-tooltip-top '
+        'map-spot-title-tooltip"'
+    )
+    assert partial.count(shared_tooltip_classes) == 2
+    assert 'role="tooltip">Hello!</span>' in partial
+    assert 'role="tooltip">Example Spot</span>' in partial
     assert 'class="nq-button-pill spot-claim-button is-standard how-to-claim-button" type="button">CLAIM</button>' in partial
     assert "#nq-under-payment" in partial
     assert "how-to-user-marker" in partial
@@ -196,9 +203,14 @@ def test_how_to_story_has_complete_copy_tooltips_and_real_claim_button() -> None
     assert "text-align: center !important;" in stylesheet
     assert ".how-to-step-reversed .how-to-step-copy" not in stylesheet
 
-    assert ".how-to-marker-example:hover .how-to-marker-tooltip" in stylesheet
-    assert ".how-to-marker-example:focus .how-to-marker-tooltip" in stylesheet
-    assert "cursor: help;" in stylesheet
+    assert ".leaflet-tooltip.map-spot-title-tooltip" in home_stylesheet
+    assert "background: rgba(255, 255, 255, 0.96);" in home_stylesheet
+    assert "font-size: 1.6rem;" in home_stylesheet
+    assert ".how-to-marker-example:hover .how-to-map-tooltip" in tooltip_stylesheet
+    assert ".how-to-marker-example:focus .how-to-map-tooltip" in tooltip_stylesheet
+    assert "cursor: default !important;" in tooltip_stylesheet
+    assert "font-size:" not in tooltip_stylesheet
+    assert "background:" not in tooltip_stylesheet
 
     assert ".nq-style button.spot-claim-button.how-to-claim-button.nq-button-pill:hover" in stylesheet
     assert ".nq-style button.spot-claim-button.how-to-claim-button.nq-button-pill:active" in stylesheet
@@ -220,9 +232,9 @@ def test_how_to_uses_user_supplied_image_paths_only() -> None:
 
     figure = partial.split('<figure class="how-to-find-spots-figure">', 1)[1]
     assert figure.count("<img") == 1
-    assert '/static/images/how-to/example.png' in figure
-    assert "width=\"703\"" in figure
-    assert "height=\"1015\"" in figure
+    assert "/static/images/how-to/example.png" in figure
+    assert 'width="703"' in figure
+    assert 'height="1015"' in figure
     assert "data-how-to-image-chunk-prefix" not in partial
     assert "data:image/webp;base64," not in controller
     assert "chunks.join" not in controller

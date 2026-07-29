@@ -17,22 +17,23 @@
 .how-to-spot-key-items {
     display: flex;
     flex-direction: column;
-    gap: 1.15rem;
+    gap: 1.4rem;
 }
 
 .how-to-spot-key-item {
     min-width: 0;
     display: grid;
-    grid-template-columns: 2.4rem minmax(0, 1fr);
-    align-items: start;
-    gap: 0.9rem;
+    grid-template-columns: 4.8rem minmax(0, 1fr);
+    align-items: center;
+    gap: 1.1rem;
 }
 
 .how-to-spot-key-icon {
-    width: 2.4rem;
-    height: 2.4rem;
+    width: 4.8rem;
+    height: 4.8rem;
     display: grid;
     place-items: center;
+    align-self: center;
     color: var(--nh-text);
 }
 

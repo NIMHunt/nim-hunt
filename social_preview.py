@@ -23,7 +23,7 @@ from social_card_images import router as router
 
 DEFAULT_BASE_URL = "https://nimhunt.app"
 MARKER = "<!-- nimhunt-social-preview -->"
-DEFAULT_SITE_IMAGE_PATH = "/static/images/nimhunt-default-social-card.jpg"
+DEFAULT_SITE_IMAGE_PATH = "/static/images/nimhunt-default-social-card.png"
 
 
 @dataclass(frozen=True)

@@ -66,8 +66,17 @@ class FindSpotsMapInteractionTest(unittest.TestCase):
         self.assertIn(".spot-centre-marker {", self.css)
         self.assertIn("filter: drop-shadow(0 3px 4px rgba(31, 35, 72, 0.18));", self.css)
 
-    def test_centre_diameter_is_doubled(self):
-        self.assertRegex(self.source, r"L\.circleMarker\(latLng, \{\s*radius: 12,")
+    def test_user_and_spot_markers_share_doubled_diameter(self):
+        self.assertIn("const MAP_MARKER_RADIUS = 12;", self.source)
+        self.assertRegex(
+            self.source,
+            r"L\.circleMarker\(latLng, \{\s*radius: MAP_MARKER_RADIUS,",
+        )
+        self.assertRegex(
+            self.source,
+            r"state\.userMarker = L\.circleMarker\(position, \{\s*"
+            r"radius: MAP_MARKER_RADIUS,",
+        )
 
     def test_search_bounds_include_overlapping_offscreen_radii(self):
         self.assertIn("expandedMapSearchBounds(visibleBounds)", self.source)

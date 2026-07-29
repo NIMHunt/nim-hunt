@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_user_and_spot_markers_share_one_radius() -> None:
+    """Keep the user's location dot aligned with the Spot marker diameter."""
     source = (ROOT / "static/find_spots.js").read_text(encoding="utf-8")
 
     assert "const MAP_MARKER_RADIUS = 12;" in source

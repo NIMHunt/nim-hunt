@@ -35,7 +35,7 @@ def test_information_views_are_variants_of_the_real_homepage() -> None:
     assert "information_view | default('') in ('about', 'how-to', 'roadmap')" in shell_template
     assert '{% include "_how_to_content.html" %}' in shell_template
     assert "/static/static_page.js?v=about-nimiq-pay-v2-20260725" in shell_template
-    assert "/static/static_pages.css?v=home-information-v8-how-to-images-20260729" in shell_template
+    assert "/static/static_pages.css?v=home-information-v9-how-to-interactions-20260729" in shell_template
     assert "/static/how_to.js?v=how-to-platform-toggle-v3-20260729" in shell_template
 
 
@@ -129,7 +129,7 @@ def test_information_renderer_uses_safe_text_and_bypasses_stale_roadmap_data() -
     assert "cache: 'no-store'" in renderer
 
 
-def test_how_to_location_panel_uses_one_uniform_size_and_static_banner() -> None:
+def test_how_to_location_panel_uses_one_uniform_size_and_stable_shadow() -> None:
     partial = _read("templates/_how_to_content.html")
     stylesheet = _read("static/static_pages.css")
     controller = _read("static/how_to.js")
@@ -156,7 +156,9 @@ def test_how_to_location_panel_uses_one_uniform_size_and_static_banner() -> None
     assert "font-size: var(--how-to-location-font-size) !important;" in stylesheet
     assert "width: 100%;" in stylesheet
     assert "max-width: none;" in stylesheet
-    assert ".nq-style .how-to-location-box:hover" in stylesheet
+    assert ".nq-style .how-to-location-box:focus-within" in stylesheet
+    assert ".nq-style .how-to-location-box:active" in stylesheet
+    assert "box-shadow: 0 0 32px rgba(233, 164, 0, 0.34) !important;" in stylesheet
     assert "transform: none !important;" in stylesheet
     assert "cursor: default !important;" in stylesheet
     assert ".how-to-permission-example[hidden]" in stylesheet
@@ -170,19 +172,22 @@ def test_how_to_location_panel_uses_one_uniform_size_and_static_banner() -> None
     assert "innerHTML" not in controller
 
 
-def test_how_to_story_forces_identical_copy_and_uses_payment_icon() -> None:
+def test_how_to_story_has_complete_copy_tooltips_and_real_claim_button() -> None:
     partial = _read("templates/_how_to_content.html")
     stylesheet = _read("static/static_pages.css")
 
     assert "This is you. Say hello!" in partial
-    assert "This is a Spot. This is where you can find some NIM" in partial
-    assert "When you move onto a Spot you can click this button to receive some NIM" in partial
+    assert "This is a Spot. This is where you can find some NIM." in partial
+    assert "When you move onto a Spot, you can click this button to receive some NIM." in partial
     assert "If your claim is valid, the NIM will enter your account immediately." in partial
+    assert "Get started by clicking “Find Spots” below. Happy Hunting!" in partial
+
+    assert 'class="how-to-marker-tooltip" role="tooltip">Hello!</span>' in partial
+    assert 'class="how-to-marker-tooltip" role="tooltip">Example Spot</span>' in partial
+    assert 'class="nq-button-pill spot-claim-button is-standard how-to-claim-button" type="button">CLAIM</button>' in partial
     assert "#nq-under-payment" in partial
-    assert "how-to-confetti" not in partial
     assert "how-to-user-marker" in partial
     assert "how-to-spot-radius" in partial
-    assert "spot-claim-button is-standard" in partial
 
     assert ".nq-style .how-to-story .how-to-step > .how-to-step-copy" in stylesheet
     assert "font-size: 2rem !important;" in stylesheet
@@ -190,15 +195,25 @@ def test_how_to_story_forces_identical_copy_and_uses_payment_icon() -> None:
     assert "opacity: 1 !important;" in stylesheet
     assert "text-align: center !important;" in stylesheet
     assert ".how-to-step-reversed .how-to-step-copy" not in stylesheet
-    assert ".nq-style .spot-claim-button.how-to-claim-button.nq-button-pill" in stylesheet
+
+    assert ".how-to-marker-example:hover .how-to-marker-tooltip" in stylesheet
+    assert ".how-to-marker-example:focus .how-to-marker-tooltip" in stylesheet
+    assert "cursor: help;" in stylesheet
+
+    assert ".nq-style button.spot-claim-button.how-to-claim-button.nq-button-pill:hover" in stylesheet
+    assert ".nq-style button.spot-claim-button.how-to-claim-button.nq-button-pill:active" in stylesheet
     assert "background: var(--nh-success) !important;" in stylesheet
-    assert "background-image: none !important;" in stylesheet
     assert "color: #ffffff !important;" in stylesheet
+    assert "transform: translateY(-2px) !important;" in stylesheet
+    assert "transform: translateY(1px) scale(0.98) !important;" in stylesheet
+
     assert ".how-to-payment-icon" in stylesheet
+    assert "color: #ffc435;" in stylesheet
+    assert ".how-to-closing-copy" in stylesheet
     assert "gap: clamp(5.5rem, 19vw, 8.5rem);" in stylesheet
 
 
-def test_how_to_uses_user_supplied_png_placeholders_only() -> None:
+def test_how_to_uses_user_supplied_png_files_only() -> None:
     partial = _read("templates/_how_to_content.html")
     stylesheet = _read("static/static_pages.css")
     controller = _read("static/how_to.js")
@@ -216,6 +231,15 @@ def test_how_to_uses_user_supplied_png_placeholders_only() -> None:
     assert "max-width: 440px;" in stylesheet
 
     asset_dir = ROOT / "static" / "images" / "how-to"
+    for required_asset in (
+        "warning-android.png",
+        "warning-ios.png",
+        "example.png",
+    ):
+        asset = asset_dir / required_asset
+        assert asset.exists()
+        assert asset.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
     for obsolete_asset in (
         "ios-location-permission.svg",
         "android-location-permission.svg",

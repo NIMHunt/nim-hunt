@@ -74,26 +74,44 @@
 
     <div class="how-to-story" aria-label="Finding and claiming a Spot">
         <section class="how-to-step">
-            <div class="how-to-step-visual" aria-hidden="true">
-                <span class="how-to-user-marker"></span>
+            <div class="how-to-step-visual">
+                <span
+                    class="how-to-marker-example"
+                    tabindex="0"
+                    role="img"
+                    aria-label="Your location marker"
+                    aria-describedby="how-to-user-tooltip"
+                >
+                    <span class="how-to-user-marker" aria-hidden="true"></span>
+                    <span id="how-to-user-tooltip" class="how-to-marker-tooltip" role="tooltip">Hello!</span>
+                </span>
             </div>
             <p class="how-to-step-copy">This is you. Say hello!</p>
         </section>
 
         <section class="how-to-step how-to-step-reversed">
-            <p class="how-to-step-copy">This is a Spot. This is where you can find some NIM</p>
-            <div class="how-to-step-visual" aria-hidden="true">
-                <span class="how-to-spot-radius">
-                    <span class="how-to-spot-marker"></span>
+            <p class="how-to-step-copy">This is a Spot. This is where you can find some NIM.</p>
+            <div class="how-to-step-visual">
+                <span
+                    class="how-to-marker-example"
+                    tabindex="0"
+                    role="img"
+                    aria-label="Example Spot marker and claim radius"
+                    aria-describedby="how-to-spot-tooltip"
+                >
+                    <span class="how-to-spot-radius" aria-hidden="true">
+                        <span class="how-to-spot-marker"></span>
+                    </span>
+                    <span id="how-to-spot-tooltip" class="how-to-marker-tooltip" role="tooltip">Example Spot</span>
                 </span>
             </div>
         </section>
 
         <section class="how-to-step">
             <div class="how-to-step-visual">
-                <span class="nq-button-pill spot-claim-button is-standard how-to-claim-button" role="img" aria-label="Claim button">CLAIM</span>
+                <button class="nq-button-pill spot-claim-button is-standard how-to-claim-button" type="button">CLAIM</button>
             </div>
-            <p class="how-to-step-copy">When you move onto a Spot you can click this button to receive some NIM</p>
+            <p class="how-to-step-copy">When you move onto a Spot, you can click this button to receive some NIM.</p>
         </section>
 
         <section class="how-to-step how-to-step-reversed">
@@ -119,4 +137,6 @@
         </div>
         <figcaption class="sr-only">Find Spots page example</figcaption>
     </figure>
+
+    <p class="how-to-closing-copy">Get started by clicking “Find Spots” below. Happy Hunting!</p>
 </section>

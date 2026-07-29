@@ -35,7 +35,8 @@ def test_information_views_are_variants_of_the_real_homepage() -> None:
     assert "information_view | default('') in ('about', 'how-to', 'roadmap')" in shell_template
     assert '{% include "_how_to_content.html" %}' in shell_template
     assert "/static/static_page.js?v=about-nimiq-pay-v2-20260725" in shell_template
-    assert "/static/static_pages.css?v=home-information-v5-how-to-20260729" in shell_template
+    assert "/static/static_pages.css?v=home-information-v6-how-to-toggle-20260729" in shell_template
+    assert "/static/how_to.js?v=how-to-platform-toggle-v1-20260729" in shell_template
 
 
 def test_information_links_change_only_the_current_page_link() -> None:
@@ -128,23 +129,69 @@ def test_information_renderer_uses_safe_text_and_bypasses_stale_roadmap_data() -
     assert "cache: 'no-store'" in renderer
 
 
-def test_how_to_page_uses_image_examples_and_css_ui_markers() -> None:
+def test_how_to_location_panel_reuses_disclaimer_style_and_switches_platforms() -> None:
+    partial = _read("templates/_how_to_content.html")
+    stylesheet = _read("static/static_pages.css")
+    controller = _read("static/how_to.js")
+
+    assert "project-disclaimer-note how-to-location-box nq-button gold action-button primary-action" in partial
+    assert "Please Allow Precise Location!" in partial
+    assert partial.count('class="project-disclaimer-icon"') == 2
+    assert partial.count("#nq-alert-triangle") == 2
+    assert 'role="tablist"' in partial
+    assert 'data-how-to-platform="ios"' in partial
+    assert 'data-how-to-platform="android"' in partial
+    assert 'data-how-to-permission="ios"' in partial
+    assert 'data-how-to-permission="android"' in partial
+    assert "how-to-permission-android" in partial
+    assert "hidden" in partial
+    assert "/static/images/how-to/ios-location-permission.svg" in partial
+    assert "/static/images/how-to/android-location-permission.svg" in partial
+
+    assert "pointer-events: auto;" in stylesheet
+    assert "justify-content: center;" in stylesheet
+    assert "text-align: center !important;" in stylesheet
+    assert "font-size: 1.2rem !important;" in stylesheet
+    assert "width: min(100%, 22rem);" in stylesheet
+    assert ".how-to-permission-example[hidden]" in stylesheet
+
+    assert "aria-selected" in controller
+    assert "panel.hidden =" in controller
+    assert "/Android/i.test(navigator.userAgent)" in controller
+    assert "ArrowLeft" in controller
+    assert "ArrowRight" in controller
+    assert "innerHTML" not in controller
+
+
+def test_how_to_story_uses_real_marker_colours_and_claim_direction() -> None:
     partial = _read("templates/_how_to_content.html")
     stylesheet = _read("static/static_pages.css")
 
-    assert "Allow precise location" in partial
     assert "This is you. Say hello!" in partial
     assert "This is a Spot. This is where you can find some NIM" in partial
     assert "When you move onto a Spot you can click this button to receive some NIM" in partial
-    assert "/static/images/how-to/ios-location-permission.svg" in partial
-    assert "/static/images/how-to/android-location-permission.svg" in partial
-    assert "/static/images/how-to/find-spots-1.svg" in partial
-    assert "/static/images/how-to/find-spots-6.svg" in partial
+    assert "If your claim is valid, the NIM will enter your account immediately." in partial
+    assert "🎉" in partial
     assert "how-to-user-marker" in partial
     assert "how-to-spot-radius" in partial
     assert "spot-claim-button is-standard" in partial
 
+    assert ".how-to-user-marker::after" not in stylesheet
+    assert "border: 0.22rem solid #1f2348;" in stylesheet
+    assert "background: #1f2348;" in stylesheet
+    assert "opacity: 0.92;" in stylesheet
+    assert "background: var(--nh-success) !important;" in stylesheet
+    assert "color: #ffffff !important;" in stylesheet
+    assert ".how-to-confetti" in stylesheet
     assert "gap: clamp(5.5rem, 19vw, 8.5rem);" in stylesheet
+
+
+def test_how_to_find_spots_image_is_constrained_and_fades_out() -> None:
+    partial = _read("templates/_how_to_content.html")
+    stylesheet = _read("static/static_pages.css")
+
+    assert "/static/images/how-to/find-spots-1.svg" in partial
+    assert "/static/images/how-to/find-spots-6.svg" in partial
     assert "-webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 88%, transparent 100%);" in stylesheet
     assert "max-width: 440px;" in stylesheet
 

@@ -87,6 +87,8 @@ const MAP_COLOURS = {
     highlight: '#0582ca',
 };
 
+const MAP_MARKER_RADIUS = 12;
+
 const REPORT_TEXT = makeSpotDetailText({
     appName: APP_NAME,
     nimiqPayUrl: document.body.dataset.nimiqPayUrl || 'https://nimpay.app',
@@ -1691,7 +1693,7 @@ function renderMapSpots(spots) {
         }
 
         const dot = L.circleMarker(latLng, {
-            radius: 12,
+            radius: MAP_MARKER_RADIUS,
             color: '#ffffff',
             fillColor: colour,
             fillOpacity: matchesFilters ? 1 : 0.68,
@@ -1864,7 +1866,7 @@ function updateUserMarker() {
     const position = [state.userLat, state.userLong];
     if (!state.userMarker) {
         state.userMarker = L.circleMarker(position, {
-            radius: 5,
+            radius: MAP_MARKER_RADIUS,
             color: '#1f2348',
             fillColor: '#1f2348',
             fillOpacity: 0.92,

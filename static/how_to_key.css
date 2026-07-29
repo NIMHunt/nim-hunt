@@ -1,3 +1,5 @@
+@import url("/static/how_to_map_tooltip.css?v=map-tooltip-v1-20260729");
+
 .how-to-spot-key {
     margin: 0 0 clamp(2.25rem, 9vw, 3.5rem);
     display: flex;

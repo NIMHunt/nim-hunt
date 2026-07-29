@@ -1,3 +1,4 @@
+import base64
 import json
 from pathlib import Path
 
@@ -35,8 +36,8 @@ def test_information_views_are_variants_of_the_real_homepage() -> None:
     assert "information_view | default('') in ('about', 'how-to', 'roadmap')" in shell_template
     assert '{% include "_how_to_content.html" %}' in shell_template
     assert "/static/static_page.js?v=about-nimiq-pay-v2-20260725" in shell_template
-    assert "/static/static_pages.css?v=home-information-v6-how-to-toggle-20260729" in shell_template
-    assert "/static/how_to.js?v=how-to-platform-toggle-v1-20260729" in shell_template
+    assert "/static/static_pages.css?v=home-information-v7-how-to-layout-20260729" in shell_template
+    assert "/static/how_to.js?v=how-to-platform-image-v2-20260729" in shell_template
 
 
 def test_information_links_change_only_the_current_page_link() -> None:
@@ -129,7 +130,7 @@ def test_information_renderer_uses_safe_text_and_bypasses_stale_roadmap_data() -
     assert "cache: 'no-store'" in renderer
 
 
-def test_how_to_location_panel_reuses_disclaimer_style_and_switches_platforms() -> None:
+def test_how_to_location_panel_uses_two_columns_and_switches_platforms() -> None:
     partial = _read("templates/_how_to_content.html")
     stylesheet = _read("static/static_pages.css")
     controller = _read("static/how_to.js")
@@ -138,21 +139,21 @@ def test_how_to_location_panel_reuses_disclaimer_style_and_switches_platforms() 
     assert "Please Allow Precise Location!" in partial
     assert partial.count('class="project-disclaimer-icon"') == 2
     assert partial.count("#nq-alert-triangle") == 2
+    assert 'class="how-to-location-layout"' in partial
+    assert 'class="how-to-location-copy-column"' in partial
+    assert 'class="how-to-location-example-column"' in partial
     assert 'role="tablist"' in partial
     assert 'data-how-to-platform="ios"' in partial
     assert 'data-how-to-platform="android"' in partial
     assert 'data-how-to-permission="ios"' in partial
     assert 'data-how-to-permission="android"' in partial
-    assert "how-to-permission-android" in partial
-    assert "hidden" in partial
     assert "/static/images/how-to/ios-location-permission.svg" in partial
     assert "/static/images/how-to/android-location-permission.svg" in partial
 
+    assert "grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);" in stylesheet
     assert "pointer-events: auto;" in stylesheet
-    assert "justify-content: center;" in stylesheet
     assert "text-align: center !important;" in stylesheet
-    assert "font-size: 1.2rem !important;" in stylesheet
-    assert "width: min(100%, 22rem);" in stylesheet
+    assert "width: min(100%, 15rem);" in stylesheet
     assert ".how-to-permission-example[hidden]" in stylesheet
 
     assert "aria-selected" in controller
@@ -163,7 +164,7 @@ def test_how_to_location_panel_reuses_disclaimer_style_and_switches_platforms() 
     assert "innerHTML" not in controller
 
 
-def test_how_to_story_uses_real_marker_colours_and_claim_direction() -> None:
+def test_how_to_story_centres_copy_and_uses_reliable_visuals() -> None:
     partial = _read("templates/_how_to_content.html")
     stylesheet = _read("static/static_pages.css")
 
@@ -171,7 +172,9 @@ def test_how_to_story_uses_real_marker_colours_and_claim_direction() -> None:
     assert "This is a Spot. This is where you can find some NIM" in partial
     assert "When you move onto a Spot you can click this button to receive some NIM" in partial
     assert "If your claim is valid, the NIM will enter your account immediately." in partial
-    assert "🎉" in partial
+    assert "🎉" not in partial
+    assert 'class="how-to-confetti-art"' in partial
+    assert "how-to-confetti-streamer" in partial
     assert "how-to-user-marker" in partial
     assert "how-to-spot-radius" in partial
     assert "spot-claim-button is-standard" in partial
@@ -180,32 +183,57 @@ def test_how_to_story_uses_real_marker_colours_and_claim_direction() -> None:
     assert "border: 0.22rem solid #1f2348;" in stylesheet
     assert "background: #1f2348;" in stylesheet
     assert "opacity: 0.92;" in stylesheet
+    assert ".how-to-step-reversed .how-to-step-copy" in stylesheet
+    assert "text-align: center;" in stylesheet
+    assert ".nq-style .spot-claim-button.how-to-claim-button.nq-button-pill" in stylesheet
     assert "background: var(--nh-success) !important;" in stylesheet
+    assert "background-image: none !important;" in stylesheet
     assert "color: #ffffff !important;" in stylesheet
-    assert ".how-to-confetti" in stylesheet
+    assert ".how-to-confetti-art" in stylesheet
     assert "gap: clamp(5.5rem, 19vw, 8.5rem);" in stylesheet
 
 
-def test_how_to_find_spots_image_is_constrained_and_fades_out() -> None:
+def test_how_to_find_spots_example_is_one_image_and_fades_out() -> None:
     partial = _read("templates/_how_to_content.html")
     stylesheet = _read("static/static_pages.css")
+    controller = _read("static/how_to.js")
 
-    assert "/static/images/how-to/find-spots-1.svg" in partial
-    assert "/static/images/how-to/find-spots-6.svg" in partial
+    figure = partial.split('<figure class="how-to-find-spots-figure">', 1)[1]
+    assert figure.count("<img") == 1
+    assert "find-spots-1.svg" not in partial
+    assert "find-spots-6.svg" not in partial
+    assert "data-how-to-find-spots-image" in partial
+    assert 'data-how-to-image-chunk-prefix="/static/images/how-to/find-spots-image-"' in partial
+    assert "width=\"440\"" in partial
+    assert "height=\"633\"" in partial
+
+    assert "[1, 2, 3, 4]" in controller
+    assert "chunks.join('')" in controller
+    assert "data:image/webp;base64," in controller
+    assert "showFindSpotsImageError" in controller
+    assert "innerHTML" not in controller
+
     assert "-webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 88%, transparent 100%);" in stylesheet
     assert "max-width: 440px;" in stylesheet
+
+    asset_dir = ROOT / "static" / "images" / "how-to"
+    encoded = "".join(
+        (asset_dir / f"find-spots-image-{number}.b64").read_text(encoding="ascii").strip()
+        for number in range(1, 5)
+    )
+    decoded = base64.b64decode(encoded, validate=True)
+    assert decoded[:4] == b"RIFF"
+    assert decoded[8:12] == b"WEBP"
 
     for asset in (
         "ios-location-permission.svg",
         "android-location-permission.svg",
-        "find-spots-1.svg",
-        "find-spots-2.svg",
-        "find-spots-3.svg",
-        "find-spots-4.svg",
-        "find-spots-5.svg",
-        "find-spots-6.svg",
+        "find-spots-image-1.b64",
+        "find-spots-image-2.b64",
+        "find-spots-image-3.b64",
+        "find-spots-image-4.b64",
     ):
-        assert (ROOT / "static" / "images" / "how-to" / asset).exists()
+        assert (asset_dir / asset).exists()
 
 
 def test_obsolete_standalone_documents_are_removed() -> None:

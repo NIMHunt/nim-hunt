@@ -1,7 +1,7 @@
 .home-information-links {
     width: 100%;
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: center;
 }
 
@@ -23,6 +23,7 @@
 }
 
 .home-information-content {
+    min-width: 0;
     padding: 3px;
 }
 
@@ -74,4 +75,222 @@
 
 .nq-style .roadmap-items > li {
     margin: 0 !important;
+}
+
+.how-to-guide {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.how-to-location-box {
+    min-width: 0;
+    padding: clamp(1.15rem, 5vw, 1.7rem);
+    border: 2px solid rgba(233, 164, 0, 0.82);
+    border-radius: 24px;
+    background: transparent;
+}
+
+.how-to-section-title {
+    margin: 0 0 0.65rem;
+    color: var(--nh-text);
+    font-size: 1.25rem;
+    font-weight: 900;
+    line-height: 1.2;
+    text-align: center;
+}
+
+.how-to-location-copy {
+    max-width: 40rem;
+    margin: 0 auto;
+    color: var(--nh-text);
+    font-size: 1rem;
+    font-weight: 800;
+    line-height: 1.5;
+    text-align: center;
+}
+
+.how-to-permission-grid {
+    min-width: 0;
+    margin-top: 1.55rem;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: clamp(0.55rem, 3vw, 1.15rem);
+}
+
+.how-to-permission-example {
+    min-width: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+.how-to-permission-example figcaption {
+    color: var(--nh-text);
+    font-size: 1rem;
+    font-weight: 900;
+    line-height: 1;
+    text-align: center;
+}
+
+.how-to-permission-example img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 17rem;
+    object-fit: contain;
+    border-radius: 20px;
+}
+
+.how-to-story {
+    padding: clamp(5rem, 17vw, 7.5rem) 0;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(5.5rem, 19vw, 8.5rem);
+}
+
+.how-to-step {
+    min-width: 0;
+    min-height: 11rem;
+    display: grid;
+    grid-template-columns: minmax(7.5rem, 0.82fr) minmax(0, 1.18fr);
+    align-items: center;
+    gap: clamp(1.25rem, 5vw, 2.3rem);
+}
+
+.how-to-step-reversed {
+    grid-template-columns: minmax(0, 1.18fr) minmax(7.5rem, 0.82fr);
+}
+
+.how-to-step-visual {
+    min-width: 0;
+    min-height: 8rem;
+    display: grid;
+    place-items: center;
+}
+
+.how-to-step-copy {
+    margin: 0;
+    color: var(--nh-text);
+    font-size: clamp(1.05rem, 4.3vw, 1.35rem);
+    font-weight: 900;
+    line-height: 1.42;
+    text-align: left;
+}
+
+.how-to-step-reversed .how-to-step-copy {
+    text-align: right;
+}
+
+.how-to-user-marker {
+    width: 5.8rem;
+    height: 5.8rem;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.78);
+    box-shadow: 0 12px 30px rgba(31, 35, 72, 0.14);
+}
+
+.how-to-user-marker::after {
+    width: 1.8rem;
+    height: 1.8rem;
+    border: 0.34rem solid #ffffff;
+    border-radius: 50%;
+    background: #080808;
+    box-shadow: 0 3px 10px rgba(31, 35, 72, 0.28);
+    content: "";
+}
+
+.how-to-spot-radius {
+    width: 8.5rem;
+    height: 8.5rem;
+    display: grid;
+    place-items: center;
+    border: 2px solid rgba(33, 188, 165, 0.72);
+    border-radius: 50%;
+    background: rgba(33, 188, 165, 0.17);
+}
+
+.how-to-spot-marker {
+    width: 2.15rem;
+    height: 2.15rem;
+    border: 0.38rem solid #ffffff;
+    border-radius: 50%;
+    background: var(--nh-success);
+    box-shadow: 0 5px 14px rgba(31, 35, 72, 0.28);
+}
+
+.how-to-claim-button {
+    pointer-events: none;
+    user-select: none;
+}
+
+.how-to-claim-button,
+.how-to-claim-button:hover,
+.how-to-claim-button:focus,
+.how-to-claim-button:active {
+    cursor: default !important;
+    transform: none !important;
+}
+
+.how-to-find-spots-figure {
+    min-width: 0;
+    margin: 0;
+}
+
+.how-to-find-spots-shot {
+    width: 100%;
+    max-width: 440px;
+    margin: 0 auto;
+    overflow: hidden;
+    border-radius: 25px;
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 88%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0%, #000 88%, transparent 100%);
+}
+
+.how-to-find-spots-shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin: 0;
+}
+
+@media (max-width: 390px) {
+    .home-information-links a {
+        font-size: 1.05rem;
+    }
+
+    .how-to-location-box {
+        padding-inline: 0.9rem;
+    }
+
+    .how-to-step,
+    .how-to-step-reversed {
+        grid-template-columns: minmax(6.5rem, 0.76fr) minmax(0, 1.24fr);
+        gap: 1rem;
+    }
+
+    .how-to-step-reversed {
+        grid-template-columns: minmax(0, 1.24fr) minmax(6.5rem, 0.76fr);
+    }
+
+    .how-to-user-marker {
+        width: 5rem;
+        height: 5rem;
+    }
+
+    .how-to-spot-radius {
+        width: 7.3rem;
+        height: 7.3rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .how-to-claim-button {
+        transition: none !important;
+    }
 }

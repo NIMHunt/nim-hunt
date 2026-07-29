@@ -23,6 +23,7 @@ from social_card_images import router as router
 
 DEFAULT_BASE_URL = "https://nimhunt.app"
 MARKER = "<!-- nimhunt-social-preview -->"
+DEFAULT_SITE_IMAGE_PATH = "/static/images/nimhunt-default-social-card.jpg"
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,11 @@ def compact(value: object, fallback: str) -> str:
     return " ".join(str(value or "").split()) or fallback
 
 
+def image_mime_type(url: str) -> str:
+    path = urllib.parse.urlparse(str(url)).path.lower()
+    return "image/jpeg" if path.endswith((".jpg", ".jpeg")) else "image/png"
+
+
 def build_social_tags(meta: SocialMetadata) -> str:
     def escape(value: str) -> str:
         return html.escape(str(value), quote=True)
@@ -66,6 +72,7 @@ def build_social_tags(meta: SocialMetadata) -> str:
     canonical = escape(meta.canonical_url)
     image = escape(meta.image_url)
     alt = escape(meta.image_alt)
+    image_type = escape(image_mime_type(meta.image_url))
     return "\n".join(
         (
             MARKER,
@@ -77,7 +84,7 @@ def build_social_tags(meta: SocialMetadata) -> str:
             f'<meta property="og:url" content="{canonical}">',
             f'<meta property="og:image" content="{image}">',
             f'<meta property="og:image:secure_url" content="{image}">',
-            '<meta property="og:image:type" content="image/png">',
+            f'<meta property="og:image:type" content="{image_type}">',
             '<meta property="og:image:width" content="1200">',
             '<meta property="og:image:height" content="630">',
             f'<meta property="og:image:alt" content="{alt}">',
@@ -140,7 +147,7 @@ def site_metadata(key: str, canonical_path: str) -> SocialMetadata:
         title,
         description,
         public_url(canonical_path),
-        image_url(f"/social/site/{key}.png"),
+        image_url(DEFAULT_SITE_IMAGE_PATH),
         f"{title} branded NimHunt preview.",
     )
 

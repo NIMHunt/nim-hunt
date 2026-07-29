@@ -1,0 +1,123 @@
+name: Apply user marker size patch
+
+on:
+  push:
+    branches:
+      - agent/match-user-location-marker
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/match-user-location-marker
+
+      - name: Match user and Spot marker sizes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("static/find_spots.js")
+          source = path.read_text(encoding="utf-8")
+
+          colours = """const MAP_COLOURS = {
+              standard: '#21bca5',
+              prizedraw: '#ffc435',
+              muted: '#8c90a8',
+              highlight: '#0582ca',
+          };
+          """
+          if source.count(colours) != 1:
+              raise SystemExit("Expected one MAP_COLOURS block")
+          source = source.replace(
+              colours,
+              colours + "\nconst MAP_MARKER_RADIUS = 12;\n",
+              1,
+          )
+
+          spot_marker = """        const dot = L.circleMarker(latLng, {
+                      radius: 12,
+          """
+          if source.count(spot_marker) != 1:
+              raise SystemExit("Expected one Spot marker radius")
+          source = source.replace(
+              spot_marker,
+              """        const dot = L.circleMarker(latLng, {
+                      radius: MAP_MARKER_RADIUS,
+          """,
+              1,
+          )
+
+          user_marker = """        state.userMarker = L.circleMarker(position, {
+                      radius: 5,
+          """
+          if source.count(user_marker) != 1:
+              raise SystemExit("Expected one user marker radius")
+          source = source.replace(
+              user_marker,
+              """        state.userMarker = L.circleMarker(position, {
+                      radius: MAP_MARKER_RADIUS,
+          """,
+              1,
+          )
+
+          path.write_text(source, encoding="utf-8")
+
+          test_path = Path("tests/test_map_marker_size.py")
+          test_path.write_text(
+              '''"""Regression test for consistent Find Spots map marker sizing."""
+
+          from pathlib import Path
+
+          ROOT = Path(__file__).resolve().parents[1]
+
+
+          def test_user_and_spot_markers_share_one_radius() -> None:
+              source = (ROOT / "static/find_spots.js").read_text(encoding="utf-8")
+
+              assert "const MAP_MARKER_RADIUS = 12;" in source
+              assert (
+                  "const dot = L.circleMarker(latLng, {\\n"
+                  "            radius: MAP_MARKER_RADIUS,"
+              ) in source
+              assert (
+                  "state.userMarker = L.circleMarker(position, {\\n"
+                  "            radius: MAP_MARKER_RADIUS,"
+              ) in source
+          ''',
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Validate patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check static/find_spots.js
+          python -m py_compile tests/test_map_marker_size.py
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path("static/find_spots.js").read_text(encoding="utf-8")
+          assert source.count("radius: MAP_MARKER_RADIUS,") == 2
+          assert "radius: 5," not in source
+          PY
+
+      - name: Commit clean final files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/match-user-marker-size.yml
+          git add static/find_spots.js tests/test_map_marker_size.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Match user and Spot marker sizes"
+          git push origin HEAD:agent/match-user-location-marker

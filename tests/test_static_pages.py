@@ -12,7 +12,7 @@ def test_information_views_are_variants_of_the_real_homepage() -> None:
     home_template = _read("templates/home.html")
     shell_template = _read("templates/_home_shell.html")
 
-    assert "request.query_params.get('view', '')" in home_template
+    assert "information_view | default(request.query_params.get('view', '')" in home_template
     assert "information_view == 'about'" in home_template
     assert "information_view == 'how-to'" in home_template
     assert "information_view == 'roadmap'" in home_template
@@ -39,19 +39,24 @@ def test_information_views_are_variants_of_the_real_homepage() -> None:
     assert "/static/how_to.js?v=how-to-platform-toggle-v3-20260729" in shell_template
 
 
-def test_information_links_change_only_the_current_page_link() -> None:
+def test_information_links_use_clean_routes_and_cover_every_view() -> None:
     shell_template = _read("templates/_home_shell.html")
 
     assert shell_template.index('id="home-metrics"') < shell_template.index(
         'class="home-information-links"'
     )
-    assert '<a href="/?view=about">About</a>' in shell_template
-    assert '<a href="/?view=how-to">How To</a>' in shell_template
-    assert '<a href="/?view=roadmap">Roadmap</a>' in shell_template
+    assert '<a href="/about">About</a>' in shell_template
+    assert '<a href="/how-to">How To</a>' in shell_template
+    assert '<a href="/roadmap">Roadmap</a>' in shell_template
     assert '<a href="/">Home</a>' in shell_template
     assert "information_view | default('') == 'about'" in shell_template
     assert "information_view | default('') == 'how-to'" in shell_template
     assert "information_view | default('') == 'roadmap'" in shell_template
+    assert (
+        "show_information_links | default(false) or information_view | default('') "
+        "in ('about', 'how-to', 'roadmap')"
+    ) in shell_template
+    assert "/?view=" not in shell_template
 
 
 def test_information_link_size_and_roadmap_alignment_match_requested_style() -> None:

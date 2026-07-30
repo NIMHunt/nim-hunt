@@ -23,7 +23,6 @@
     data-display-name-min="{{ display_name_min | default(3) }}"
     data-display-name-max="{{ display_name_max | default(18) }}"
     data-home-information-view="{{ information_view | default('') }}"
-    data-test-features-enabled="{{ 'true' if test_features_enabled | default(false) else 'false' }}"
 >
     {% if show_notice | default(true) %}
     <div id="notice-backdrop" class="notice-backdrop" hidden>
@@ -189,7 +188,7 @@
     {% endif %}
 
     {% if home_script_src is defined and home_script_src %}
-    <script src="/static/first_visit_guide.js?v=first-visit-guide-v1-20260729"></script>
+    <script src="/static/first_visit_guide.js?v=first-visit-guide-v2-20260730"></script>
     <script type="module" src="{{ home_script_src }}"></script>
     {% endif %}
 </body>

@@ -32,7 +32,7 @@
             <a id="notice-link" class="notice-link" data-i18n="common.readMore" hidden>Read more</a>
             <div class="notice-actions">
                 <button id="notice-ok" class="nq-button light-blue" data-i18n="common.ok">OK</button>
-                <a id="notice-guide" class="nq-button notice-guide-button" href="/?view=how-to" hidden>See Guide</a>
+                <a id="notice-guide" class="nq-button notice-guide-button" href="/how-to" hidden>See Guide</a>
             </div>
         </section>
     </div>
@@ -153,24 +153,24 @@
         </div>
         {% endif %}
 
-        {% if show_information_links | default(false) %}
+        {% if show_information_links | default(false) or information_view | default('') in ('about', 'how-to', 'roadmap') %}
         <nav class="home-information-links" aria-label="Project information">
             {% if information_view | default('') == 'about' %}
             <a href="/">Home</a>
-            <a href="/?view=how-to">How To</a>
-            <a href="/?view=roadmap">Roadmap</a>
+            <a href="/how-to">How To</a>
+            <a href="/roadmap">Roadmap</a>
             {% elif information_view | default('') == 'how-to' %}
-            <a href="/?view=about">About</a>
+            <a href="/about">About</a>
             <a href="/">Home</a>
-            <a href="/?view=roadmap">Roadmap</a>
+            <a href="/roadmap">Roadmap</a>
             {% elif information_view | default('') == 'roadmap' %}
-            <a href="/?view=about">About</a>
-            <a href="/?view=how-to">How To</a>
+            <a href="/about">About</a>
+            <a href="/how-to">How To</a>
             <a href="/">Home</a>
             {% else %}
-            <a href="/?view=about">About</a>
-            <a href="/?view=how-to">How To</a>
-            <a href="/?view=roadmap">Roadmap</a>
+            <a href="/about">About</a>
+            <a href="/how-to">How To</a>
+            <a href="/roadmap">Roadmap</a>
             {% endif %}
         </nav>
         {% endif %}

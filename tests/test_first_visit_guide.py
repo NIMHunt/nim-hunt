@@ -26,7 +26,7 @@ def test_first_visit_notice_has_a_quiet_starter_guide_action() -> None:
 
     assert 'id="notice-guide"' in shell
     assert 'class="nq-button notice-guide-button"' in shell
-    assert 'href="/?view=how-to"' in shell
+    assert 'href="/how-to"' in shell
     assert ">See Guide</a>" in shell
     assert 'class="notice-actions"' in shell
     assert "data-test-features-enabled" not in shell

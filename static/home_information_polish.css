@@ -6,8 +6,20 @@
 
 /* Roadmap entries are primary prose, so keep their weight consistent with the
    About and Starter Guide copy instead of falling back to regular Nimiq text. */
+.nq-style .roadmap-items {
+    display: block;
+    padding-inline-start: 2.4rem !important;
+    list-style: disc outside;
+}
+
 .nq-style .roadmap-items > .roadmap-item {
+    display: list-item;
+    margin: 0 0 0.35rem !important;
     font-weight: 800;
+}
+
+.nq-style .roadmap-items > .roadmap-item:last-child {
+    margin-bottom: 0 !important;
 }
 
 .notice-actions {

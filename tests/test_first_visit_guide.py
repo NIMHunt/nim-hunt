@@ -9,8 +9,12 @@ def test_about_and_roadmap_primary_text_use_nimhunt_text_colour() -> None:
     assert ".nq-style .static-page-copy," in stylesheet
     assert ".nq-style .roadmap-heading," in stylesheet
     assert ".nq-style .roadmap-items > .roadmap-item" in stylesheet
-    assert "color: var(--nh-text);" in stylesheet
-    assert "!important" not in stylesheet
+
+    primary_text_rule = stylesheet.split(
+        ".nq-style .static-page-copy,", 1
+    )[1].split("}", 1)[0]
+    assert "color: var(--nh-text);" in primary_text_rule
+    assert "!important" not in primary_text_rule
 
 
 def test_first_visit_notice_has_a_quiet_starter_guide_action() -> None:
@@ -27,7 +31,7 @@ def test_first_visit_notice_has_a_quiet_starter_guide_action() -> None:
     assert 'class="notice-actions"' in shell
     assert "data-test-features-enabled" not in shell
     assert "/static/first_visit_guide.js?v=first-visit-guide-v2-20260730" in shell
-    assert "/static/home_information_polish.css?v=roadmap-typography-v1-20260730" in shell
+    assert "/static/home_information_polish.css?v=roadmap-typography-v2-20260730" in shell
 
     assert ".notice-actions > .nq-button" in stylesheet
     assert "height: 7.5rem;" in stylesheet

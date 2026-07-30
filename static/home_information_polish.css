@@ -23,6 +23,16 @@
     text-decoration: none;
 }
 
+/*
+ * nq-button normally reveals a dark-blue ::before layer on hover/focus.
+ * This secondary action should remain visually quiet, so retain the shared
+ * button component while disabling only that coloured overlay.
+ */
+.nq-style .notice-card .notice-guide-button::before {
+    background: transparent;
+    background-image: none;
+}
+
 .notice-guide-button[hidden] {
     display: none;
 }

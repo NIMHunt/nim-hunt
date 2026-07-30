@@ -7,7 +7,7 @@ def test_how_to_heading_is_starter_guide_without_renaming_navigation_link() -> N
     shell = _read("templates/_home_shell.html")
 
     assert "{% elif information_view == 'how-to' %}Starter Guide{% else %}" in shell
-    assert '<a href="/?view=how-to">How To</a>' in shell
+    assert '<a href="/how-to">How To</a>' in shell
     assert (
         '/static/how_to_key.css?v=spot-key-v2-map-tooltip-20260729' in shell
     )

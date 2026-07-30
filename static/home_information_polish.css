@@ -9,57 +9,32 @@
     gap: 10px;
 }
 
-.notice-guide-button {
+.notice-actions > .nq-button {
     width: 100%;
-    min-height: 48px;
-    padding: 0 18px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    height: 7.5rem;
+    margin: 0;
+}
+
+.nq-style .notice-card .notice-guide-button {
     border: 1px solid var(--nh-border);
-    border-radius: 999px;
     background: rgba(255, 255, 255, 0.46);
     color: var(--nh-muted);
     box-shadow: none;
-    font: inherit;
-    font-weight: 800;
-    line-height: 1;
-    text-align: center;
     text-decoration: none;
-    transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
 .notice-guide-button[hidden] {
     display: none;
 }
 
-.notice-guide-button:hover,
-.notice-guide-button:focus-visible {
+.nq-style .notice-card .notice-guide-button:hover,
+.nq-style .notice-card .notice-guide-button:focus-visible {
     background: rgba(255, 255, 255, 0.78);
     color: var(--nh-text);
     box-shadow: 0 6px 18px rgba(31, 35, 72, 0.08);
-    transform: translateY(-1px);
 }
 
-.notice-guide-button:focus-visible {
-    outline: 3px solid rgba(31, 35, 72, 0.14);
-    outline-offset: 2px;
-}
-
-.notice-guide-button:active {
+.nq-style .notice-card .notice-guide-button:active {
     background: rgba(255, 255, 255, 0.62);
     box-shadow: none;
-    transform: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .notice-guide-button {
-        transition: none;
-    }
-
-    .notice-guide-button:hover,
-    .notice-guide-button:focus-visible,
-    .notice-guide-button:active {
-        transform: none;
-    }
 }

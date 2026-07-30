@@ -40,8 +40,8 @@
 
             return response;
         } finally {
-            // This wrapper observes only the Home-session response. Restore the
-            // native browser function immediately afterwards, including failures.
+            // Observe only the real Home-session response, then restore the
+            // browser's native fetch function, including when the request fails.
             if (isHomeSession) window.fetch = nativeFetch;
         }
     };

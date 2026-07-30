@@ -74,7 +74,7 @@
             <p class="home-error-message">{{ error_message }}</p>
             {% endif %}
             {% else %}
-            {% if information_view | default('') in ('about', 'how-to', 'faq', 'roadmap') %}
+            {% if information_view | default('') in ('about', 'how-to', 'roadmap') or information_view | default('') == 'faq' %}
             <div id="home-information-content" class="home-information-content" aria-labelledby="home-information-title">
                 <h2 id="home-information-title" class="nq-label static-page-title" data-static-page-title>
                     {% if information_view == 'about' %}About{% elif information_view == 'how-to' %}Starter Guide{% elif information_view == 'faq' %}FAQ{% else %}Roadmap{% endif %}
@@ -90,7 +90,7 @@
                 {% endif %}
             </div>
             {% endif %}
-            <div id="home-dynamic-welcome"{% if information_view | default('') in ('about', 'how-to', 'faq', 'roadmap') %} hidden{% endif %}>
+            <div id="home-dynamic-welcome"{% if information_view | default('') in ('about', 'how-to', 'roadmap') or information_view | default('') == 'faq' %} hidden{% endif %}>
                 <p id="welcome-line" class="welcome-line" data-i18n="home.preparing">Preparing your home screen.</p>
                 <div id="display-name-editor" class="display-name-editor" hidden>
                     <p id="display-name-error" class="display-name-error" role="alert" hidden></p>
@@ -156,7 +156,7 @@
         </div>
         {% endif %}
 
-        {% if show_information_links | default(false) or information_view | default('') in ('about', 'how-to', 'faq', 'roadmap') %}
+        {% if show_information_links | default(false) or information_view | default('') in ('about', 'how-to', 'roadmap') or information_view | default('') == 'faq' %}
         <nav class="home-information-links" aria-label="Project information">
             {% if information_view | default('') == 'about' %}
             <a href="/">Home</a>

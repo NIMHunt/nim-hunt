@@ -29,12 +29,13 @@
 
 .nq-style .notice-card .notice-guide-button:hover,
 .nq-style .notice-card .notice-guide-button:focus-visible {
-    background: rgba(255, 255, 255, 0.78);
-    color: var(--nh-text);
-    box-shadow: 0 6px 18px rgba(31, 35, 72, 0.08);
+    background: rgba(255, 255, 255, 0.58);
+    color: var(--nh-muted);
+    box-shadow: 0 3px 10px rgba(31, 35, 72, 0.04);
 }
 
 .nq-style .notice-card .notice-guide-button:active {
-    background: rgba(255, 255, 255, 0.62);
+    background: rgba(255, 255, 255, 0.52);
+    color: var(--nh-muted);
     box-shadow: none;
 }

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import status
+from fastapi.responses import RedirectResponse
 
 import constants as const
 import database as schema
@@ -24,6 +25,12 @@ from social_card_images import router as router
 DEFAULT_BASE_URL = "https://nimhunt.app"
 MARKER = "<!-- nimhunt-social-preview -->"
 DEFAULT_SITE_IMAGE_PATH = "/static/images/nimhunt-default-social-card.png"
+INFORMATION_PATHS = {
+    "/about": "about",
+    "/how-to": "how-to",
+    "/roadmap": "roadmap",
+}
+INFORMATION_VIEW_PATHS = {view: path for path, view in INFORMATION_PATHS.items()}
 
 
 @dataclass(frozen=True)
@@ -124,6 +131,11 @@ SITE_COPY = {
         "Learn what NimHunt is, why it was made, and the ideas behind this Nimiq "
         "community project.",
     ),
+    "how-to": (
+        "How To · NimHunt",
+        "Learn how to allow precise location access, find nearby Spots and claim NIM "
+        "with NimHunt.",
+    ),
     "roadmap": (
         "NimHunt Roadmap",
         "See the features currently planned and in development for NimHunt.",
@@ -189,6 +201,41 @@ def claim_metadata(claim_id: int) -> SocialMetadata:
     )
 
 
+def legacy_information_redirect(path: str, query_string: bytes) -> str | None:
+    if path not in {"/", "/home"}:
+        return None
+    pairs = urllib.parse.parse_qsl(
+        query_string.decode(errors="ignore"),
+        keep_blank_values=True,
+    )
+    view = next((value.lower() for key, value in pairs if key == "view"), "")
+    target = INFORMATION_VIEW_PATHS.get(view)
+    if target is None:
+        return None
+    remaining = [(key, value) for key, value in pairs if key != "view"]
+    suffix = urllib.parse.urlencode(remaining, doseq=True)
+    return f"{target}?{suffix}" if suffix else target
+
+
+def information_scope(scope: dict[str, Any]) -> dict[str, Any]:
+    path = str(scope.get("path") or "/")
+    view = INFORMATION_PATHS.get(path)
+    if view is None:
+        return scope
+    pairs = urllib.parse.parse_qsl(
+        scope.get("query_string", b"").decode(errors="ignore"),
+        keep_blank_values=True,
+    )
+    pairs = [(key, value) for key, value in pairs if key != "view"]
+    query_string = urllib.parse.urlencode([("view", view), *pairs], doseq=True).encode()
+    return {
+        **scope,
+        "path": "/",
+        "raw_path": b"/",
+        "query_string": query_string,
+    }
+
+
 async def metadata_for_request(
     path: str,
     query_string: bytes = b"",
@@ -196,11 +243,13 @@ async def metadata_for_request(
 ) -> SocialMetadata:
     if status_code == status.HTTP_404_NOT_FOUND:
         return site_metadata("not-found", path)
+    if path in INFORMATION_PATHS:
+        return site_metadata(INFORMATION_PATHS[path], path)
     if path in {"/", "/home"}:
         query = urllib.parse.parse_qs(query_string.decode(errors="ignore"))
         view = str((query.get("view") or [""])[0]).lower()
-        if view in {"about", "roadmap"}:
-            return site_metadata(view, f"/?view={view}")
+        if view in INFORMATION_VIEW_PATHS:
+            return site_metadata(view, INFORMATION_VIEW_PATHS[view])
         return site_metadata("home", "/")
     routes = {
         "/spots": ("find-spots", "/spots"),
@@ -227,7 +276,7 @@ async def metadata_for_request(
 
 
 class SocialPreviewMiddleware:
-    """Inject metadata into HTML while preserving every other ASGI response."""
+    """Serve clean information URLs and inject metadata into HTML responses."""
 
     def __init__(self, app: Callable[..., Awaitable[None]]) -> None:
         self.app = app
@@ -237,12 +286,26 @@ class SocialPreviewMiddleware:
             await self.app(scope, receive, send)
             return
 
+        original_path = str(scope.get("path") or "/")
+        original_query_string = scope.get("query_string", b"")
+        redirect_target = legacy_information_redirect(
+            original_path,
+            original_query_string,
+        )
+        if redirect_target is not None:
+            response = RedirectResponse(
+                url=redirect_target,
+                status_code=status.HTTP_308_PERMANENT_REDIRECT,
+            )
+            await response(scope, receive, send)
+            return
+
         messages: list[dict[str, Any]] = []
 
         async def capture(message: dict[str, Any]) -> None:
             messages.append(message)
 
-        await self.app(scope, receive, capture)
+        await self.app(information_scope(scope), receive, capture)
 
         start_index = next(
             (
@@ -281,8 +344,8 @@ class SocialPreviewMiddleware:
             return
 
         meta = await metadata_for_request(
-            str(scope.get("path") or "/"),
-            scope.get("query_string", b""),
+            original_path,
+            original_query_string,
             int(start.get("status", 200)),
         )
         body = inject_social_tags(body, meta)

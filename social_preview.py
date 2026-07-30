@@ -28,6 +28,7 @@ DEFAULT_SITE_IMAGE_PATH = "/static/images/nimhunt-default-social-card.png"
 INFORMATION_PATHS = {
     "/about": "about",
     "/how-to": "how-to",
+    "/faq": "faq",
     "/roadmap": "roadmap",
 }
 INFORMATION_VIEW_PATHS = {view: path for path, view in INFORMATION_PATHS.items()}
@@ -135,6 +136,11 @@ SITE_COPY = {
         "How To · NimHunt",
         "Learn how to allow precise location access, find nearby Spots and claim NIM "
         "with NimHunt.",
+    ),
+    "faq": (
+        "FAQ · NimHunt",
+        "Find answers to common questions about NimHunt, geographic Spots, claims and "
+        "Prizedraws.",
     ),
     "roadmap": (
         "NimHunt Roadmap",

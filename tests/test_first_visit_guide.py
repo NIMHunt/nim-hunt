@@ -21,15 +21,22 @@ def test_first_visit_notice_has_a_quiet_starter_guide_action() -> None:
     text_catalogue = _read("static/interface_text.js")
 
     assert 'id="notice-guide"' in shell
+    assert 'class="nq-button notice-guide-button"' in shell
     assert 'href="/?view=how-to"' in shell
     assert ">See Guide</a>" in shell
     assert 'class="notice-actions"' in shell
     assert 'data-test-features-enabled=' in shell
     assert "/static/first_visit_guide.js?v=first-visit-guide-v1-20260729" in shell
+    assert "/static/home_information_polish.css?v=first-visit-guide-v2-20260730" in shell
 
-    assert ".notice-guide-button" in stylesheet
+    assert ".notice-actions > .nq-button" in stylesheet
+    assert "height: 7.5rem;" in stylesheet
+    assert ".nq-style .notice-card .notice-guide-button" in stylesheet
     assert "background: rgba(255, 255, 255, 0.46);" in stylesheet
     assert ".notice-guide-button[hidden]" in stylesheet
+    assert "min-height:" not in stylesheet
+    assert "font: inherit;" not in stylesheet
+    assert "border-radius: 999px;" not in stylesheet
 
     assert "data?.created" in controller
     assert "requestPath(args[0]) !== '/api/home/session'" in controller

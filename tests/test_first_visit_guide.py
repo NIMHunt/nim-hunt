@@ -27,16 +27,23 @@ def test_first_visit_notice_has_a_quiet_starter_guide_action() -> None:
     assert 'class="notice-actions"' in shell
     assert 'data-test-features-enabled=' in shell
     assert "/static/first_visit_guide.js?v=first-visit-guide-v1-20260729" in shell
-    assert "/static/home_information_polish.css?v=first-visit-guide-v2-20260730" in shell
+    assert "/static/home_information_polish.css?v=first-visit-guide-v3-20260730" in shell
 
     assert ".notice-actions > .nq-button" in stylesheet
     assert "height: 7.5rem;" in stylesheet
     assert ".nq-style .notice-card .notice-guide-button" in stylesheet
     assert "background: rgba(255, 255, 255, 0.46);" in stylesheet
+    assert "background: rgba(255, 255, 255, 0.58);" in stylesheet
+    assert "color: var(--nh-muted);" in stylesheet
     assert ".notice-guide-button[hidden]" in stylesheet
     assert "min-height:" not in stylesheet
     assert "font: inherit;" not in stylesheet
     assert "border-radius: 999px;" not in stylesheet
+
+    hover_rules = stylesheet.split(".nq-style .notice-card .notice-guide-button:hover,", 1)[1]
+    hover_rules = hover_rules.split(".nq-style .notice-card .notice-guide-button:active", 1)[0]
+    assert "color: var(--nh-muted);" in hover_rules
+    assert "color: var(--nh-text);" not in hover_rules
 
     assert "data?.created" in controller
     assert "requestPath(args[0]) !== '/api/home/session'" in controller

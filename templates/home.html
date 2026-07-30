@@ -9,6 +9,11 @@
 {% set hero_href = '/' %}
 {% set hero_aria_label = 'Back to Home' %}
 {% set hero_screenreader_text = 'Return to Home' %}
+{% elif information_view == 'faq' %}
+{% set page_title = 'FAQ · ' ~ app_name %}
+{% set hero_href = '/' %}
+{% set hero_aria_label = 'Back to Home' %}
+{% set hero_screenreader_text = 'Return to Home' %}
 {% elif information_view == 'roadmap' %}
 {% set page_title = 'Roadmap · ' ~ app_name %}
 {% set hero_href = '/' %}

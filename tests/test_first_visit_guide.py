@@ -27,7 +27,7 @@ def test_first_visit_notice_has_a_quiet_starter_guide_action() -> None:
     assert 'class="notice-actions"' in shell
     assert "data-test-features-enabled" not in shell
     assert "/static/first_visit_guide.js?v=first-visit-guide-v2-20260730" in shell
-    assert "/static/home_information_polish.css?v=first-visit-guide-v4-20260730" in shell
+    assert "/static/home_information_polish.css?v=roadmap-typography-v1-20260730" in shell
 
     assert ".notice-actions > .nq-button" in stylesheet
     assert "height: 7.5rem;" in stylesheet

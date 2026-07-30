@@ -68,6 +68,19 @@ def test_spot_metadata_uses_requested_title_description_and_map(monkeypatch) -> 
     assert "250-metre claim radius" in meta.image_alt
 
 
+def test_information_metadata_uses_clean_canonical_paths(monkeypatch) -> None:
+    monkeypatch.delenv("NIMHUNT_PUBLIC_BASE_URL", raising=False)
+
+    how_to = asyncio.run(social_preview.metadata_for_request("/how-to"))
+    legacy_about = asyncio.run(
+        social_preview.metadata_for_request("/", b"view=about")
+    )
+
+    assert how_to.title == "How To · NimHunt"
+    assert how_to.canonical_url == "https://nimhunt.app/how-to"
+    assert legacy_about.canonical_url == "https://nimhunt.app/about"
+
+
 def test_draft_map_changes_create_a_new_social_card_revision(monkeypatch) -> None:
     monkeypatch.delenv("NIMHUNT_PUBLIC_BASE_URL", raising=False)
     original = spot_fixture()
@@ -199,8 +212,11 @@ def test_cold_map_render_uses_bounded_parallel_tile_loading() -> None:
     assert "NIMHUNT_SOCIAL_TILE_WORKERS" in source
 
 
-def test_middleware_injects_about_metadata() -> None:
-    async def app(_scope, _receive, send) -> None:
+def test_middleware_serves_clean_about_path_and_injects_metadata() -> None:
+    received_scopes: list[dict[str, object]] = []
+
+    async def app(scope, _receive, send) -> None:
+        received_scopes.append(scope)
         body = b"<html><head><title>NimHunt</title></head><body></body></html>"
         await send(
             {
@@ -228,8 +244,9 @@ def test_middleware_injects_about_metadata() -> None:
             {
                 "type": "http",
                 "method": "GET",
-                "path": "/",
-                "query_string": b"view=about",
+                "path": "/about",
+                "raw_path": b"/about",
+                "query_string": b"",
             },
             receive,
             send,
@@ -240,9 +257,51 @@ def test_middleware_injects_about_metadata() -> None:
         for message in messages
         if message.get("type") == "http.response.body"
     )
+    assert received_scopes[0]["path"] == "/"
+    assert received_scopes[0]["raw_path"] == b"/"
+    assert received_scopes[0]["query_string"] == b"view=about"
     assert b"nimhunt-social-preview" in body
     assert b"About NimHunt" in body
+    assert b"https://nimhunt.app/about" in body
     assert b"summary_large_image" in body
+
+
+def test_legacy_information_query_redirects_to_clean_path() -> None:
+    app_called = False
+
+    async def app(_scope, _receive, _send) -> None:
+        nonlocal app_called
+        app_called = True
+
+    messages: list[dict[str, object]] = []
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, object]) -> None:
+        messages.append(message)
+
+    asyncio.run(
+        social_preview.SocialPreviewMiddleware(app)(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/",
+                "query_string": b"view=how-to",
+                "headers": [],
+            },
+            receive,
+            send,
+        )
+    )
+
+    start = next(
+        message for message in messages if message.get("type") == "http.response.start"
+    )
+    headers = dict(start["headers"])
+    assert app_called is False
+    assert start["status"] == 308
+    assert headers[b"location"] == b"/how-to"
 
 
 def test_middleware_preserves_zero_copy_static_file_messages() -> None:

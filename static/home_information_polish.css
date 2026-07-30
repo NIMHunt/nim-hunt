@@ -4,6 +4,12 @@
     color: var(--nh-text);
 }
 
+/* Roadmap entries are primary prose, so keep their weight consistent with the
+   About and Starter Guide copy instead of falling back to regular Nimiq text. */
+.nq-style .roadmap-items > .roadmap-item {
+    font-weight: 800;
+}
+
 .notice-actions {
     display: grid;
     gap: 10px;

@@ -25,8 +25,8 @@ def test_first_visit_notice_has_a_quiet_starter_guide_action() -> None:
     assert 'href="/?view=how-to"' in shell
     assert ">See Guide</a>" in shell
     assert 'class="notice-actions"' in shell
-    assert 'data-test-features-enabled=' in shell
-    assert "/static/first_visit_guide.js?v=first-visit-guide-v1-20260729" in shell
+    assert "data-test-features-enabled" not in shell
+    assert "/static/first_visit_guide.js?v=first-visit-guide-v2-20260730" in shell
     assert "/static/home_information_polish.css?v=first-visit-guide-v4-20260730" in shell
 
     assert ".notice-actions > .nq-button" in stylesheet
@@ -52,10 +52,12 @@ def test_first_visit_notice_has_a_quiet_starter_guide_action() -> None:
     assert "color: var(--nh-text);" not in hover_rules
 
     assert "data?.created" in controller
-    assert "requestPath(args[0]) !== '/api/home/session'" in controller
-    assert "preview') === 'first-visit'" in controller
-    assert "body.dataset.testFeaturesEnabled === 'true'" in controller
-    assert "const previewData = { ...data, created: true };" in controller
+    assert "const isHomeSession = requestPath(args[0]) === '/api/home/session';" in controller
+    assert "if (isHomeSession) window.fetch = nativeFetch;" in controller
+    assert "preview" not in controller
+    assert "testFeaturesEnabled" not in controller
+    assert "created: true" not in controller
+    assert "new Response(" not in controller
 
     assert "if (data.created && state.user && !state.banned)" in home_controller
     assert "scheduleWelcomeConfetti();" in home_controller

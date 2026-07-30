@@ -1,16 +1,11 @@
 (() => {
-    const body = document.body;
     const noticeBackdrop = document.getElementById('notice-backdrop');
     const guideLink = document.getElementById('notice-guide');
-    if (!body || !noticeBackdrop || !guideLink || typeof window.fetch !== 'function') return;
+    if (!noticeBackdrop || !guideLink || typeof window.fetch !== 'function') return;
 
     const nativeFetch = window.fetch.bind(window);
     let awaitingFirstVisitNotice = false;
     let showingFirstVisitNotice = false;
-
-    const previewRequested = body.dataset.testFeaturesEnabled === 'true'
-        && !body.dataset.homeInformationView
-        && new URLSearchParams(window.location.search).get('preview') === 'first-visit';
 
     function requestPath(input) {
         try {
@@ -26,39 +21,29 @@
     }
 
     window.fetch = async (...args) => {
-        const response = await nativeFetch(...args);
-        if (requestPath(args[0]) !== '/api/home/session') return response;
+        const isHomeSession = requestPath(args[0]) === '/api/home/session';
 
-        // This wrapper exists only to observe the one Home-session response.
-        // Restore the native function immediately so every later request follows
-        // NimHunt's ordinary fetch path without another interception layer.
-        window.fetch = nativeFetch;
-
-        let data = null;
         try {
-            data = await response.clone().json();
-        } catch (error) {
+            const response = await nativeFetch(...args);
+            if (!isHomeSession) return response;
+
+            let data = null;
+            try {
+                data = await response.clone().json();
+            } catch (error) {
+                return response;
+            }
+
+            if (data?.created && canShowFirstVisit(data)) {
+                awaitingFirstVisitNotice = true;
+            }
+
             return response;
+        } finally {
+            // This wrapper observes only the Home-session response. Restore the
+            // native browser function immediately afterwards, including failures.
+            if (isHomeSession) window.fetch = nativeFetch;
         }
-
-        if (data?.created && canShowFirstVisit(data)) {
-            awaitingFirstVisitNotice = true;
-        }
-
-        if (!previewRequested || !canShowFirstVisit(data)) return response;
-
-        awaitingFirstVisitNotice = true;
-        const previewData = { ...data, created: true };
-        const headers = new Headers(response.headers);
-        headers.delete('content-encoding');
-        headers.delete('content-length');
-        headers.set('content-type', 'application/json');
-
-        return new Response(JSON.stringify(previewData), {
-            status: response.status,
-            statusText: response.statusText,
-            headers,
-        });
     };
 
     function syncGuideVisibility() {

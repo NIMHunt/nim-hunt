@@ -27,7 +27,7 @@ def test_first_visit_notice_has_a_quiet_starter_guide_action() -> None:
     assert 'class="notice-actions"' in shell
     assert 'data-test-features-enabled=' in shell
     assert "/static/first_visit_guide.js?v=first-visit-guide-v1-20260729" in shell
-    assert "/static/home_information_polish.css?v=first-visit-guide-v3-20260730" in shell
+    assert "/static/home_information_polish.css?v=first-visit-guide-v4-20260730" in shell
 
     assert ".notice-actions > .nq-button" in stylesheet
     assert "height: 7.5rem;" in stylesheet
@@ -39,6 +39,12 @@ def test_first_visit_notice_has_a_quiet_starter_guide_action() -> None:
     assert "min-height:" not in stylesheet
     assert "font: inherit;" not in stylesheet
     assert "border-radius: 999px;" not in stylesheet
+
+    overlay_rule = stylesheet.split(
+        ".nq-style .notice-card .notice-guide-button::before {", 1
+    )[1].split("}", 1)[0]
+    assert "background: transparent;" in overlay_rule
+    assert "background-image: none;" in overlay_rule
 
     hover_rules = stylesheet.split(".nq-style .notice-card .notice-guide-button:hover,", 1)[1]
     hover_rules = hover_rules.split(".nq-style .notice-card .notice-guide-button:active", 1)[0]

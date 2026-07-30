@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-polish-v2-20260704') }}">
     <link rel="stylesheet" href="/static/disclaimer_button.css?v=disclaimer-button-v3-20260722">
     <link rel="stylesheet" href="/static/static_pages.css?v=home-information-v9-how-to-interactions-20260729">
-    <link rel="stylesheet" href="/static/home_information_polish.css?v=first-visit-guide-v1-20260729">
+    <link rel="stylesheet" href="/static/home_information_polish.css?v=first-visit-guide-v2-20260730">
     {% if information_view | default('') == 'how-to' %}
     <link rel="stylesheet" href="/static/how_to_key.css?v=spot-key-v2-map-tooltip-20260729">
     {% endif %}
@@ -33,7 +33,7 @@
             <a id="notice-link" class="notice-link" data-i18n="common.readMore" hidden>Read more</a>
             <div class="notice-actions">
                 <button id="notice-ok" class="nq-button light-blue" data-i18n="common.ok">OK</button>
-                <a id="notice-guide" class="notice-guide-button" href="/?view=how-to" hidden>See Guide</a>
+                <a id="notice-guide" class="nq-button notice-guide-button" href="/?view=how-to" hidden>See Guide</a>
             </div>
         </section>
     </div>

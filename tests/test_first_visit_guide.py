@@ -30,7 +30,10 @@ def test_first_visit_notice_has_a_quiet_starter_guide_action() -> None:
     assert ">See Guide</a>" in shell
     assert 'class="notice-actions"' in shell
     assert "data-test-features-enabled" not in shell
-    assert "/static/first_visit_guide.js?v=first-visit-guide-v2-20260730" in shell
+    assert (
+        "/static/first_visit_guide.js?v=first-visit-guide-v3-browser-session-20260731"
+        in shell
+    )
     assert "/static/home_information_polish.css?v=roadmap-typography-v2-20260730" in shell
 
     assert ".notice-actions > .nq-button" in stylesheet
@@ -66,3 +69,25 @@ def test_first_visit_notice_has_a_quiet_starter_guide_action() -> None:
     assert "if (data.created && state.user && !state.banned)" in home_controller
     assert "scheduleWelcomeConfetti();" in home_controller
     assert "buttonText: \"Let's Go!\"" in text_catalogue
+
+
+def test_browser_nimiq_pay_notice_is_shown_once_per_tab_session() -> None:
+    controller = _read("static/first_visit_guide.js")
+
+    assert (
+        "const WALLET_NOTICE_SESSION_KEY = "
+        "'nimhunt.wallet-unavailable-notice-shown.v1';"
+    ) in controller
+    assert "window.sessionStorage.getItem(WALLET_NOTICE_SESSION_KEY)" in controller
+    assert "window.sessionStorage.setItem(WALLET_NOTICE_SESSION_KEY, '1');" in controller
+    assert "if (data?.code === 'wallet_unavailable')" in controller
+    assert "suppressWalletUnavailableNotice = !claimWalletNoticeForSession();" in controller
+    assert "if (suppressWalletUnavailableNotice)" in controller
+    assert "noticeBackdrop.hidden = true;" in controller
+    assert "window.localStorage" not in controller
+
+    # The session gate must remain specific to the browser/Nimiq Pay reminder.
+    assert controller.index("if (awaitingWalletUnavailableNotice)") < controller.index(
+        "if (awaitingFirstVisitNotice)"
+    )
+    assert "if (data?.created && canShowFirstVisit(data))" in controller

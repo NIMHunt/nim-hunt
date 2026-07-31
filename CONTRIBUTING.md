@@ -56,6 +56,7 @@ for file in static/*.js; do node --check --input-type=module < "$file"; done
 for file in helpers/*.mjs; do node --check "$file"; done
 for file in *.sh; do bash -n "$file"; done
 python -m pip check
+git diff --check
 ```
 
 GitHub Actions repeats the full suite, compiles every Jinja template, seeds a

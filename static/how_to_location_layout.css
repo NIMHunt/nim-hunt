@@ -1,0 +1,49 @@
+/* Keep the location-permission heading comfortably readable at every width.
+   The original panel remains responsible for its colours and typography; this
+   file changes only the arrangement of its existing elements. */
+.how-to-location-layout {
+    grid-template-areas:
+        "title title"
+        "copy example";
+}
+
+/* The wrapper carries no visual or semantic role, so its children can
+   participate directly in the parent grid. */
+.how-to-location-copy-column {
+    display: contents;
+}
+
+.how-to-location-title {
+    grid-area: title;
+}
+
+.how-to-location-copy {
+    grid-area: copy;
+    align-self: center;
+    margin-top: 0;
+}
+
+.how-to-location-example-column {
+    grid-area: example;
+}
+
+@media (max-width: 560px) {
+    .how-to-location-layout {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+            "title"
+            "copy"
+            "example";
+        gap: 1.4rem;
+    }
+
+    .how-to-location-copy {
+        width: min(100%, 24rem);
+        justify-self: center;
+    }
+
+    .how-to-location-example-column {
+        width: min(100%, 28rem);
+        justify-self: center;
+    }
+}

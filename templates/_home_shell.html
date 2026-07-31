@@ -123,7 +123,7 @@
         {% endif %}
 
         {% if show_debug | default(true) %}
-        <section class="debug-card" aria-label="Troubleshooting information" data-i18n-aria-label="home.troubleshootingAria">
+        <section class="debug-card" aria-label="Troubleshooting information" data-i18n-aria-label="home.troubleshootingAria" hidden>
             <button id="debug-toggle" class="debug-toggle disclosure-toggle" type="button" aria-expanded="false" aria-controls="debug-panel">
                 <span data-i18n="home.troubleshooting">Troubleshooting</span>
             </button>
@@ -190,6 +190,7 @@
 
     <script type="module" src="/static/page_lifecycle.js?v=history-card-v4-20260722"></script>
     <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
+    <script type="module" src="/static/troubleshooting_visibility.js?v=mainnet-hidden-v1-20260731"></script>
 
     {% if information_view | default('') in ('about', 'roadmap') %}
     <script type="module" src="/static/static_page.js?v=about-nimiq-pay-v2-20260725"></script>

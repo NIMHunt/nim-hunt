@@ -32,6 +32,18 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
         schema.DB_PATH = self._old_path
         self._tmp.close()
 
+    async def _gather_with_deadlock_timeout(self, *awaitables):
+        """Run concurrent operations with one generous deadlock guard.
+
+        Coordination inside the tests uses events rather than short sleeps. The
+        timeout is not part of the race itself; it only stops CI hanging forever
+        if a real locking regression is introduced.
+        """
+        return await asyncio.wait_for(
+            asyncio.gather(*awaitables),
+            timeout=5,
+        )
+
     async def _create_published_spot(
         self,
         *,
@@ -105,6 +117,33 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         return spot_id, users
 
+    async def _create_ready_prizedraw(
+        self,
+        *,
+        suffix: str,
+    ) -> tuple[int, list[int]]:
+        spot_id, users = await self._create_published_spot(
+            suffix=suffix,
+            max_total_claims=4,
+            is_prizedraw=True,
+            prize_count=2,
+        )
+        async with schema.get_db() as db:
+            claim_ids: list[int] = []
+            for user_id, _device_hash in users[:4]:
+                claim = await db_access.create_claim_attempt(
+                    db,
+                    spot_id=spot_id,
+                    user_id=user_id,
+                    lat=51.5,
+                    long=-0.1,
+                    location_accuracy_metres=5.0,
+                    payout_address=const.DEV_PLATFORM_FEE_ADDRESS,
+                )
+                claim_ids.append(int(claim[schema.CLAIM_ID]))
+            await db.commit()
+        return spot_id, claim_ids
+
     async def test_simultaneous_final_standard_claims_are_serialised(self):
         spot_id, users = await self._create_published_spot(
             suffix="standard",
@@ -112,18 +151,15 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
         )
         original_identify = public_html._identify_private_page_user
         arrivals = 0
-        both_arrived = asyncio.Event()
+        both_identified = asyncio.Event()
 
-        async def briefly_overlap_identity_check(db, payload):
+        async def identify_then_release_together(db, payload):
             nonlocal arrivals
             result = await original_identify(db, payload)
             arrivals += 1
-            if arrivals >= 2:
-                both_arrived.set()
-            try:
-                await asyncio.wait_for(both_arrived.wait(), timeout=0.1)
-            except TimeoutError:
-                pass
+            if arrivals == 2:
+                both_identified.set()
+            await both_identified.wait()
             return result
 
         async def submit(device_hash: str):
@@ -146,7 +182,7 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(
                 public_html,
                 "_identify_private_page_user",
-                side_effect=briefly_overlap_identity_check,
+                side_effect=identify_then_release_together,
             ),
             mock.patch.object(
                 public_html,
@@ -159,11 +195,12 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 mock.AsyncMock(),
             ),
         ):
-            responses = await asyncio.gather(
+            responses = await self._gather_with_deadlock_timeout(
                 submit(users[0][1]),
                 submit(users[1][1]),
             )
 
+        self.assertEqual(arrivals, 2)
         self.assertEqual(sorted(response.status_code for response in responses), [200, 409])
         rejected = next(response for response in responses if response.status_code == 409)
         rejected_body = json.loads(rejected.body)
@@ -182,44 +219,20 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(int(rows[0][schema.CLAIM_STATUS]), const.CLAIM_STATUS_SUCCESS)
 
     async def test_simultaneous_prizedraw_settlement_selects_once(self):
-        spot_id, users = await self._create_published_spot(
-            suffix="prizedraw",
-            max_total_claims=4,
-            is_prizedraw=True,
-            prize_count=2,
+        spot_id, claim_ids = await self._create_ready_prizedraw(
+            suffix="prizedraw-concurrency",
         )
-        async with schema.get_db() as db:
-            claim_ids: list[int] = []
-            for user_id, _device_hash in users[:4]:
-                claim = await db_access.create_claim_attempt(
-                    db,
-                    spot_id=spot_id,
-                    user_id=user_id,
-                    lat=51.5,
-                    long=-0.1,
-                    location_accuracy_metres=5.0,
-                    payout_address=const.DEV_PLATFORM_FEE_ADDRESS,
-                )
-                claim_ids.append(int(claim[schema.CLAIM_ID]))
-            await db.commit()
-
-        original_ready = settlement_updater._settlement_ready_reason
-        arrivals = 0
-        both_arrived = asyncio.Event()
         sample_calls = 0
-        sends: list[int] = []
-
-        async def briefly_overlap_readiness(db, *, spot, now):
-            nonlocal arrivals
-            result = await original_ready(db, spot=spot, now=now)
-            arrivals += 1
-            if arrivals >= 2:
-                both_arrived.set()
-            try:
-                await asyncio.wait_for(both_arrived.wait(), timeout=0.1)
-            except TimeoutError:
-                pass
-            return result
+        workers_started = 0
+        both_workers_started = asyncio.Event()
+        payout_retry = mock.AsyncMock(
+            return_value={
+                "ok": True,
+                "spot_id": spot_id,
+                "retried": False,
+                "payouts": [],
+            }
+        )
 
         def choose_winners(population, winner_count):
             nonlocal sample_calls
@@ -227,8 +240,78 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(winner_count, 2)
             return population[:winner_count]
 
+        async def settle_after_both_workers_start():
+            nonlocal workers_started
+            workers_started += 1
+            if workers_started == 2:
+                both_workers_started.set()
+            await both_workers_started.wait()
+            return await settlement_updater.settle_prizedraw_spot_if_ready(
+                spot_id=spot_id
+            )
+
+        with (
+            mock.patch.object(
+                settlement_updater.secrets.SystemRandom,
+                "sample",
+                side_effect=choose_winners,
+            ),
+            mock.patch.object(
+                settlement_updater,
+                "retry_pending_prizedraw_payouts_for_spot",
+                payout_retry,
+            ),
+            mock.patch.object(cache, "notify_spot_changed", mock.AsyncMock()),
+            mock.patch.object(cache, "notify_claim_changed", mock.AsyncMock()),
+            mock.patch.object(cache, "notify_user_changed", mock.AsyncMock()),
+        ):
+            results = await self._gather_with_deadlock_timeout(
+                settle_after_both_workers_start(),
+                settle_after_both_workers_start(),
+            )
+
+        self.assertEqual(workers_started, 2)
+        self.assertTrue(all(result["ok"] for result in results), results)
+        self.assertEqual(sum(bool(result.get("settled")) for result in results), 1)
+        self.assertEqual(sample_calls, 1)
+        payout_retry.assert_awaited_once_with(spot_id=spot_id)
+
+        skipped = next(result for result in results if not result.get("settled"))
+        self.assertEqual(skipped.get("reason"), "not_published")
+
+        async with schema.get_db() as db:
+            spot = await db_access.get_spot(db, spot_id=spot_id)
+            winners = await db_access.get_prizedraw_winner_claim_ids(
+                db,
+                spot_id=spot_id,
+            )
+            payout_rows = [
+                row
+                for row in await db_access.get_transactions_by_spot(
+                    db,
+                    spot_id=spot_id,
+                    limit=db_access.MAX_LIMIT,
+                )
+                if int(row[schema.TRANS_TYPE]) == const.TRANS_TYPE_CLAIM
+            ]
+
+        self.assertEqual(int(spot[schema.SPOT_STATUS]), const.SPOT_STATUS_COMPLETED)
+        self.assertEqual(len(winners), 2)
+        self.assertTrue(set(winners).issubset(set(claim_ids)))
+        self.assertEqual(payout_rows, [])
+
+    async def test_settled_prizedraw_creates_one_payout_per_winner(self):
+        spot_id, claim_ids = await self._create_ready_prizedraw(
+            suffix="prizedraw-payouts",
+        )
+        sends: list[tuple[str, int]] = []
+
+        def choose_winners(population, winner_count):
+            self.assertEqual(winner_count, 2)
+            return population[:winner_count]
+
         async def fake_send(*, spot, to_address, amount, memo=None):
-            sends.append(int(amount))
+            sends.append((str(to_address), int(amount)))
             return trans_updater.SubmittedChainTransaction(
                 tx_hash=f"{len(sends):064x}",
                 from_address=spot[schema.SPOT_DEPOSIT_ADDRESS],
@@ -237,11 +320,6 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
             )
 
         with (
-            mock.patch.object(
-                settlement_updater,
-                "_settlement_ready_reason",
-                side_effect=briefly_overlap_readiness,
-            ),
             mock.patch.object(
                 settlement_updater.secrets.SystemRandom,
                 "sample",
@@ -257,14 +335,13 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(cache, "notify_user_changed", mock.AsyncMock()),
             mock.patch.object(cache, "notify_transaction_changed", mock.AsyncMock()),
         ):
-            results = await asyncio.gather(
-                settlement_updater.settle_prizedraw_spot_if_ready(spot_id=spot_id),
-                settlement_updater.settle_prizedraw_spot_if_ready(spot_id=spot_id),
+            result = await settlement_updater.settle_prizedraw_spot_if_ready(
+                spot_id=spot_id
             )
 
-        self.assertTrue(all(result["ok"] for result in results), results)
-        self.assertEqual(sum(bool(result.get("settled")) for result in results), 1)
-        self.assertEqual(sample_calls, 1)
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["settled"], result)
+        self.assertTrue(result["payout_retry"]["ok"], result)
         self.assertEqual(len(sends), 2)
 
         async with schema.get_db() as db:
@@ -282,10 +359,23 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 )
                 if int(row[schema.TRANS_TYPE]) == const.TRANS_TYPE_CLAIM
             ]
+
         self.assertEqual(int(spot[schema.SPOT_STATUS]), const.SPOT_STATUS_COMPLETED)
         self.assertEqual(len(winners), 2)
         self.assertTrue(set(winners).issubset(set(claim_ids)))
         self.assertEqual(len(payout_rows), 2)
+        self.assertEqual(
+            {int(row[schema.TRANS_CLAIM_ID]) for row in payout_rows},
+            set(winners),
+        )
+        self.assertEqual(
+            sum(int(row[schema.TRANS_AMOUNT]) for row in payout_rows),
+            int(spot[schema.SPOT_TOTAL_VALUE]),
+        )
+        self.assertEqual(
+            sorted(amount for _address, amount in sends),
+            sorted(int(row[schema.TRANS_AMOUNT]) for row in payout_rows),
+        )
 
 
 class TransactionHealthEndpointTest(unittest.IsolatedAsyncioTestCase):

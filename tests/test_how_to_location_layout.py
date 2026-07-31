@@ -28,6 +28,17 @@ def test_location_permission_panel_stacks_at_560_pixels() -> None:
     assert '"example"' in stylesheet
 
 
+def test_stacked_location_copy_uses_available_card_width() -> None:
+    stylesheet = _read("static/how_to_location_layout.css")
+    mobile_rules = stylesheet.split("@media (max-width: 560px)", 1)[1]
+    copy_rule = mobile_rules.split(".how-to-location-copy {", 1)[1].split("}", 1)[0]
+
+    assert "width: 100%;" in copy_rule
+    assert "max-width: none;" in copy_rule
+    assert "justify-self: stretch;" in copy_rule
+    assert "24rem" not in copy_rule
+
+
 def test_location_layout_override_loads_only_for_how_to_page() -> None:
     shell = _read("templates/_home_shell.html")
     conditional = "{% if information_view | default('') == 'how-to' %}"

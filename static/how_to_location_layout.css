@@ -38,8 +38,9 @@
     }
 
     .how-to-location-copy {
-        width: min(100%, 24rem);
-        justify-self: center;
+        width: 100%;
+        max-width: none;
+        justify-self: stretch;
     }
 
     .how-to-location-example-column {

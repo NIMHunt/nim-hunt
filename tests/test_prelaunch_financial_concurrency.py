@@ -149,20 +149,11 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
             suffix="standard",
             max_total_claims=1,
         )
-        original_identify = public_html._identify_private_page_user
-        arrivals = 0
-        both_identified = asyncio.Event()
-
-        async def identify_then_release_together(db, payload):
-            nonlocal arrivals
-            result = await original_identify(db, payload)
-            arrivals += 1
-            if arrivals == 2:
-                both_identified.set()
-            await both_identified.wait()
-            return result
+        workers_started = 0
+        both_workers_started = asyncio.Event()
 
         async def submit(device_hash: str):
+            nonlocal workers_started
             payload = public_html.ClaimSpotRequest(
                 device_id_hash=device_hash,
                 wallet_available=True,
@@ -172,6 +163,10 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 accuracy=5.0,
                 payout_address=const.DEV_PLATFORM_FEE_ADDRESS,
             )
+            workers_started += 1
+            if workers_started == 2:
+                both_workers_started.set()
+            await both_workers_started.wait()
             return await public_html.claim_spot_api(
                 spot_id,
                 payload,
@@ -179,11 +174,6 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
             )
 
         with (
-            mock.patch.object(
-                public_html,
-                "_identify_private_page_user",
-                side_effect=identify_then_release_together,
-            ),
             mock.patch.object(
                 public_html,
                 "_notify_all_cache_for_spot_owner_change",
@@ -200,7 +190,7 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 submit(users[1][1]),
             )
 
-        self.assertEqual(arrivals, 2)
+        self.assertEqual(workers_started, 2)
         self.assertEqual(sorted(response.status_code for response in responses), [200, 409])
         rejected = next(response for response in responses if response.status_code == 409)
         rejected_body = json.loads(rejected.body)
@@ -220,7 +210,7 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_simultaneous_prizedraw_settlement_selects_once(self):
         spot_id, claim_ids = await self._create_ready_prizedraw(
-            suffix="prizedraw-concurrency",
+            suffix="pd-race",
         )
         sample_calls = 0
         workers_started = 0
@@ -302,7 +292,7 @@ class FinancialConcurrencyIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_settled_prizedraw_creates_one_payout_per_winner(self):
         spot_id, claim_ids = await self._create_ready_prizedraw(
-            suffix="prizedraw-payouts",
+            suffix="pd-payout",
         )
         sends: list[tuple[str, int]] = []
 

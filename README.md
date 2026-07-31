@@ -1,13 +1,38 @@
 # NimHunt
 
-![CI](https://github.com/NIMHunt/nim-hunt/actions/workflows/ci.yml/badge.svg)
+[![CI](https://github.com/NIMHunt/nim-hunt/actions/workflows/ci.yml/badge.svg)](https://github.com/NIMHunt/nim-hunt/actions/workflows/ci.yml)
+[![Live site](https://img.shields.io/badge/live-nimhunt.app-21bca5)](https://nimhunt.app)
+[![License: MIT](https://img.shields.io/badge/license-MIT-5c5ce0)](LICENSE)
 
-NimHunt is a small geofaucet-style and Prizedraw mini-app for Nimiq Pay.
+**[Open NimHunt](https://nimhunt.app)** · **[Open Nimiq Pay](https://nimpay.app)** · [Architecture](#architecture) · [Testing](#testing-and-quality-checks) · [Deployment](#public-deployment)
 
-Creators fund geographic **Spots** with NIM. Other users find those Spots on a
-map and can claim or enter them only when they are within the configured radius.
-NimHunt is designed for a coding competition and modest community use rather
-than high-volume financial infrastructure.
+[![NimHunt map preview](static/images/nimhunt-default-social-card.png)](https://nimhunt.app)
+
+NimHunt is a mobile-first geofaucet and Prizedraw mini-app for Nimiq Pay.
+Creators fund real-world geographic **Spots** with NIM; other users discover them
+on a map and can claim a reward or enter a draw only from inside the configured
+area.
+
+The project is live on MainAlbatross and was built for a coding competition and
+modest community use. It deliberately favours transparent rules, conservative
+financial safeguards and a small, understandable stack over high-volume
+infrastructure.
+
+## At a glance
+
+- **Real Nimiq integration** — Nimiq Pay handles creator funding and participant
+  addresses; NimHunt independently verifies transactions through Nimiq RPC.
+- **Two reward formats** — immediate Standard Spot rewards and randomly selected
+  Prizedraw winners.
+- **Location-aware participation** — radius checks, optional stay durations,
+  scheduling, participant limits and one-time claim codes.
+- **Durable financial workflows** — outgoing intents are recorded before
+  broadcast, ambiguous sends are not blindly retried, and winner sets are stored
+  before payouts begin.
+- **Production separation** — development, public TestAlbatross and MainAlbatross
+  modes have explicit safety boundaries and network-identity checks.
+- **Automated quality gates** — Python and Node tests, linting, syntax checks,
+  template compilation, fresh database seeding and dependency audits run in CI.
 
 ## Features
 
@@ -278,7 +303,7 @@ operator-controlled cancellation-fee address.
 Clone the repository, then enter it:
 
 ```bash
-git clone git@github.com:NIMHunt/nim-hunt.git
+git clone https://github.com/NIMHunt/nim-hunt.git
 cd nim-hunt
 ```
 
@@ -349,11 +374,11 @@ the current schema and inserts mock users, Spots, claims and transactions. The
 script and `spoof.py` refuse to run in either public deployment mode.
 
 NimHunt currently follows a fresh-development-database policy rather than
-maintaining a general migration framework. The creation-fee release raises the
-schema to version `2`, so after pulling this release stop the server and run
-this reset once before ordinary local testing. Never use the reset script on a
-public deployment database; public TestAlbatross and MainAlbatross must use fresh
-persistent databases for this release.
+maintaining a general migration framework. The current release uses schema
+version `3`, so after pulling a change that updates the schema, stop the server
+and run this reset before ordinary local testing. Never use the reset script on
+a public deployment database; public TestAlbatross and MainAlbatross must use
+fresh persistent databases for this release.
 
 ## Phone testing
 

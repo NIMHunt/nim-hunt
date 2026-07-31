@@ -3,7 +3,7 @@ cache.py
 
 Small in-memory cache helpers for NimHunt.
 
-This cache is deliberately simple, but now has two layers:
+This cache is deliberately simple, but has three layers:
 
 1. SPOT cache
    - Stores published, non-expired current/upcoming SPOTs.

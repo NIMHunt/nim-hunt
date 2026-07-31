@@ -1,4 +1,5 @@
 (() => {
+    const WALLET_NOTICE_SESSION_KEY = 'nimhunt.wallet-unavailable-notice-shown.v1';
     const noticeBackdrop = document.getElementById('notice-backdrop');
     const guideLink = document.getElementById('notice-guide');
     if (!noticeBackdrop || !guideLink || typeof window.fetch !== 'function') return;
@@ -6,6 +7,8 @@
     const nativeFetch = window.fetch.bind(window);
     let awaitingFirstVisitNotice = false;
     let showingFirstVisitNotice = false;
+    let awaitingWalletUnavailableNotice = false;
+    let suppressWalletUnavailableNotice = false;
 
     function requestPath(input) {
         try {
@@ -18,6 +21,20 @@
 
     function canShowFirstVisit(data) {
         return Boolean(data?.user && !data.user.is_banned);
+    }
+
+    function claimWalletNoticeForSession() {
+        try {
+            if (window.sessionStorage.getItem(WALLET_NOTICE_SESSION_KEY) === '1') {
+                return false;
+            }
+            window.sessionStorage.setItem(WALLET_NOTICE_SESSION_KEY, '1');
+            return true;
+        } catch (error) {
+            // Some privacy modes disable browser storage. In that case, keep the
+            // original behaviour rather than accidentally hiding useful guidance.
+            return true;
+        }
     }
 
     window.fetch = async (...args) => {
@@ -38,6 +55,11 @@
                 awaitingFirstVisitNotice = true;
             }
 
+            if (data?.code === 'wallet_unavailable') {
+                awaitingWalletUnavailableNotice = true;
+                suppressWalletUnavailableNotice = !claimWalletNoticeForSession();
+            }
+
             return response;
         } finally {
             // Observe only the real Home-session response, then restore the
@@ -51,6 +73,16 @@
             guideLink.hidden = true;
             showingFirstVisitNotice = false;
             return;
+        }
+
+        if (awaitingWalletUnavailableNotice) {
+            awaitingWalletUnavailableNotice = false;
+            if (suppressWalletUnavailableNotice) {
+                suppressWalletUnavailableNotice = false;
+                noticeBackdrop.hidden = true;
+                return;
+            }
+            suppressWalletUnavailableNotice = false;
         }
 
         if (awaitingFirstVisitNotice) {

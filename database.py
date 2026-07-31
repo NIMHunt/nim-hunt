@@ -1,11 +1,9 @@
-"""
-─────────────────────────────────────────────
+"""SQLite schema, connection management, and durable deployment identity.
 
-database.py
-
-The back-end of the system. Handles the database.
-
-─────────────────────────────────────────────
+This module defines NimHunt's tables, indexes, triggers, schema version, and
+connection helpers. Validated application reads and writes belong in
+``db_access.py``; route and financial workflows should use that boundary rather
+than embedding ad-hoc SQL.
 """
 
 import os

@@ -26,9 +26,5 @@
 
 .nq-style .faq-answer > .faq-answer-copy {
     margin: 0 !important;
-    color: var(--nh-text);
-    font-size: 1rem;
-    font-weight: 750;
-    line-height: 1.45;
     text-align: left;
 }

@@ -20,7 +20,7 @@ def test_faq_is_a_fourth_information_view_with_a_clean_route() -> None:
     assert "{% set page_title = 'FAQ · ' ~ app_name %}" in home_template
     assert '{% include "_faq_content.html" %}' in shell_template
     assert "/static/faq.js?v=faq-accordion-v1-20260730" in shell_template
-    assert "/static/faq.css?v=faq-layout-v1-20260730" in shell_template
+    assert "/static/faq.css?v=faq-layout-v2-standard-answer-20260731" in shell_template
     assert '"/faq": "faq"' in social_source
 
     metadata = asyncio.run(social_preview.metadata_for_request("/faq"))

@@ -1,0 +1,30 @@
+.home-information-links {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.faq-page,
+.faq-list,
+.faq-item {
+    min-width: 0;
+}
+
+.nq-style .faq-list {
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.faq-question {
+    overflow: visible;
+    line-height: 1.25;
+    text-overflow: clip;
+    white-space: normal;
+}
+
+.faq-toggle .spot-list-top-row {
+    align-items: center;
+}
+
+.nq-style .faq-answer > .faq-answer-copy {
+    margin: 0 !important;
+    text-align: left;
+}

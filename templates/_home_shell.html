@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="/static/disclaimer_button.css?v=disclaimer-button-v3-20260722">
     <link rel="stylesheet" href="/static/static_pages.css?v=home-information-v9-how-to-interactions-20260729">
     <link rel="stylesheet" href="/static/home_information_polish.css?v=roadmap-typography-v2-20260730">
+    <link rel="stylesheet" href="/static/faq.css?v=faq-layout-v2-standard-answer-20260731">
     {% if information_view | default('') == 'how-to' %}
     <link rel="stylesheet" href="/static/how_to_key.css?v=spot-key-v2-map-tooltip-20260729">
     {% endif %}
@@ -73,13 +74,15 @@
             <p class="home-error-message">{{ error_message }}</p>
             {% endif %}
             {% else %}
-            {% if information_view | default('') in ('about', 'how-to', 'roadmap') %}
+            {% if information_view | default('') in ('about', 'how-to', 'roadmap') or information_view | default('') == 'faq' %}
             <div id="home-information-content" class="home-information-content" aria-labelledby="home-information-title">
                 <h2 id="home-information-title" class="nq-label static-page-title" data-static-page-title>
-                    {% if information_view == 'about' %}About{% elif information_view == 'how-to' %}Starter Guide{% else %}Roadmap{% endif %}
+                    {% if information_view == 'about' %}About{% elif information_view == 'how-to' %}Starter Guide{% elif information_view == 'faq' %}FAQ{% else %}Roadmap{% endif %}
                 </h2>
                 {% if information_view == 'how-to' %}
                     {% include "_how_to_content.html" %}
+                {% elif information_view == 'faq' %}
+                    {% include "_faq_content.html" %}
                 {% else %}
                 <div class="static-page-body" data-static-page-content>
                     <p class="static-page-copy">Loading…</p>
@@ -87,7 +90,7 @@
                 {% endif %}
             </div>
             {% endif %}
-            <div id="home-dynamic-welcome"{% if information_view | default('') in ('about', 'how-to', 'roadmap') %} hidden{% endif %}>
+            <div id="home-dynamic-welcome"{% if information_view | default('') in ('about', 'how-to', 'roadmap') or information_view | default('') == 'faq' %} hidden{% endif %}>
                 <p id="welcome-line" class="welcome-line" data-i18n="home.preparing">Preparing your home screen.</p>
                 <div id="display-name-editor" class="display-name-editor" hidden>
                     <p id="display-name-error" class="display-name-error" role="alert" hidden></p>
@@ -153,23 +156,32 @@
         </div>
         {% endif %}
 
-        {% if show_information_links | default(false) or information_view | default('') in ('about', 'how-to', 'roadmap') %}
+        {% if show_information_links | default(false) or information_view | default('') in ('about', 'how-to', 'roadmap') or information_view | default('') == 'faq' %}
         <nav class="home-information-links" aria-label="Project information">
             {% if information_view | default('') == 'about' %}
             <a href="/">Home</a>
             <a href="/how-to">How To</a>
+            <a href="/faq">FAQ</a>
             <a href="/roadmap">Roadmap</a>
             {% elif information_view | default('') == 'how-to' %}
             <a href="/about">About</a>
+            <a href="/">Home</a>
+            <a href="/faq">FAQ</a>
+            <a href="/roadmap">Roadmap</a>
+            {% elif information_view | default('') == 'faq' %}
+            <a href="/about">About</a>
+            <a href="/how-to">How To</a>
             <a href="/">Home</a>
             <a href="/roadmap">Roadmap</a>
             {% elif information_view | default('') == 'roadmap' %}
             <a href="/about">About</a>
             <a href="/how-to">How To</a>
+            <a href="/faq">FAQ</a>
             <a href="/">Home</a>
             {% else %}
             <a href="/about">About</a>
             <a href="/how-to">How To</a>
+            <a href="/faq">FAQ</a>
             <a href="/roadmap">Roadmap</a>
             {% endif %}
         </nav>
@@ -185,6 +197,10 @@
 
     {% if information_view | default('') == 'how-to' %}
     <script type="module" src="/static/how_to.js?v=how-to-platform-toggle-v3-20260729"></script>
+    {% endif %}
+
+    {% if information_view | default('') == 'faq' %}
+    <script type="module" src="/static/faq.js?v=faq-accordion-v1-20260730"></script>
     {% endif %}
 
     {% if home_script_src is defined and home_script_src %}

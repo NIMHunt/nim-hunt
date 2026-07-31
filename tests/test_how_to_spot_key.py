@@ -6,7 +6,8 @@ def _read(relative_path: str) -> str:
 def test_how_to_heading_is_starter_guide_without_renaming_navigation_link() -> None:
     shell = _read("templates/_home_shell.html")
 
-    assert "{% elif information_view == 'how-to' %}Starter Guide{% else %}" in shell
+    assert "{% elif information_view == 'how-to' %}Starter Guide" in shell
+    assert "{% elif information_view == 'faq' %}FAQ{% else %}Roadmap{% endif %}" in shell
     assert '<a href="/how-to">How To</a>' in shell
     assert (
         '/static/how_to_key.css?v=spot-key-v2-map-tooltip-20260729' in shell

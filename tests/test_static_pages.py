@@ -187,7 +187,9 @@ def test_how_to_story_has_complete_copy_shared_map_tooltips_and_real_claim_butto
     assert "This is a Spot. This is where you can find some NIM." in partial
     assert "When you move onto a Spot, you can click this button to receive some NIM." in partial
     assert "If your claim is valid, the NIM will enter your account immediately." in partial
-    assert "Get started by clicking “Find Spots” below. Happy Hunting!" in partial
+    assert (
+        "Get started by clicking “Find Spots” below.<br>Happy Hunting!" in partial
+    )
 
     shared_tooltip_classes = (
         'class="how-to-map-tooltip leaflet-tooltip leaflet-tooltip-top '

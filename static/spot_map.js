@@ -1,7 +1,14 @@
 const DEFAULT_MAP_CENTRE = [54.5, -3.4];
 const DEFAULT_MAP_ZOOM = 5;
 
+function hasCoordinateValue(value) {
+    return value !== null
+        && value !== undefined
+        && !(typeof value === 'string' && value.trim() === '');
+}
+
 function validSpotCoordinate(spot) {
+    if (!hasCoordinateValue(spot?.lat) || !hasCoordinateValue(spot?.long)) return false;
     const lat = Number(spot.lat);
     const long = Number(spot.long);
     return Number.isFinite(lat) && Number.isFinite(long);
@@ -130,11 +137,12 @@ export function createReusableSpotMap({
 
     const spotLayer = window.L.layerGroup().addTo(map);
     const layerEntries = new Map();
+    let hasRenderedInitialView = false;
 
     const api = {
         map,
         spotLayer,
-        setSpots(nextSpots = []) {
+        setSpots(nextSpots = [], { fitView = !hasRenderedInitialView } = {}) {
             renderSpotsOnMap({
                 map,
                 spotLayer,
@@ -147,7 +155,9 @@ export function createReusableSpotMap({
                 onSpotCentreClick,
                 radiusInteractive,
                 highlightColour,
+                fitView,
             });
+            hasRenderedInitialView = true;
         },
         setSpotHighlighted(spotId, highlighted) {
             return setLayerEntryHighlighted(
@@ -174,6 +184,7 @@ export function renderSpotsOnMap({
     onSpotCentreClick = null,
     radiusInteractive = true,
     highlightColour = '#0582ca',
+    fitView = true,
 }) {
     if (!map || !spotLayer || !window.L) return;
 
@@ -182,7 +193,7 @@ export function renderSpotsOnMap({
     const visibleSpots = spots.filter(validSpotCoordinate);
 
     if (visibleSpots.length === 0) {
-        map.setView(DEFAULT_MAP_CENTRE, DEFAULT_MAP_ZOOM);
+        if (fitView) map.setView(DEFAULT_MAP_CENTRE, DEFAULT_MAP_ZOOM);
         return;
     }
 
@@ -241,6 +252,8 @@ export function renderSpotsOnMap({
         circle.addTo(spotLayer);
         marker.addTo(spotLayer);
     }
+
+    if (!fitView) return;
 
     if (bounds.length === 1) {
         map.setView(bounds[0], 13);

@@ -9,6 +9,7 @@ const { createReusableSpotMap } = await import(moduleUrl);
 
 function makeLeaflet() {
     const map = {
+        createOptions: null,
         fitBoundsCalls: [],
         setViewCalls: [],
         fitBounds(bounds, options) {
@@ -46,7 +47,10 @@ function makeLeaflet() {
         map,
         spotLayer,
         L: {
-            map: () => map,
+            map: (_mapEl, options) => {
+                map.createOptions = options;
+                return map;
+            },
             tileLayer: () => ({ addTo() {} }),
             layerGroup: () => spotLayer,
             circle: makeLayer,
@@ -56,7 +60,7 @@ function makeLeaflet() {
     };
 }
 
-function createMap(spots) {
+function createMap(spots, options = {}) {
     const leaflet = makeLeaflet();
     globalThis.window = { L: leaflet.L };
     const api = createReusableSpotMap({
@@ -66,6 +70,7 @@ function createMap(spots) {
         spots,
         onSpotCentreClick: () => {},
         radiusInteractive: false,
+        ...options,
     });
     return { api, ...leaflet };
 }
@@ -96,4 +101,25 @@ test('unlocated drafts are excluded instead of being treated as latitude 0 longi
 
     assert.equal(map.fitBoundsCalls.length, 0);
     assert.deepEqual(map.setViewCalls, [{ centre: [locatedSpot.lat, locatedSpot.long], zoom: 13 }]);
+});
+
+test('the exact Null Island placeholder is excluded from overview bounds', () => {
+    const locatedSpot = { id: 2, lat: 55.84, long: -5.05, radius: 100 };
+    const { map } = createMap([
+        { id: 1, lat: 0, long: 0, radius: 25 },
+        locatedSpot,
+    ]);
+
+    assert.equal(map.fitBoundsCalls.length, 0);
+    assert.deepEqual(map.setViewCalls, [{ centre: [locatedSpot.lat, locatedSpot.long], zoom: 13 }]);
+});
+
+test('a reusable map can override the global zoom-out floor', () => {
+    const { map } = createMap([
+        { id: 1, lat: 55.84, long: -5.05, radius: 100 },
+        { id: 2, lat: -33.87, long: 151.21, radius: 100 },
+    ], { minZoom: 0 });
+
+    assert.equal(map.createOptions.minZoom, 0);
+    assert.equal(map.fitBoundsCalls.length, 1);
 });

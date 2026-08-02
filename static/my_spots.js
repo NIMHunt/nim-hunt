@@ -18,7 +18,7 @@ import {
     spotScheduleSummary,
     unixToText,
 } from './spot_ui.js?v=special-user-badge-v1-20260727';
-import { createReusableSpotMap } from './spot_map.js?v=marker-white-outline-v1-20260723';
+import { createReusableSpotMap } from './spot_map.js?v=map-view-cache-v2-20260802';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=single-open-details-v1-20260722';
 import {

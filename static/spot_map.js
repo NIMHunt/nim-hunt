@@ -11,7 +11,9 @@ function validSpotCoordinate(spot) {
     if (!hasCoordinateValue(spot?.lat) || !hasCoordinateValue(spot?.long)) return false;
     const lat = Number(spot.lat);
     const long = Number(spot.long);
-    return Number.isFinite(lat) && Number.isFinite(long);
+    return Number.isFinite(lat)
+        && Number.isFinite(long)
+        && !(lat === 0 && long === 0);
 }
 
 function spotLatLng(spot) {
@@ -122,13 +124,20 @@ export function createReusableSpotMap({
     onSpotCentreClick = null,
     radiusInteractive = true,
     highlightColour = '#0582ca',
+    minZoom = null,
 }) {
     if (!mapEl || !window.L) return null;
 
-    const map = window.L.map(mapEl, {
+    const mapOptions = {
         zoomControl: true,
         attributionControl: true,
-    });
+    };
+    const requestedMinZoom = Number(minZoom);
+    if (minZoom !== null && minZoom !== undefined && Number.isFinite(requestedMinZoom)) {
+        mapOptions.minZoom = requestedMinZoom;
+    }
+
+    const map = window.L.map(mapEl, mapOptions);
 
     window.L.tileLayer(tileUrl, {
         attribution: tileAttribution,

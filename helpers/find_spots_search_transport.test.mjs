@@ -7,13 +7,16 @@ const source = await readFile(sourceUrl, 'utf8');
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
 const {
     createFindSpotsSearchTransport,
+    longitudeForViewport,
     longitudeSearchRanges,
     mergeSpotSearchPayloads,
+    spotSearchViewport,
     wrappedSpotSearchUrls,
 } = await import(moduleUrl);
 
-function searchUrl(minLong, maxLong) {
-    return `/api/spots/search?min_lat=-20&max_lat=20&min_long=${minLong}&max_long=${maxLong}&limit=150`;
+function searchUrl(minLong, maxLong, distanceLong = null) {
+    const distance = distanceLong === null ? '' : `&distance_long=${distanceLong}`;
+    return `/api/spots/search?min_lat=-20&max_lat=20&min_long=${minLong}&max_long=${maxLong}&limit=150${distance}`;
 }
 
 function response(payload, status = 200) {
@@ -50,21 +53,32 @@ test('a viewport spanning the whole world uses one full-world search', () => {
     ]);
 });
 
-test('wrapped search URLs preserve other parameters and stay inside API limits', () => {
-    const urls = wrappedSpotSearchUrls(searchUrl(170, 190), 'https://nimhunt.example');
+test('wrapped search URLs preserve parameters and normalise test-location longitude', () => {
+    const urls = wrappedSpotSearchUrls(searchUrl(170, 190, 545), 'https://nimhunt.example');
 
     assert.equal(urls.length, 2);
     assert.deepEqual(urls.map((url) => [
         Number(url.searchParams.get('min_long')),
         Number(url.searchParams.get('max_long')),
+        Number(url.searchParams.get('distance_long')),
         url.searchParams.get('limit'),
     ]), [
-        [170, 180, '150'],
-        [-180, -170, '150'],
+        [170, 180, -175, '150'],
+        [-180, -170, -175, '150'],
     ]);
 });
 
-test('split search responses are merged, deduplicated and sorted', async () => {
+test('canonical Spot longitudes are projected into the visible repeated world', () => {
+    const firstCopy = spotSearchViewport(searchUrl(170, 190), 'https://nimhunt.example');
+    const laterCopy = spotSearchViewport(searchUrl(530, 550), 'https://nimhunt.example');
+
+    assert.equal(longitudeForViewport(-175, firstCopy), 185);
+    assert.equal(longitudeForViewport(175, firstCopy), 175);
+    assert.equal(longitudeForViewport(-175, laterCopy), 545);
+    assert.equal(longitudeForViewport(175, laterCopy), 535);
+});
+
+test('split search responses are merged, deduplicated, sorted and projected', async () => {
     const calls = [];
     const fetchImpl = async (input) => {
         const url = new URL(input);
@@ -74,16 +88,16 @@ test('split search responses are merged, deduplicated and sorted', async () => {
             return response({
                 ok: true,
                 spots: [
-                    { id: 2, status_label: 'upcoming', starts_at: 200 },
-                    { id: 1, status_label: 'active', starts_at: 300 },
+                    { id: 2, long: 175, status_label: 'upcoming', starts_at: 200 },
+                    { id: 1, long: 176, status_label: 'active', starts_at: 300 },
                 ],
             });
         }
         return response({
             ok: true,
             spots: [
-                { id: 1, status_label: 'active', starts_at: 300 },
-                { id: 3, status_label: 'active', starts_at: 100 },
+                { id: 1, long: 176, status_label: 'active', starts_at: 300 },
+                { id: 3, long: -175, status_label: 'active', starts_at: 100 },
             ],
         });
     };
@@ -97,6 +111,7 @@ test('split search responses are merged, deduplicated and sorted', async () => {
 
     assert.equal(calls.length, 2);
     assert.deepEqual(payload.spots.map((spot) => spot.id), [3, 1, 2]);
+    assert.deepEqual(payload.spots.map((spot) => spot.long), [185, 176, 175]);
 });
 
 test('repeated failures reuse the last successful result without repeating the blocking error', async () => {
@@ -104,7 +119,10 @@ test('repeated failures reuse the last successful result without repeating the b
     let suppressedCount = 0;
     const fetchImpl = async () => {
         if (mode === 'success') {
-            return response({ ok: true, spots: [{ id: 7, status_label: 'active' }] });
+            return response({
+                ok: true,
+                spots: [{ id: 7, long: -175, status_label: 'active' }],
+            });
         }
         if (mode === 'http-failure') return response({ detail: 'Temporary failure' }, 503);
         throw new Error('Network unavailable');
@@ -115,16 +133,18 @@ test('repeated failures reuse the last successful result without repeating the b
         onSuppressedFailure: () => { suppressedCount += 1; },
     });
 
-    const firstSuccess = await transport.fetch(searchUrl(-10, 10));
-    assert.equal((await firstSuccess.json()).spots[0].id, 7);
+    const firstSuccess = await transport.fetch(searchUrl(170, 190));
+    assert.equal((await firstSuccess.json()).spots[0].long, 185);
 
     mode = 'http-failure';
-    const firstFailure = await transport.fetch(searchUrl(-10, 10));
+    const firstFailure = await transport.fetch(searchUrl(170, 190));
     assert.equal(firstFailure.status, 503, 'the page should show one visible warning');
 
-    const repeatedFailure = await transport.fetch(searchUrl(-10, 10));
+    const repeatedFailure = await transport.fetch(searchUrl(530, 550));
     assert.equal(repeatedFailure.status, 200);
-    assert.deepEqual((await repeatedFailure.json()).spots.map((spot) => spot.id), [7]);
+    const fallbackPayload = await repeatedFailure.json();
+    assert.deepEqual(fallbackPayload.spots.map((spot) => spot.id), [7]);
+    assert.deepEqual(fallbackPayload.spots.map((spot) => spot.long), [545]);
     assert.equal(suppressedCount, 1);
 
     mode = 'success';

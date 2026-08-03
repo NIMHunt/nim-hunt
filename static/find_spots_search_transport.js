@@ -4,8 +4,23 @@ const MAX_LONGITUDE = 180;
 const WORLD_LONGITUDE_SPAN = 360;
 
 function finiteNumber(value) {
+    if (
+        value === null
+        || value === undefined
+        || (typeof value === 'string' && value.trim() === '')
+    ) {
+        return null;
+    }
+
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
+}
+
+function requestUrl(input, origin) {
+    const rawUrl = typeof input === 'string' || input instanceof URL
+        ? input
+        : input?.url;
+    return rawUrl ? new URL(rawUrl, origin) : null;
 }
 
 export function wrapLongitude(value) {
@@ -42,14 +57,51 @@ export function longitudeSearchRanges(minLong, maxLong) {
     ];
 }
 
-export function wrappedSpotSearchUrls(input, origin = 'http://localhost') {
-    const rawUrl = typeof input === 'string' || input instanceof URL
-        ? input
-        : input?.url;
-    if (!rawUrl) return [];
+export function spotSearchViewport(input, origin = 'http://localhost') {
+    const url = requestUrl(input, origin);
+    if (!url || url.pathname !== SPOT_SEARCH_PATH) return null;
 
-    const url = new URL(rawUrl, origin);
-    if (url.pathname !== SPOT_SEARCH_PATH) return [];
+    const west = finiteNumber(url.searchParams.get('min_long'));
+    const rawEast = finiteNumber(url.searchParams.get('max_long'));
+    if (west === null || rawEast === null) return null;
+
+    let width = rawEast - west;
+    while (width < 0) width += WORLD_LONGITUDE_SPAN;
+
+    return {
+        west,
+        east: west + width,
+        centre: west + (width / 2),
+        width,
+    };
+}
+
+export function longitudeForViewport(value, viewport) {
+    const longitude = wrapLongitude(value);
+    const centre = finiteNumber(viewport?.centre);
+    if (longitude === null || centre === null) return value;
+
+    const worldOffset = Math.round((centre - longitude) / WORLD_LONGITUDE_SPAN);
+    return longitude + (worldOffset * WORLD_LONGITUDE_SPAN);
+}
+
+export function projectSpotSearchPayload(payload, viewport) {
+    const safePayload = payload && typeof payload === 'object'
+        ? payload
+        : { ok: true, spots: [] };
+
+    return {
+        ...safePayload,
+        spots: (Array.isArray(safePayload.spots) ? safePayload.spots : []).map((spot) => ({
+            ...spot,
+            long: longitudeForViewport(spot?.long, viewport),
+        })),
+    };
+}
+
+export function wrappedSpotSearchUrls(input, origin = 'http://localhost') {
+    const url = requestUrl(input, origin);
+    if (!url || url.pathname !== SPOT_SEARCH_PATH) return [];
 
     const ranges = longitudeSearchRanges(
         url.searchParams.get('min_long'),
@@ -57,10 +109,17 @@ export function wrappedSpotSearchUrls(input, origin = 'http://localhost') {
     );
     if (ranges.length === 0) return [url];
 
+    const distanceLongitude = url.searchParams.has('distance_long')
+        ? wrapLongitude(url.searchParams.get('distance_long'))
+        : null;
+
     return ranges.map(({ minLong, maxLong }) => {
         const nextUrl = new URL(url);
         nextUrl.searchParams.set('min_long', String(minLong));
         nextUrl.searchParams.set('max_long', String(maxLong));
+        if (distanceLongitude !== null) {
+            nextUrl.searchParams.set('distance_long', String(distanceLongitude));
+        }
         return nextUrl;
     });
 }
@@ -129,14 +188,18 @@ export function createFindSpotsSearchTransport({
     let lastSuccessfulPayload = { ok: true, spots: [] };
     let failureAlreadyReported = false;
 
-    const fallbackResponse = (error) => {
+    const fallbackResponse = (error, viewport) => {
         onSuppressedFailure?.(error);
-        return jsonResponse(lastSuccessfulPayload, ResponseCtor);
+        return jsonResponse(
+            projectSpotSearchPayload(lastSuccessfulPayload, viewport),
+            ResponseCtor,
+        );
     };
 
     const fetchSearch = async (input, options = {}) => {
         const urls = wrappedSpotSearchUrls(input, origin);
         if (urls.length === 0) return fetchImpl(input, options);
+        const viewport = spotSearchViewport(input, origin);
 
         try {
             const responses = await Promise.all(
@@ -144,7 +207,7 @@ export function createFindSpotsSearchTransport({
             );
             const failedResponse = responses.find((response) => !response.ok);
             if (failedResponse) {
-                if (failureAlreadyReported) return fallbackResponse(failedResponse);
+                if (failureAlreadyReported) return fallbackResponse(failedResponse, viewport);
                 failureAlreadyReported = true;
                 return failedResponse;
             }
@@ -155,15 +218,17 @@ export function createFindSpotsSearchTransport({
             lastSuccessfulPayload = mergeSpotSearchPayloads(payloads);
             failureAlreadyReported = false;
 
-            if (responses.length === 1) return responses[0];
-            return jsonResponse(lastSuccessfulPayload, ResponseCtor);
+            return jsonResponse(
+                projectSpotSearchPayload(lastSuccessfulPayload, viewport),
+                ResponseCtor,
+            );
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
             if (!failureAlreadyReported) {
                 failureAlreadyReported = true;
                 throw error;
             }
-            return fallbackResponse(error);
+            return fallbackResponse(error, viewport);
         }
     };
 

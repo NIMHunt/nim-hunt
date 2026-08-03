@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "check": "node --check nimiq_helper.mjs && node --check transaction_data.mjs",
-    "test": "node --test transaction_data.test.mjs localisation.test.mjs prizedraw_rules.test.mjs static_localisation.test.mjs helper_safety.test.mjs helper_rpc_send.test.mjs helper_rpc_failure.test.mjs nimiq_payment.test.mjs keyed_reconcile.test.mjs spot_map_view.test.mjs"
+    "test": "node --test transaction_data.test.mjs localisation.test.mjs prizedraw_rules.test.mjs static_localisation.test.mjs helper_safety.test.mjs helper_rpc_send.test.mjs helper_rpc_failure.test.mjs nimiq_payment.test.mjs keyed_reconcile.test.mjs spot_map_view.test.mjs find_spots_search_transport.test.mjs my_spots_world_wrap.test.mjs"
   },
   "dependencies": {
     "@nimiq/core": "2.7.1"

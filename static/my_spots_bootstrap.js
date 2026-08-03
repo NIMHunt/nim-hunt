@@ -1,0 +1,2 @@
+import './my_spots_world_wrap_install.js?v=my-spots-world-wrap-v1-20260803';
+import './my_spots.js?v=my-spots-world-wrap-v1-20260803';

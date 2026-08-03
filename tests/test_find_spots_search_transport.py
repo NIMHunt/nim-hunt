@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CACHE_VERSION = "wrapped-search-v1-20260803"
+TRANSPORT_CACHE_VERSION = "wrapped-search-v1-20260803"
+BOOTSTRAP_CACHE_VERSION = "initial-view-v1-20260803"
+PAGE_CACHE_VERSION = "wrapped-search-v2-20260803"
 
 
 def source(path: str) -> str:
@@ -16,18 +18,18 @@ def test_find_spots_loads_the_search_transport_before_the_page_module():
     installer = source("static/find_spots_search_transport_install.js")
 
     assert (
-        f"/static/find_spots_bootstrap.js?v={CACHE_VERSION}"
+        f"/static/find_spots_bootstrap.js?v={BOOTSTRAP_CACHE_VERSION}"
         in template
     )
     assert 'src="/static/find_spots.js?' not in template
     assert (
-        f"./find_spots_search_transport_install.js?v={CACHE_VERSION}"
+        f"./find_spots_search_transport_install.js?v={TRANSPORT_CACHE_VERSION}"
         in bootstrap
     )
-    assert f"./find_spots.js?v={CACHE_VERSION}" in bootstrap
+    assert f"./find_spots.js?v={PAGE_CACHE_VERSION}" in bootstrap
     assert bootstrap.index("find_spots_search_transport_install.js") < bootstrap.index("find_spots.js")
     assert (
-        f"./find_spots_search_transport.js?v={CACHE_VERSION}"
+        f"./find_spots_search_transport.js?v={TRANSPORT_CACHE_VERSION}"
         in installer
     )
     assert "installFindSpotsSearchTransport();" in installer

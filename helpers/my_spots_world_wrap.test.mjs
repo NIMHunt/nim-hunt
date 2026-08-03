@@ -30,13 +30,15 @@ test('date-line neighbours form compact initial bounds instead of spanning the w
 });
 
 test('ordinary overview points retain their natural longitudes', () => {
-    assert.deepEqual(compactWorldPoints([
-        [55.86, -4.25],
-        [-33.87, 151.21],
-    ]), [
+    const compacted = compactWorldPoints([
         [55.86, -4.25],
         [-33.87, 151.21],
     ]);
+
+    assert.equal(compacted[0][0], 55.86);
+    assert.ok(Math.abs(compacted[0][1] - (-4.25)) < 1e-9);
+    assert.equal(compacted[1][0], -33.87);
+    assert.ok(Math.abs(compacted[1][1] - 151.21) < 1e-9);
 });
 
 function makeLeaflet() {

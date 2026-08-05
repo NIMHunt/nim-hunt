@@ -1,0 +1,33 @@
+name: Apply Spot duplication patch
+
+on:
+  push:
+    branches:
+      - agent/duplicate-spots-as-drafts
+    paths:
+      - .github/workflows/apply-spot-duplicate-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/duplicate-spots-as-drafts
+          fetch-depth: 0
+
+      - name: Apply feature patch
+        run: python tools/apply_spot_duplicate_patch.py
+
+      - name: Commit feature
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add Spot duplication workflow"
+          git push origin HEAD:agent/duplicate-spots-as-drafts

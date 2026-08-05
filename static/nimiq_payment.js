@@ -86,7 +86,6 @@ export async function requestNimiqPayment(provider, intent) {
         recipient: String(intent?.recipient || '').trim(),
         value: amount,
         data: String(intent?.transaction_description || ''),
-        validityStartHeight: walletHeight,
     }));
 
     // The documented provider contract returns the hash directly as a string.

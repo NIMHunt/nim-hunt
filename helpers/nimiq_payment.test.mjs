@@ -23,13 +23,33 @@ function provider(overrides = {}) {
   };
 }
 
-test('deposit uses the documented direct hash response and current validity height', async () => {
+test('deposit checks the current height but lets Nimiq Pay choose its validity start height', async () => {
   const nimiq = provider();
   const payment = await requestNimiqPayment(nimiq, INTENT);
   assert.equal(payment.txHash, HASH);
   assert.equal(payment.fromAddress, 'NQ FUNDING');
-  assert.equal(nimiq.calls[3][1].validityStartHeight, 5002);
+  assert.equal(payment.walletHeight, 5002);
+  assert.equal(Object.hasOwn(nimiq.calls[3][1], 'validityStartHeight'), false);
   assert.equal(nimiq.calls.filter(call => Array.isArray(call) && call[0] === 'send').length, 1);
+});
+
+test('rapid consecutive deposits never pin a stale wallet validity window', async () => {
+  let sendCount = 0;
+  const nimiq = provider({
+    async sendBasicTransactionWithData(request) {
+      this.calls.push(['send', request]);
+      assert.equal(Object.hasOwn(request, 'validityStartHeight'), false);
+      sendCount += 1;
+      return (sendCount === 1 ? 'ab' : 'cd').repeat(32);
+    },
+  });
+
+  const first = await requestNimiqPayment(nimiq, INTENT);
+  const second = await requestNimiqPayment(nimiq, INTENT);
+
+  assert.equal(first.txHash, 'ab'.repeat(32));
+  assert.equal(second.txHash, 'cd'.repeat(32));
+  assert.equal(sendCount, 2);
 });
 
 test('wrapped result data is never mistaken for a transaction hash', async () => {

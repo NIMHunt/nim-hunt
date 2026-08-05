@@ -19,6 +19,10 @@ import {
     unixToText,
 } from './spot_ui.js?v=special-user-badge-v1-20260727';
 import { createReusableSpotMap } from './spot_map.js?v=my-spots-overview-v3-20260802';
+import {
+    mySpotsMapColourForSpot,
+    spotsVisibleOnMySpotsMap,
+} from './my_spots_map_policy.js?v=my-spots-map-status-v1-20260805';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=single-open-details-v1-20260722';
 import {
@@ -996,17 +1000,6 @@ function openSpotPage(spot) {
     window.location.href = href;
 }
 
-const MY_SPOTS_MAP_COLOURS = {
-    activeStandard: '#21bca5',
-    activePrizedraw: '#ffc435',
-    muted: '#8c90a8',
-};
-
-function mySpotsMapColourForSpot(spot) {
-    if (spot?.status_label !== 'active') return MY_SPOTS_MAP_COLOURS.muted;
-    return spot.is_prizedraw ? MY_SPOTS_MAP_COLOURS.activePrizedraw : MY_SPOTS_MAP_COLOURS.activeStandard;
-}
-
 function renderMap(spots) {
     try {
         if (!state.spotMap) {
@@ -1407,7 +1400,7 @@ function renderLoadedMySpots(data) {
     const spots = Array.isArray(data.spots) ? data.spots : [];
     state.draftSpotCount = Number(data.draft_count ?? spots.filter((spot) => spot.status_label === 'draft').length);
     syncCreateSpotAvailability();
-    renderMap(spots);
+    renderMap(spotsVisibleOnMySpotsMap(spots));
     renderSpots(spots);
 }
 

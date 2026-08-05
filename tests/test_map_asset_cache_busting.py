@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MY_SPOTS_OVERVIEW_CACHE_VERSION = "my-spots-overview-v3-20260802"
-MY_SPOTS_BOOTSTRAP_CACHE_VERSION = "my-spots-world-wrap-v1-20260803"
+MY_SPOTS_BOOTSTRAP_CACHE_VERSION = "my-spots-map-status-v1-20260805"
 
 
 def source(path: str) -> str:

@@ -27,6 +27,7 @@ from funding_flow import funding_flow_diagnostics
 from funding_flow import install as install_funding_flow
 from public_html import render_not_found_page
 from public_html import router as public_router
+from spot_duplicate import router as spot_duplicate_router
 
 install_funding_flow()
 
@@ -457,6 +458,7 @@ app = FastAPI(title=const.APP_NAME, lifespan=lifespan)
 app.add_middleware(social_preview.SocialPreviewMiddleware)
 app.mount("/static", StaticFiles(directory=str(const.STATIC_DIR)), name="static")
 app.include_router(public_router)
+app.include_router(spot_duplicate_router)
 app.include_router(social_preview.router)
 
 

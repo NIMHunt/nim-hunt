@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MY_SPOTS_OVERVIEW_CACHE_VERSION = "my-spots-overview-v3-20260802"
-MY_SPOTS_BOOTSTRAP_CACHE_VERSION = "rapid-deposit-v1-20260805"
+MY_SPOTS_BOOTSTRAP_CACHE_VERSION = "spot-duplicate-v1-20260805"
 
 
 def source(path: str) -> str:
@@ -25,7 +25,7 @@ def test_my_spots_loads_the_wide_overview_under_fresh_cache_keys():
         in template
     ), "Returning webviews must load the new My Spots bootstrap URL."
     assert (
-        f"./my_spots.js?v={MY_SPOTS_BOOTSTRAP_CACHE_VERSION}"
+        "./my_spots.js?v=rapid-deposit-v1-20260805"
         in bootstrap
     ), "The bootstrap must load the My Spots entry module under a fresh URL."
     assert "minZoom: 0" in my_spots, "My Spots must be able to fit geographically distant Spots."

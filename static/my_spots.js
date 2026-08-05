@@ -1,6 +1,10 @@
 import { init, requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
 import { reconcileKeyedItems } from './keyed_reconcile.js?v=blockchain-flow-v1-20260720';
-import { requestNimiqPayment } from './nimiq_payment.js?v=blockchain-flow-v1-20260720';
+import { requestNimiqPayment } from './nimiq_payment.js?v=rapid-deposit-v1-20260805';
+import {
+    createPendingDepositStore,
+    recoverPendingDepositQueue,
+} from './pending_deposit_store.js?v=rapid-deposit-v1-20260805';
 import {
     appendBulletLine,
     appendDetailDescription,
@@ -22,7 +26,7 @@ import { createReusableSpotMap } from './spot_map.js?v=my-spots-overview-v3-2026
 import {
     mySpotsMapColourForSpot,
     spotsVisibleOnMySpotsMap,
-} from './my_spots_map_policy.js?v=my-spots-map-status-v1-20260805';
+} from './my_spots_map_policy.js?v=rapid-deposit-v1-20260805';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=single-open-details-v1-20260722';
 import {
@@ -1077,40 +1081,26 @@ async function openDepositModal(spot) {
     }
 }
 
-const PENDING_DEPOSIT_STORAGE_KEY = 'nimhunt.pendingDepositSubmission.v2';
-const OBSOLETE_PENDING_DEPOSIT_STORAGE_KEY = 'nimhunt.pendingDepositSubmission.v1';
 const RETRYABLE_DEPOSIT_RECORDING_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
+const pendingDepositStore = (() => {
+    try {
+        return createPendingDepositStore(window.sessionStorage);
+    } catch (_err) {
+        return createPendingDepositStore(null);
+    }
+})();
+
 function savePendingDepositSubmission(record) {
-    try {
-        sessionStorage.setItem(PENDING_DEPOSIT_STORAGE_KEY, JSON.stringify(record));
-    } catch (_err) {
-        // Some private WebViews disable storage. The immediate retry still works.
-    }
+    return pendingDepositStore.save(record);
 }
 
-function clearPendingDepositSubmission() {
-    try {
-        sessionStorage.removeItem(PENDING_DEPOSIT_STORAGE_KEY);
-    } catch (_err) {
-        // Nothing else is required.
-    }
+function clearPendingDepositSubmission(record) {
+    return pendingDepositStore.remove(record);
 }
 
-function readPendingDepositSubmission() {
-    try {
-        // PR #29 used a broad provider-response parser. Never replay hashes stored
-        // by that implementation because they might not identify a transaction.
-        sessionStorage.removeItem(OBSOLETE_PENDING_DEPOSIT_STORAGE_KEY);
-        const raw = sessionStorage.getItem(PENDING_DEPOSIT_STORAGE_KEY);
-        if (!raw) return null;
-        const value = JSON.parse(raw);
-        if (!value?.spotId || !value?.txHash || !value?.amount) return null;
-        return value;
-    } catch (_err) {
-        clearPendingDepositSubmission();
-        return null;
-    }
+function readPendingDepositSubmissions() {
+    return pendingDepositStore.load();
 }
 
 function depositRecordingIsRetryable(err) {
@@ -1143,17 +1133,22 @@ async function submitDepositRecording(record, { retry = true } = {}) {
     }
 }
 
-async function recoverPendingDepositSubmission() {
-    const record = readPendingDepositSubmission();
-    if (!record) return false;
-    try {
-        await submitDepositRecording(record, { retry: true });
-        clearPendingDepositSubmission();
-        return true;
-    } catch (err) {
-        console.warn('NimHunt could not recover the submitted deposit record yet.', err);
-        return false;
+async function recoverPendingDepositSubmissions() {
+    if (readPendingDepositSubmissions().length === 0) return false;
+
+    const result = await recoverPendingDepositQueue({
+        store: pendingDepositStore,
+        submit: (record) => submitDepositRecording(record, { retry: true }),
+    });
+
+    for (const failure of result.failures) {
+        console.warn(
+            'NimHunt could not recover one submitted deposit record yet.',
+            failure.error,
+        );
     }
+
+    return result.recoveredCount > 0;
 }
 
 async function requestDepositPayment(intent) {
@@ -1181,7 +1176,7 @@ async function confirmDeposit() {
         };
         savePendingDepositSubmission(submittedRecord);
         await submitDepositRecording(submittedRecord, { retry: true });
-        clearPendingDepositSubmission();
+        clearPendingDepositSubmission(submittedRecord);
 
         state.depositInProgress = false;
         els.depositBackdrop.hidden = true;
@@ -1474,7 +1469,7 @@ async function initMySpots() {
     }
 
     renderLoadedMySpots(data);
-    if (await recoverPendingDepositSubmission()) {
+    if (await recoverPendingDepositSubmissions()) {
         renderLoadedMySpots(await loadMySpots());
     }
     scheduleMySpotsRefresh();

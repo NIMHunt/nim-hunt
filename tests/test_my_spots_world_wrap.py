@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORLD_WRAP_CACHE_VERSION = "my-spots-world-wrap-v1-20260803"
-PAGE_CACHE_VERSION = "my-spots-map-status-v1-20260805"
+PAGE_CACHE_VERSION = "rapid-deposit-v1-20260805"
 
 
 def source(path: str) -> str:

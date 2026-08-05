@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE_VERSION = "rapid-deposit-v1-20260805"
+BOOTSTRAP_CACHE_VERSION = "spot-duplicate-v1-20260805"
 
 
 def source(path: str) -> str:
@@ -40,5 +41,5 @@ def test_returning_webviews_receive_the_rapid_deposit_fix():
 
     assert f"./nimiq_payment.js?v={CACHE_VERSION}" in page
     assert f"./my_spots.js?v={CACHE_VERSION}" in bootstrap
-    assert f"/static/my_spots_bootstrap.js?v={CACHE_VERSION}-" in template
+    assert f"/static/my_spots_bootstrap.js?v={BOOTSTRAP_CACHE_VERSION}-" in template
     assert "./nimiq_payment.js?v=blockchain-flow-v1-20260720" not in page

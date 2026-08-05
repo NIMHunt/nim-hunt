@@ -44,7 +44,7 @@ infrastructure.
 - **Scheduling** — configure a future start and a fixed active duration.
 - **Participation limits** — set total participants and per-user limits.
 - **Creation fees** — charge separate configurable fees for Standard Spots and Prizedraws.
-- **Creator tools** — inspect drafts, deposits, publishing state, claim codes and history.
+- **Creator tools** — inspect drafts, deposits, publishing state, claim codes and history; duplicate any owned Spot into a clean, editable draft.
 - **Claim history** — users can review pending, successful and failed claims.
 - **On-chain descriptions** — NimHunt-generated transactions include short Spot labels.
 - **Optional X announcements** — automatically announce newly-active Spots through a configured account.

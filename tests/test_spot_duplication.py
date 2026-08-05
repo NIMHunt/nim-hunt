@@ -151,6 +151,7 @@ class SpotDuplicationTests(unittest.IsolatedAsyncioTestCase):
                 country="United Kingdom",
                 auto_reverse_geocode=False,
             )
+            await db.commit()
             async with db_access.transaction(db, immediate=True):
                 copy_id = await duplicate_owned_spot_as_draft(
                     db,

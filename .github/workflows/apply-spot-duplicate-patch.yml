@@ -21,6 +21,19 @@ jobs:
           ref: agent/duplicate-spots-as-drafts
           fetch-depth: 0
 
+      - name: Correct staging-script cache assertion
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tools/apply_spot_duplicate_patch.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              '{{MY_SPOTS_BOOTSTRAP_CACHE_VERSION}}',
+              '{MY_SPOTS_BOOTSTRAP_CACHE_VERSION}',
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+
       - name: Apply feature patch
         run: python tools/apply_spot_duplicate_patch.py
 

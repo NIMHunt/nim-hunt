@@ -52,7 +52,7 @@ class SpotDuplicationTests(unittest.IsolatedAsyncioTestCase):
                     claim_duration=600,
                     max_claims_per_user=2,
                     max_total_claims=3,
-                    total_value=3 * const.MIN_STANDARD_CLAIM_PAYOUT,
+                    total_value=const.MIN_SPOT_TOTAL_VALUE,
                     starts_at=now - 100,
                     ends_at=7 * 24 * 60 * 60,
                     use_password=True,

@@ -1,0 +1,216 @@
+diff --git a/static/my_spots.js b/static/my_spots.js
+--- a/static/my_spots.js
++++ b/static/my_spots.js
+@@ -19,6 +19,10 @@
+     unixToText,
+ } from './spot_ui.js?v=special-user-badge-v1-20260727';
+ import { createReusableSpotMap } from './spot_map.js?v=my-spots-overview-v3-20260802';
++import {
++    mySpotsMapColourForSpot,
++    spotsVisibleOnMySpotsMap,
++} from './my_spots_map_policy.js?v=my-spots-map-status-v1-20260805';
+ import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
+ import { getCommonText, getSpotText, makeMySpotsText } from './interface_text.js?v=single-open-details-v1-20260722';
+ import {
+@@ -38,17 +42,6 @@
+     const href = spotHrefFromMySpots(spot);
+     if (!href) return;
+     window.location.href = href;
+-}
+-
+-const MY_SPOTS_MAP_COLOURS = {
+-    activeStandard: '#21bca5',
+-    activePrizedraw: '#ffc435',
+-    muted: '#8c90a8',
+-};
+-
+-function mySpotsMapColourForSpot(spot) {
+-    if (spot?.status_label !== 'active') return MY_SPOTS_MAP_COLOURS.muted;
+-    return spot.is_prizedraw ? MY_SPOTS_MAP_COLOURS.activePrizedraw : MY_SPOTS_MAP_COLOURS.activeStandard;
+ }
+ 
+ function renderMap(spots) {
+@@ -77,7 +70,7 @@
+     const spots = Array.isArray(data.spots) ? data.spots : [];
+     state.draftSpotCount = Number(data.draft_count ?? spots.filter((spot) => spot.status_label === 'draft').length);
+     syncCreateSpotAvailability();
+-    renderMap(spots);
++    renderMap(spotsVisibleOnMySpotsMap(spots));
+     renderSpots(spots);
+ }
+ 
+diff --git a/static/my_spots_map_policy.js b/static/my_spots_map_policy.js
+new file mode 100644
+--- /dev/null
++++ b/static/my_spots_map_policy.js
+@@ -0,0 +1,31 @@
++export const MY_SPOTS_MAP_COLOURS = Object.freeze({
++    activeStandard: '#21bca5',
++    activePrizedraw: '#ffc435',
++    completed: '#0582ca',
++    cancelled: '#d94432',
++    muted: '#8c90a8',
++});
++
++export function mySpotEndHasElapsed(spot, nowSeconds = Math.floor(Date.now() / 1000)) {
++    const endsAt = Number(spot?.ends_at);
++    const now = Number(nowSeconds);
++    return Number.isFinite(endsAt)
++        && endsAt > 0
++        && Number.isFinite(now)
++        && endsAt <= now;
++}
++
++export function spotsVisibleOnMySpotsMap(spots, nowSeconds = Math.floor(Date.now() / 1000)) {
++    if (!Array.isArray(spots)) return [];
++    return spots.filter((spot) => !mySpotEndHasElapsed(spot, nowSeconds));
++}
++
++export function mySpotsMapColourForSpot(spot) {
++    const status = String(spot?.status_label || '').trim().toLowerCase();
++    if (status === 'completed') return MY_SPOTS_MAP_COLOURS.completed;
++    if (status === 'cancelled') return MY_SPOTS_MAP_COLOURS.cancelled;
++    if (status !== 'active') return MY_SPOTS_MAP_COLOURS.muted;
++    return spot.is_prizedraw
++        ? MY_SPOTS_MAP_COLOURS.activePrizedraw
++        : MY_SPOTS_MAP_COLOURS.activeStandard;
++}
+diff --git a/static/my_spots_bootstrap.js b/static/my_spots_bootstrap.js
+--- a/static/my_spots_bootstrap.js
++++ b/static/my_spots_bootstrap.js
+@@ -1,2 +1,2 @@
+ import './my_spots_world_wrap_install.js?v=my-spots-world-wrap-v1-20260803';
+-import './my_spots.js?v=my-spots-world-wrap-v1-20260803';
++import './my_spots.js?v=my-spots-map-status-v1-20260805';
+diff --git a/templates/my_spots.html b/templates/my_spots.html
+--- a/templates/my_spots.html
++++ b/templates/my_spots.html
+@@ -145,7 +145,7 @@
+     <script type="module" src="/static/localise_page.js?v=deposit-recording-v1-20260720-{{ asset_version | default('localisation-v1-20260717') }}"></script>
+     <script src="{{ leaflet_js_url }}"></script>
+     <script src="/static/map_zoom_guard.js?v=success-code-map-zoom-v1-20260721"></script>
+-    <script type="module" src="/static/my_spots_bootstrap.js?v=my-spots-world-wrap-v1-20260803-{{ asset_version | default('publish-confirm-v1-20260701') }}"></script>
++    <script type="module" src="/static/my_spots_bootstrap.js?v=my-spots-map-status-v1-20260805-{{ asset_version | default('publish-confirm-v1-20260701') }}"></script>
+     <script type="module" src="/static/x_share.js?v=x-share-v4-20260726"></script>
+ </body>
+ </html>
+diff --git a/helpers/package.json b/helpers/package.json
+--- a/helpers/package.json
++++ b/helpers/package.json
+@@ -4,7 +4,7 @@
+   "type": "module",
+   "scripts": {
+     "check": "node --check nimiq_helper.mjs && node --check transaction_data.mjs",
+-    "test": "node --test transaction_data.test.mjs localisation.test.mjs prizedraw_rules.test.mjs static_localisation.test.mjs helper_safety.test.mjs helper_rpc_send.test.mjs helper_rpc_failure.test.mjs nimiq_payment.test.mjs keyed_reconcile.test.mjs spot_map_view.test.mjs find_spots_search_transport.test.mjs my_spots_world_wrap.test.mjs find_spots_initial_view.test.mjs"
++    "test": "node --test transaction_data.test.mjs localisation.test.mjs prizedraw_rules.test.mjs static_localisation.test.mjs helper_safety.test.mjs helper_rpc_send.test.mjs helper_rpc_failure.test.mjs nimiq_payment.test.mjs keyed_reconcile.test.mjs spot_map_view.test.mjs find_spots_search_transport.test.mjs my_spots_world_wrap.test.mjs my_spots_map_policy.test.mjs find_spots_initial_view.test.mjs"
+   },
+   "dependencies": {
+     "@nimiq/core": "2.7.1"
+diff --git a/helpers/my_spots_map_policy.test.mjs b/helpers/my_spots_map_policy.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/helpers/my_spots_map_policy.test.mjs
+@@ -0,0 +1,55 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++
++import {
++    MY_SPOTS_MAP_COLOURS,
++    mySpotEndHasElapsed,
++    mySpotsMapColourForSpot,
++    spotsVisibleOnMySpotsMap,
++} from '../static/my_spots_map_policy.js';
++
++const NOW = 2_000_000_000;
++
++test('only Spots whose end datetime has elapsed are removed from My Spots map', () => {
++    const spots = [
++        { id: 1, status_label: 'active', ends_at: NOW + 60 },
++        { id: 2, status_label: 'completed', ends_at: NOW + 60 },
++        { id: 3, status_label: 'cancelled', ends_at: NOW + 60 },
++        { id: 4, status_label: 'completed', ends_at: NOW },
++        { id: 5, status_label: 'cancelled', ends_at: NOW - 1 },
++        { id: 6, status_label: 'completed', ends_at: null },
++    ];
++
++    assert.deepEqual(
++        spotsVisibleOnMySpotsMap(spots, NOW).map((spot) => spot.id),
++        [1, 2, 3, 6],
++    );
++    assert.equal(mySpotEndHasElapsed(spots[3], NOW), true);
++    assert.equal(mySpotEndHasElapsed(spots[1], NOW), false);
++});
++
++test('completed and cancelled Spots use Nimiq blue and red while still visible', () => {
++    assert.equal(
++        mySpotsMapColourForSpot({ status_label: 'completed' }),
++        MY_SPOTS_MAP_COLOURS.completed,
++    );
++    assert.equal(MY_SPOTS_MAP_COLOURS.completed, '#0582ca');
++
++    assert.equal(
++        mySpotsMapColourForSpot({ status_label: 'cancelled' }),
++        MY_SPOTS_MAP_COLOURS.cancelled,
++    );
++    assert.equal(MY_SPOTS_MAP_COLOURS.cancelled, '#d94432');
++});
++
++test('existing active, prizedraw and muted map colours are preserved', () => {
++    assert.equal(
++        mySpotsMapColourForSpot({ status_label: 'active', is_prizedraw: false }),
++        '#21bca5',
++    );
++    assert.equal(
++        mySpotsMapColourForSpot({ status_label: 'active', is_prizedraw: true }),
++        '#ffc435',
++    );
++    assert.equal(mySpotsMapColourForSpot({ status_label: 'upcoming' }), '#8c90a8');
++});
+diff --git a/tests/test_my_spots_world_wrap.py b/tests/test_my_spots_world_wrap.py
+--- a/tests/test_my_spots_world_wrap.py
++++ b/tests/test_my_spots_world_wrap.py
+@@ -3,7 +3,8 @@
+ from pathlib import Path
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+-CACHE_VERSION = "my-spots-world-wrap-v1-20260803"
++WORLD_WRAP_CACHE_VERSION = "my-spots-world-wrap-v1-20260803"
++PAGE_CACHE_VERSION = "my-spots-map-status-v1-20260805"
+ 
+ 
+ def source(path: str) -> str:
+@@ -15,11 +16,11 @@
+     bootstrap = source("static/my_spots_bootstrap.js")
+     installer = source("static/my_spots_world_wrap_install.js")
+ 
+-    assert f"/static/my_spots_bootstrap.js?v={CACHE_VERSION}" in template
++    assert f"/static/my_spots_bootstrap.js?v={PAGE_CACHE_VERSION}" in template
+     assert 'src="/static/my_spots.js?' not in template
+-    assert f"./my_spots_world_wrap_install.js?v={CACHE_VERSION}" in bootstrap
+-    assert f"./my_spots.js?v={CACHE_VERSION}" in bootstrap
+-    assert f"./my_spots_world_wrap.js?v={CACHE_VERSION}" in installer
++    assert f"./my_spots_world_wrap_install.js?v={WORLD_WRAP_CACHE_VERSION}" in bootstrap
++    assert f"./my_spots.js?v={PAGE_CACHE_VERSION}" in bootstrap
++    assert f"./my_spots_world_wrap.js?v={WORLD_WRAP_CACHE_VERSION}" in installer
+     assert "installMySpotsWorldWrap();" in installer
+ 
+ 
+@@ -34,2 +35,18 @@
+     assert "fetch(" not in world_wrap
+     assert "/api/" not in world_wrap
++
++
++def test_my_spots_map_policy_only_filters_the_map():
++    page = source("static/my_spots.js")
++    policy = source("static/my_spots_map_policy.js")
++
++    assert f"./my_spots_map_policy.js?v={PAGE_CACHE_VERSION}" in page
++    assert "renderMap(spotsVisibleOnMySpotsMap(spots));" in page
++    assert "renderSpots(spots);" in page
++    assert "endsAt <= now" in policy
++    assert "status === 'completed'" in policy
++    assert "status === 'cancelled'" in policy
++    assert "#0582ca" in policy
++    assert "#d94432" in policy
++    assert "fetch(" not in policy
++    assert "/api/" not in policy

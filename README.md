@@ -142,6 +142,33 @@ For finite Prizedraws:
 A Total Participants value of `0` means **Unlimited** and therefore does not impose
 those finite comparisons.
 
+### Expiry and remainder refunds
+
+When a Spot reaches the end of its active period, NimHunt stops accepting new
+claims or entries and settles the Spot's remaining financial obligations. This is
+**not a cancellation**: the cancellation fee is not charged merely because a Spot
+finishes normally.
+
+For a Standard Spot, NimHunt first waits for any in-progress duration claim that
+began while the Spot was active to finish. It also waits until every successful
+claim payout and the creation fee have confirmed. The Spot is then completed and
+all safely-accounted funds still left at its deposit address are returned to the
+original funding wallet. This remainder includes unused reward funds and any
+confirmed overfunding, after confirmed claim payouts and the creation fee have
+been deducted.
+
+For example, if a `1,000 NIM` Standard Spot is divided into ten `100 NIM` claims
+and only four claims succeed before the Spot ends, `400 NIM` is paid to claimants
+and the unused `600 NIM` reward remainder is returned to the creator. The creation
+fee remains paid, but no cancellation fee is applied.
+
+Prizedraws settle the draw before any remainder is returned. Winner payouts and
+the creation fee must confirm first; any balance left afterwards is refunded to
+the original funding wallet. Normally the configured prize pool is distributed
+to the selected winners, but if there are no eligible entries the entire unused
+prize pool can be returned. Confirmed overfunding is also returned once settlement
+is complete.
+
 ### Cancellation
 
 A funded draft may be cancelled instead of deleted. Published Standard Spots may

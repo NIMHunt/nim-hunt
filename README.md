@@ -152,7 +152,7 @@ finishes normally.
 For a Standard Spot, NimHunt first waits for any in-progress duration claim that
 began while the Spot was active to finish. It also waits until every successful
 claim payout and the creation fee have confirmed. The Spot is then completed and
-all safely-accounted funds still left at its deposit address are returned to the
+the safely-accounted funds still left at its deposit address are returned to the
 original funding wallet. This remainder includes unused reward funds and any
 confirmed overfunding, after confirmed claim payouts and the creation fee have
 been deducted.
@@ -297,9 +297,9 @@ NimHunt recognises the official Albatross network names and protocol IDs:
 
 | Network | ID | Intended use |
 |---|---:|---|
-| `TestAlbatross` | `5` | development and public testing with test NIM |
-| `MainAlbatross` | `24` | production with real NIM |
-| `DevAlbatross` | `6` | advanced local/custom-network development |
+| TestAlbatross | `5` | development and public testing with test NIM |
+| MainAlbatross | `24` | production with real NIM |
+| DevAlbatross | `6` | advanced local/custom-network development |
 
 Network-specific RPC and Hub defaults are selected automatically:
 

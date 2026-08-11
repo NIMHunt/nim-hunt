@@ -1,0 +1,46 @@
+name: Refresh nanoid lockfile
+
+on:
+  push:
+    branches:
+      - agent/fix-nanoid-audit
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-lockfile:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/fix-nanoid-audit
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: helpers/package-lock.json
+
+      - name: Regenerate lockfile
+        run: npm install --package-lock-only --ignore-scripts --prefix helpers
+
+      - name: Verify patched dependency
+        run: |
+          node -e "const lock=require('./helpers/package-lock.json'); const v=lock.packages['node_modules/nanoid'].version; if(v !== '3.3.17') { throw new Error('Expected nanoid 3.3.17, got ' + v); }"
+          npm audit --omit=dev --prefix helpers
+
+      - name: Commit generated lockfile
+        run: |
+          if git diff --quiet -- helpers/package-lock.json; then
+            echo 'Lockfile already up to date.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add helpers/package-lock.json
+          git commit -m 'Refresh nanoid lockfile'
+          git push origin HEAD:agent/fix-nanoid-audit

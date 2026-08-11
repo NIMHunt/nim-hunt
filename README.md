@@ -43,7 +43,7 @@ infrastructure.
 - **Stay durations** — require a claimant to remain inside the radius for a set time.
 - **Scheduling** — configure a future start and a fixed active duration.
 - **Participation limits** — set total participants and per-user limits.
-- **Creation fees** — charge separate configurable fees for Standard Spots and Prizedraws.
+- **Platform fees** — charge configurable creation fees and a separate cancellation fee; cancelling a funded Spot does not refund fees already owed.
 - **Creator tools** — inspect drafts, deposits, publishing state, claim codes and history.
 - **Claim history** — users can review pending, successful and failed claims.
 - **On-chain descriptions** — NimHunt-generated transactions include short Spot labels.
@@ -142,17 +142,64 @@ For finite Prizedraws:
 A Total Participants value of `0` means **Unlimited** and therefore does not impose
 those finite comparisons.
 
+### Expiry and remainder refunds
+
+When a Spot reaches the end of its active period, NimHunt stops accepting new
+claims or entries and settles the Spot's remaining financial obligations. This is
+**not a cancellation**: the cancellation fee is not charged merely because a Spot
+finishes normally.
+
+For a Standard Spot, NimHunt first waits for any in-progress duration claim that
+began while the Spot was active to finish. It also waits until every successful
+claim payout and the creation fee have confirmed. The Spot is then completed and
+the safely-accounted funds still left at its deposit address are returned to the
+original funding wallet. This remainder includes unused reward funds and any
+confirmed overfunding, after confirmed claim payouts and the creation fee have
+been deducted.
+
+For example, if a `1,000 NIM` Standard Spot is divided into ten `100 NIM` claims
+and only four claims succeed before the Spot ends, `400 NIM` is paid to claimants
+and the unused `600 NIM` reward remainder is returned to the creator. The creation
+fee remains paid, but no cancellation fee is applied.
+
+Prizedraws settle the draw before any remainder is returned. Winner payouts and
+the creation fee must confirm first; any balance left afterwards is refunded to
+the original funding wallet. Normally the configured prize pool is distributed
+to the selected winners, but if there are no eligible entries the entire unused
+prize pool can be returned. Confirmed overfunding is also returned once settlement
+is complete.
+
 ### Cancellation
 
 A funded draft may be cancelled instead of deleted. Published Standard Spots may
 also be cancelled; published Prizedraws retain their existing no-cancellation rule.
+
+**Cancellation is not free, and cancelling a Spot does not restore the creator to
+their pre-creation balance.** Any creation fee that is already owed is retained.
+NimHunt then deducts the configured cancellation fee from the Spot funds that
+remain after confirmed claim payouts and the creation fee. Only the balance left
+after those deductions, if any, is refunded to the original funding wallet.
+
+In other words:
+
+- creation fees already owed are **not refunded**;
+- the cancellation fee is taken from the remaining cancellable Spot balance;
+- the creator receives only whatever remains after that cancellation fee;
+- if the remaining balance is less than or equal to the cancellation fee, the
+  cancellation fee consumes the whole balance and **no refund transaction is sent**.
+
+With the documented defaults, the cancellation fee is `500 NIM`, which is also the
+minimum Spot reward pool. Therefore, cancelling an otherwise untouched minimum-size
+`500 NIM` Spot can leave `0 NIM` to refund after its creation fee has already been
+retained.
+
 Cancellation creates up to two outgoing transactions:
 
-- the remaining refundable balance to the original funding wallet;
-- the configured cancellation fee to the platform fee address.
+- the refundable remainder, if any, to the original funding wallet;
+- the cancellation fee, capped at the remaining cancellable balance, to the
+  platform fee address.
 
-If the creation fee already confirmed, it is retained and excluded from the
-refund. If a draft is only partly funded, no creation fee is charged; the ordinary
+If a draft is only partly funded, no creation fee is charged; the ordinary
 cancellation fee is applied to the confirmed deposit. Once deposits reach the full
 Spot-plus-fee target, the creation fee is owed: cancellation waits until that fee
 confirms, so a timing race cannot be used to avoid it. Cancellation also waits while
@@ -497,8 +544,11 @@ export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
 ```
 
 The default is `500 NIM`. A value of `0` preserves the refund flow without charging
-a cancellation fee. The amount and destination are snapshotted when cancellation first starts,
-so later environment changes cannot alter a cancellation already in progress.
+a cancellation fee. The cancellation fee is deducted from the remaining cancellable
+Spot balance and is capped at that balance, so the refund may be smaller than the
+original Spot value or may be `0 NIM`. The amount and destination are snapshotted
+when cancellation first starts, so later environment changes cannot alter a
+cancellation already in progress.
 
 ### Shared fee destination
 

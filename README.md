@@ -297,9 +297,9 @@ NimHunt recognises the official Albatross network names and protocol IDs:
 
 | Network | ID | Intended use |
 |---|---:|---|
-| TestAlbatross | `5` | development and public testing with test NIM |
-| MainAlbatross | `24` | production with real NIM |
-| DevAlbatross | `6` | advanced local/custom-network development |
+| `TestAlbatross` | `5` | development and public testing with test NIM |
+| `MainAlbatross` | `24` | production with real NIM |
+| `DevAlbatross` | `6` | advanced local/custom-network development |
 
 Network-specific RPC and Hub defaults are selected automatically:
 

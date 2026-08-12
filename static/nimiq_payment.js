@@ -1,7 +1,10 @@
 const NIMIQ_TRANSACTION_HASH_RE = /^[0-9a-f]{64}$/i;
 const DEFAULT_MAX_HEAD_DIFFERENCE = 120;
-const DEFAULT_CONSENSUS_ATTEMPTS = 5;
-const DEFAULT_CONSENSUS_RETRY_DELAY_MS = 750;
+export const NIMIQ_CONSENSUS_GRACE_PERIOD_MS = 15_000;
+const DEFAULT_CONSENSUS_RETRY_DELAY_MS = 1_000;
+const DEFAULT_CONSENSUS_ATTEMPTS = Math.ceil(
+    NIMIQ_CONSENSUS_GRACE_PERIOD_MS / DEFAULT_CONSENSUS_RETRY_DELAY_MS,
+) + 1;
 
 function providerErrorMessage(value) {
     const error = value?.error;
@@ -11,40 +14,49 @@ function providerErrorMessage(value) {
     return String(error.message || error.reason || error.code || 'Nimiq Pay rejected the request.');
 }
 
-function throwProviderError(value) {
+function throwProviderError(value, context = 'Nimiq Pay request failed') {
     const message = providerErrorMessage(value);
-    if (message) throw new Error(message);
+    if (message) throw new Error(`${context}: ${message}`);
     return value;
 }
 
 export function normaliseNimiqTransactionHash(value) {
     if (typeof value !== 'string') {
-        throw new Error('Nimiq Pay did not return a transaction hash.');
+        throw new Error(
+            'Nimiq Pay payment result did not include a transaction hash. '
+            + 'The wallet may have completed the payment, so check Nimiq Pay before trying again.'
+        );
     }
     const hash = value.trim();
     if (!NIMIQ_TRANSACTION_HASH_RE.test(hash)) {
-        throw new Error('Nimiq Pay returned an invalid transaction hash. The deposit was not recorded.');
+        throw new Error(
+            'Nimiq Pay payment result included an invalid transaction hash. '
+            + 'The wallet may have completed the payment, so check Nimiq Pay before trying again.'
+        );
     }
     return hash.toLowerCase();
 }
 
 function requireBlockHeight(value, label) {
-    const result = throwProviderError(value);
+    const result = throwProviderError(value, `${label} blockchain-height check failed`);
     const height = Number(result);
     if (!Number.isSafeInteger(height) || height < 0) {
-        throw new Error(`${label} did not return a valid block height.`);
+        throw new Error(
+            `${label} blockchain-height check failed: no valid block height was returned. `
+            + 'No transaction was requested.'
+        );
     }
     return height;
 }
 
 function requireAccounts(value) {
-    const result = throwProviderError(value);
+    const result = throwProviderError(value, 'Nimiq Pay funding-account request failed');
     if (!Array.isArray(result) || result.length === 0) {
-        throw new Error('Nimiq Pay did not share a funding account.');
+        throw new Error('Nimiq Pay did not share a funding account. No transaction was requested.');
     }
     const accounts = result.map((account) => typeof account === 'string' ? account.trim() : '');
     if (accounts.some((account) => !account)) {
-        throw new Error('Nimiq Pay returned an invalid funding account.');
+        throw new Error('Nimiq Pay returned an invalid funding account. No transaction was requested.');
     }
     return accounts;
 }
@@ -75,15 +87,25 @@ async function waitForConsensus(provider, options) {
     );
 
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-        const consensus = throwProviderError(await provider.isConsensusEstablished());
+        const consensus = throwProviderError(
+            await provider.isConsensusEstablished(),
+            'Nimiq Pay consensus check failed',
+        );
         if (consensus === true) return;
         if (consensus !== false) {
-            throw new Error('Nimiq Pay returned an invalid blockchain consensus status.');
+            throw new Error(
+                'Nimiq Pay consensus check returned an invalid status. No transaction was requested.'
+            );
         }
         if (attempt + 1 < attempts) await wait(retryDelayMs);
     }
 
-    throw new Error('Nimiq Pay has not established blockchain consensus yet. Please try again shortly.');
+    const waitedSeconds = Math.ceil(Math.max(0, attempts - 1) * retryDelayMs / 1000);
+    const waitDescription = waitedSeconds > 0 ? ` after waiting about ${waitedSeconds} seconds` : '';
+    throw new Error(
+        `Nimiq Pay is still syncing with the blockchain${waitDescription}. `
+        + 'No transaction was requested. Keep Nimiq Pay open briefly, then try again.'
+    );
 }
 
 export async function requestNimiqPayment(provider, intent, options = {}) {
@@ -92,7 +114,7 @@ export async function requestNimiqPayment(provider, intent, options = {}) {
         || typeof provider.getBlockNumber !== 'function'
         || typeof provider.listAccounts !== 'function'
         || typeof provider.sendBasicTransactionWithData !== 'function') {
-        throw new Error('The Nimiq Pay provider is unavailable or incomplete.');
+        throw new Error('Nimiq Pay provider setup failed before payment. No transaction was requested.');
     }
 
     await waitForConsensus(provider, options);
@@ -106,8 +128,8 @@ export async function requestNimiqPayment(provider, intent, options = {}) {
             : DEFAULT_MAX_HEAD_DIFFERENCE;
         if (Math.abs(walletHeight - serverHeight) > maxDifference) {
             throw new Error(
-                'Nimiq Pay and NimHunt appear to be connected to different or badly out-of-sync networks. '
-                + 'No transaction was requested.'
+                'Network check failed: Nimiq Pay and NimHunt appear to be connected to different '
+                + 'or badly out-of-sync networks. No transaction was requested.'
             );
         }
     }
@@ -115,14 +137,14 @@ export async function requestNimiqPayment(provider, intent, options = {}) {
     const accounts = requireAccounts(await provider.listAccounts());
     const amount = Number(intent?.amount);
     if (!Number.isSafeInteger(amount) || amount <= 0) {
-        throw new Error('NimHunt supplied an invalid deposit amount.');
+        throw new Error('NimHunt supplied an invalid deposit amount. No transaction was requested.');
     }
 
     const result = throwProviderError(await provider.sendBasicTransactionWithData({
         recipient: String(intent?.recipient || '').trim(),
         value: amount,
         data: String(intent?.transaction_description || ''),
-    }));
+    }), 'Nimiq Pay payment request was rejected');
 
     // The documented provider contract returns the hash directly as a string.
     // Never recurse through arbitrary result/data fields: signatures, request IDs

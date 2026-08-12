@@ -82,10 +82,49 @@ test('network/head mismatch stops before account sharing and payment', async () 
   assert.deepEqual(nimiq.calls, ['consensus', 'height']);
 });
 
-test('payment is blocked while wallet consensus is unavailable', async () => {
+test('temporary wallet consensus loss is retried before requesting a payment', async () => {
+  let consensusChecks = 0;
+  const nimiq = provider({
+    async isConsensusEstablished() {
+      this.calls.push('consensus');
+      consensusChecks += 1;
+      return consensusChecks >= 3;
+    },
+  });
+
+  const payment = await requestNimiqPayment(nimiq, INTENT, {
+    consensusAttempts: 3,
+    consensusRetryDelayMs: 0,
+  });
+
+  assert.equal(payment.txHash, HASH);
+  assert.deepEqual(nimiq.calls.slice(0, 5), ['consensus', 'consensus', 'consensus', 'height', 'accounts']);
+  assert.equal(nimiq.calls.filter(call => Array.isArray(call) && call[0] === 'send').length, 1);
+});
+
+test('payment remains blocked when wallet consensus never recovers', async () => {
   const nimiq = provider({
     async isConsensusEstablished() { this.calls.push('consensus'); return false; },
   });
-  await assert.rejects(() => requestNimiqPayment(nimiq, INTENT), /consensus/);
+
+  await assert.rejects(
+    () => requestNimiqPayment(nimiq, INTENT, {
+      consensusAttempts: 3,
+      consensusRetryDelayMs: 0,
+    }),
+    /consensus/,
+  );
+  assert.deepEqual(nimiq.calls, ['consensus', 'consensus', 'consensus']);
+});
+
+test('invalid wallet consensus responses fail closed before chain or account access', async () => {
+  const nimiq = provider({
+    async isConsensusEstablished() { this.calls.push('consensus'); return undefined; },
+  });
+
+  await assert.rejects(
+    () => requestNimiqPayment(nimiq, INTENT, { consensusRetryDelayMs: 0 }),
+    /invalid blockchain consensus status/,
+  );
   assert.deepEqual(nimiq.calls, ['consensus']);
 });

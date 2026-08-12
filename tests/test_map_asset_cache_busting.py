@@ -29,6 +29,8 @@ def test_my_spots_loads_the_wide_overview_under_fresh_cache_keys():
         f"const MY_SPOTS_MODULE_URL = './my_spots.js?v={MY_SPOTS_PAGE_CACHE_VERSION}'"
         in bootstrap
     ), "The bootstrap must identify the current My Spots entry module URL."
-    assert "fetch(url, { cache: 'reload' })" in bootstrap
+    assert "new URL(url, import.meta.url)" in bootstrap
+    assert "fetch(moduleUrl, { cache: 'reload' })" in bootstrap
+    assert "fetch(url, { cache: 'reload' })" not in bootstrap
     assert "minZoom: 0" in my_spots, "My Spots must be able to fit geographically distant Spots."
     assert "./spot_map.js?v=map-view-cache-v2-20260802" not in my_spots

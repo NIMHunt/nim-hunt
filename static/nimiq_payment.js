@@ -1,12 +1,5 @@
 const NIMIQ_TRANSACTION_HASH_RE = /^[0-9a-f]{64}$/i;
 const DEFAULT_MAX_HEAD_DIFFERENCE = 120;
-export const NIMIQ_CONSENSUS_GRACE_PERIOD_MS = 15_000;
-const DEFAULT_CONSENSUS_RETRY_DELAY_MS = 1_000;
-const DEFAULT_CONSENSUS_DIAGNOSTIC_TIMEOUT_MS = 2_000;
-const CONSENSUS_DIAGNOSTIC_TIMEOUT = Symbol('consensus-diagnostic-timeout');
-const DEFAULT_CONSENSUS_ATTEMPTS = Math.ceil(
-    NIMIQ_CONSENSUS_GRACE_PERIOD_MS / DEFAULT_CONSENSUS_RETRY_DELAY_MS,
-) + 1;
 
 function providerErrorMessage(value) {
     const error = value?.error;
@@ -69,104 +62,18 @@ function requireAccounts(value) {
     return accounts;
 }
 
-function positiveIntegerOption(value, fallback) {
-    const number = Number(value);
-    return Number.isSafeInteger(number) && number > 0 ? number : fallback;
-}
-
-function nonNegativeIntegerOption(value, fallback) {
-    const number = Number(value);
-    return Number.isSafeInteger(number) && number >= 0 ? number : fallback;
-}
-
-function wait(delayMs) {
-    if (delayMs <= 0) return Promise.resolve();
-    return new Promise((resolve) => setTimeout(resolve, delayMs));
-}
-
-async function readWithTimeout(readValue, timeoutMs) {
-    let timer = null;
-    try {
-        return await Promise.race([
-            Promise.resolve().then(readValue),
-            new Promise((resolve) => {
-                timer = setTimeout(() => resolve(CONSENSUS_DIAGNOSTIC_TIMEOUT), timeoutMs);
-            }),
-        ]);
-    } finally {
-        if (timer !== null) clearTimeout(timer);
-    }
-}
-
-async function consensusFailureDiagnostics(provider, intent, options) {
-    const timeoutMs = positiveIntegerOption(
-        options?.consensusDiagnosticTimeoutMs,
-        DEFAULT_CONSENSUS_DIAGNOSTIC_TIMEOUT_MS,
-    );
-
-    let walletHeight = null;
-    try {
-        const result = await readWithTimeout(() => provider.getBlockNumber(), timeoutMs);
-        if (result !== CONSENSUS_DIAGNOSTIC_TIMEOUT) walletHeight = blockHeightOrNull(result);
-    } catch (_err) {
-        walletHeight = null;
-    }
-
-    const serverHeight = blockHeightOrNull(intent?.chain_height);
-    const parts = [
-        `Nimiq Pay block: ${walletHeight === null ? 'unavailable' : walletHeight}.`,
-        `NimHunt block: ${serverHeight === null ? 'unavailable' : serverHeight}.`,
-    ];
-    if (walletHeight !== null && serverHeight !== null) {
-        parts.push(`Block-height difference: ${Math.abs(walletHeight - serverHeight)}.`);
-    }
-    return parts.join(' ');
-}
-
-async function waitForConsensus(provider, intent, options) {
-    const attempts = positiveIntegerOption(
-        options?.consensusAttempts,
-        DEFAULT_CONSENSUS_ATTEMPTS,
-    );
-    const retryDelayMs = nonNegativeIntegerOption(
-        options?.consensusRetryDelayMs,
-        DEFAULT_CONSENSUS_RETRY_DELAY_MS,
-    );
-
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-        const consensus = throwProviderError(
-            await provider.isConsensusEstablished(),
-            'Nimiq Pay consensus check failed',
-        );
-        if (consensus === true) return;
-        if (consensus !== false) {
-            throw new Error(
-                'Nimiq Pay consensus check returned an invalid status. No transaction was requested.'
-            );
-        }
-        if (attempt + 1 < attempts) await wait(retryDelayMs);
-    }
-
-    const waitedSeconds = Math.ceil(Math.max(0, attempts - 1) * retryDelayMs / 1000);
-    const waitDescription = waitedSeconds > 0 ? ` after waiting about ${waitedSeconds} seconds` : '';
-    const diagnostics = await consensusFailureDiagnostics(provider, intent, options);
-    throw new Error(
-        `Nimiq Pay is still reporting that it is syncing with the blockchain${waitDescription}. `
-        + `${diagnostics} No transaction was requested.`
-    );
-}
-
-export async function requestNimiqPayment(provider, intent, options = {}) {
+export async function requestNimiqPayment(provider, intent) {
     if (!provider
-        || typeof provider.isConsensusEstablished !== 'function'
         || typeof provider.getBlockNumber !== 'function'
         || typeof provider.listAccounts !== 'function'
         || typeof provider.sendBasicTransactionWithData !== 'function') {
         throw new Error('Nimiq Pay provider setup failed before payment. No transaction was requested.');
     }
 
-    await waitForConsensus(provider, intent, options);
-
+    // Nimiq Pay owns transaction readiness and broadcasting. Its exposed
+    // consensus status can remain false even while the embedded client is
+    // following the current chain, so use the wallet/server height comparison
+    // as NimHunt's read-only network sanity check instead of preflight polling.
     const walletHeight = requireBlockHeight(await provider.getBlockNumber(), 'Nimiq Pay');
     const serverHeightValue = intent?.chain_height;
     if (serverHeightValue !== null && serverHeightValue !== undefined) {

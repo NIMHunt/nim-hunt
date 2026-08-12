@@ -42,7 +42,9 @@ def test_returning_webviews_receive_the_nimiq_2_payment_fix():
     assert f"./nimiq_payment.js?v={CACHE_VERSION}" in page
     assert f"const NIMIQ_PAYMENT_MODULE_URL = './nimiq_payment.js?v={CACHE_VERSION}'" in bootstrap
     assert f"const MY_SPOTS_MODULE_URL = './my_spots.js?v={CACHE_VERSION}'" in bootstrap
-    assert "fetch(url, { cache: 'reload' })" in bootstrap
+    assert "new URL(url, import.meta.url)" in bootstrap
+    assert "fetch(moduleUrl, { cache: 'reload' })" in bootstrap
+    assert "fetch(url, { cache: 'reload' })" not in bootstrap
     assert "await response.arrayBuffer();" in bootstrap
     assert "await import(MY_SPOTS_MODULE_URL);" in bootstrap
     assert f"/static/my_spots_bootstrap.js?v={BOOTSTRAP_CACHE_VERSION}-" in template

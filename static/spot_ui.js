@@ -64,11 +64,14 @@ export function nimFromLunaText(value) {
 }
 
 export function highestTimeUnitText(seconds, suffix = '') {
-    const value = Math.max(0, Math.floor(Number(seconds || 0)));
-    if (value <= 60) return `Less than 1 Minute${suffix ? ` ${suffix}` : ''}`;
+    const numericValue = Number(seconds || 0);
+    const value = Number.isFinite(numericValue) ? Math.max(0, numericValue) : 0;
+    if (value < 60) return `Less than 1 Minute${suffix ? ` ${suffix}` : ''}`;
 
+    // Pick the unit from the actual time remaining, then round within that
+    // unit. Do not promote a rounded value into the next unit: for example,
+    // 23.8 hours should read "24 Hours", not "1 Day".
     const units = [
-        ['Week', 7 * 24 * 60 * 60],
         ['Day', 24 * 60 * 60],
         ['Hour', 60 * 60],
         ['Minute', 60],
@@ -76,7 +79,7 @@ export function highestTimeUnitText(seconds, suffix = '') {
 
     for (const [name, size] of units) {
         if (value >= size) {
-            const count = Math.floor(value / size);
+            const count = Math.round(value / size);
             return `${count} ${name}${count === 1 ? '' : 's'}${suffix ? ` ${suffix}` : ''}`;
         }
     }

@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { requestNimiqPayment } from '../static/nimiq_payment.js';
+import {
+  NIMIQ_CONSENSUS_GRACE_PERIOD_MS,
+  requestNimiqPayment,
+} from '../static/nimiq_payment.js';
 
 const HASH = 'ab'.repeat(32);
 const INTENT = {
@@ -22,6 +25,10 @@ function provider(overrides = {}) {
     ...overrides,
   };
 }
+
+test('production consensus grace period allows up to fifteen seconds for wallet sync', () => {
+  assert.equal(NIMIQ_CONSENSUS_GRACE_PERIOD_MS, 15_000);
+});
 
 test('deposit checks the current height but lets Nimiq Pay choose its validity start height', async () => {
   const nimiq = provider();
@@ -56,21 +63,27 @@ test('wrapped result data is never mistaken for a transaction hash', async () =>
   const nimiq = provider({
     async sendBasicTransactionWithData() { return { data: HASH }; },
   });
-  await assert.rejects(() => requestNimiqPayment(nimiq, INTENT), /did not return a transaction hash/);
+  await assert.rejects(
+    () => requestNimiqPayment(nimiq, INTENT),
+    /did not include a transaction hash.*check Nimiq Pay before trying again/i,
+  );
 });
 
-test('provider error objects are surfaced and never recorded', async () => {
+test('provider payment errors identify the failed stage and are never recorded', async () => {
   const nimiq = provider({
     async sendBasicTransactionWithData() { return { error: { message: 'Broadcast rejected' } }; },
   });
-  await assert.rejects(() => requestNimiqPayment(nimiq, INTENT), /Broadcast rejected/);
+  await assert.rejects(
+    () => requestNimiqPayment(nimiq, INTENT),
+    /Nimiq Pay payment request was rejected: Broadcast rejected/,
+  );
 });
 
 test('non-string account responses stop before requesting a payment', async () => {
   const nimiq = provider({
     async listAccounts() { this.calls.push('accounts'); return [{ address: 'NQ FUNDING' }]; },
   });
-  await assert.rejects(() => requestNimiqPayment(nimiq, INTENT), /invalid funding account/);
+  await assert.rejects(() => requestNimiqPayment(nimiq, INTENT), /invalid funding account.*No transaction was requested/i);
   assert.deepEqual(nimiq.calls, ['consensus', 'height', 'accounts']);
 });
 
@@ -78,7 +91,10 @@ test('network/head mismatch stops before account sharing and payment', async () 
   const nimiq = provider({
     async getBlockNumber() { this.calls.push('height'); return 900000; },
   });
-  await assert.rejects(() => requestNimiqPayment(nimiq, INTENT), /different or badly out-of-sync networks/);
+  await assert.rejects(
+    () => requestNimiqPayment(nimiq, INTENT),
+    /Network check failed:.*different.*out-of-sync networks.*No transaction was requested/is,
+  );
   assert.deepEqual(nimiq.calls, ['consensus', 'height']);
 });
 
@@ -112,7 +128,7 @@ test('payment remains blocked when wallet consensus never recovers', async () =>
       consensusAttempts: 3,
       consensusRetryDelayMs: 0,
     }),
-    /consensus/,
+    /still syncing with the blockchain.*No transaction was requested.*Keep Nimiq Pay open/i,
   );
   assert.deepEqual(nimiq.calls, ['consensus', 'consensus', 'consensus']);
 });
@@ -124,7 +140,7 @@ test('invalid wallet consensus responses fail closed before chain or account acc
 
   await assert.rejects(
     () => requestNimiqPayment(nimiq, INTENT, { consensusRetryDelayMs: 0 }),
-    /invalid blockchain consensus status/,
+    /consensus check returned an invalid status.*No transaction was requested/i,
   );
   assert.deepEqual(nimiq.calls, ['consensus']);
 });

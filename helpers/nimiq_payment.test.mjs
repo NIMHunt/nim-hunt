@@ -118,7 +118,7 @@ test('temporary wallet consensus loss is retried before requesting a payment', a
   assert.equal(nimiq.calls.filter(call => Array.isArray(call) && call[0] === 'send').length, 1);
 });
 
-test('payment remains blocked when wallet consensus never recovers', async () => {
+test('consensus timeout reports wallet and server heights while keeping payment blocked', async () => {
   const nimiq = provider({
     async isConsensusEstablished() { this.calls.push('consensus'); return false; },
   });
@@ -128,9 +128,66 @@ test('payment remains blocked when wallet consensus never recovers', async () =>
       consensusAttempts: 3,
       consensusRetryDelayMs: 0,
     }),
-    /still syncing with the blockchain.*No transaction was requested.*Keep Nimiq Pay open/i,
+    /still reporting that it is syncing.*Nimiq Pay block: 5002.*NimHunt block: 5000.*Block-height difference: 2.*No transaction was requested/is,
   );
-  assert.deepEqual(nimiq.calls, ['consensus', 'consensus', 'consensus']);
+  assert.deepEqual(nimiq.calls, ['consensus', 'consensus', 'consensus', 'height']);
+  assert.equal(nimiq.calls.includes('accounts'), false);
+  assert.equal(nimiq.calls.some(call => Array.isArray(call) && call[0] === 'send'), false);
+});
+
+test('consensus timeout exposes a large height gap without weakening the payment gate', async () => {
+  const nimiq = provider({
+    async isConsensusEstablished() { this.calls.push('consensus'); return false; },
+    async getBlockNumber() { this.calls.push('height'); return 4200; },
+  });
+
+  await assert.rejects(
+    () => requestNimiqPayment(nimiq, INTENT, {
+      consensusAttempts: 1,
+      consensusRetryDelayMs: 0,
+    }),
+    /Nimiq Pay block: 4200.*NimHunt block: 5000.*Block-height difference: 800.*No transaction was requested/is,
+  );
+  assert.deepEqual(nimiq.calls, ['consensus', 'height']);
+});
+
+test('failed diagnostic height read does not hide the original consensus failure', async () => {
+  const nimiq = provider({
+    async isConsensusEstablished() { this.calls.push('consensus'); return false; },
+    async getBlockNumber() {
+      this.calls.push('height');
+      throw new Error('height unavailable');
+    },
+  });
+
+  await assert.rejects(
+    () => requestNimiqPayment(nimiq, INTENT, {
+      consensusAttempts: 1,
+      consensusRetryDelayMs: 0,
+    }),
+    /still reporting that it is syncing.*Nimiq Pay block: unavailable.*NimHunt block: 5000.*No transaction was requested/is,
+  );
+  assert.deepEqual(nimiq.calls, ['consensus', 'height']);
+});
+
+test('diagnostic height read is bounded if Nimiq Pay never answers', async () => {
+  const nimiq = provider({
+    async isConsensusEstablished() { this.calls.push('consensus'); return false; },
+    async getBlockNumber() {
+      this.calls.push('height');
+      return new Promise(() => {});
+    },
+  });
+
+  await assert.rejects(
+    () => requestNimiqPayment(nimiq, INTENT, {
+      consensusAttempts: 1,
+      consensusRetryDelayMs: 0,
+      consensusDiagnosticTimeoutMs: 1,
+    }),
+    /Nimiq Pay block: unavailable.*NimHunt block: 5000.*No transaction was requested/is,
+  );
+  assert.deepEqual(nimiq.calls, ['consensus', 'height']);
 });
 
 test('invalid wallet consensus responses fail closed before chain or account access', async () => {

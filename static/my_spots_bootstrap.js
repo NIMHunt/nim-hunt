@@ -5,7 +5,11 @@ const MY_SPOTS_MODULE_URL = './my_spots.js?v=rapid-deposit-v1-20260805';
 
 async function refreshCachedPaymentModule(url) {
     try {
-        const response = await fetch(url, { cache: 'reload' });
+        // fetch() resolves relative URLs against the document, unlike import().
+        // Resolve from this bootstrap module so /my-spots refreshes the same
+        // /static/... resource that the module loader will import below.
+        const moduleUrl = new URL(url, import.meta.url);
+        const response = await fetch(moduleUrl, { cache: 'reload' });
         if (!response.ok) return;
         // Fully consume the response so the refreshed entry is available to the
         // module loader before My Spots imports the same versioned URL.

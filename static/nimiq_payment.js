@@ -1,5 +1,7 @@
 const NIMIQ_TRANSACTION_HASH_RE = /^[0-9a-f]{64}$/i;
 const DEFAULT_MAX_HEAD_DIFFERENCE = 120;
+const DEFAULT_CONSENSUS_ATTEMPTS = 5;
+const DEFAULT_CONSENSUS_RETRY_DELAY_MS = 750;
 
 function providerErrorMessage(value) {
     const error = value?.error;
@@ -47,7 +49,44 @@ function requireAccounts(value) {
     return accounts;
 }
 
-export async function requestNimiqPayment(provider, intent) {
+function positiveIntegerOption(value, fallback) {
+    const number = Number(value);
+    return Number.isSafeInteger(number) && number > 0 ? number : fallback;
+}
+
+function nonNegativeIntegerOption(value, fallback) {
+    const number = Number(value);
+    return Number.isSafeInteger(number) && number >= 0 ? number : fallback;
+}
+
+function wait(delayMs) {
+    if (delayMs <= 0) return Promise.resolve();
+    return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+async function waitForConsensus(provider, options) {
+    const attempts = positiveIntegerOption(
+        options?.consensusAttempts,
+        DEFAULT_CONSENSUS_ATTEMPTS,
+    );
+    const retryDelayMs = nonNegativeIntegerOption(
+        options?.consensusRetryDelayMs,
+        DEFAULT_CONSENSUS_RETRY_DELAY_MS,
+    );
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const consensus = throwProviderError(await provider.isConsensusEstablished());
+        if (consensus === true) return;
+        if (consensus !== false) {
+            throw new Error('Nimiq Pay returned an invalid blockchain consensus status.');
+        }
+        if (attempt + 1 < attempts) await wait(retryDelayMs);
+    }
+
+    throw new Error('Nimiq Pay has not established blockchain consensus yet. Please try again shortly.');
+}
+
+export async function requestNimiqPayment(provider, intent, options = {}) {
     if (!provider
         || typeof provider.isConsensusEstablished !== 'function'
         || typeof provider.getBlockNumber !== 'function'
@@ -56,10 +95,7 @@ export async function requestNimiqPayment(provider, intent) {
         throw new Error('The Nimiq Pay provider is unavailable or incomplete.');
     }
 
-    const consensus = throwProviderError(await provider.isConsensusEstablished());
-    if (consensus !== true) {
-        throw new Error('Nimiq Pay has not established blockchain consensus yet. Please try again shortly.');
-    }
+    await waitForConsensus(provider, options);
 
     const walletHeight = requireBlockHeight(await provider.getBlockNumber(), 'Nimiq Pay');
     const serverHeightValue = intent?.chain_height;

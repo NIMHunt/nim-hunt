@@ -316,7 +316,12 @@ async function sendLunaFromSpotDeposit(payload) {
         keyPair.toAddress(), recipient, amount, fee, height, networkId,
       );
   tx.sign(keyPair);
-  const verified = tx.verify(networkId);
+
+  const maxSupportedVersion = Number(Nimiq.Policy?.MAX_SUPPORTED_VERSION);
+  if (!Number.isSafeInteger(maxSupportedVersion) || maxSupportedVersion <= 0) {
+    throw new Error('This @nimiq/core build does not expose a supported protocol version.');
+  }
+  const verified = tx.verify(maxSupportedVersion, networkId);
   if (verified === false) throw new Error('The locally signed Nimiq transaction failed verification.');
 
   let hash;
@@ -353,6 +358,7 @@ async function sendLunaFromSpotDeposit(payload) {
     deposit_key_path: keyPath,
     validity_start_height: Number(height),
     network_id: networkId,
+    protocol_version: maxSupportedVersion,
     broadcast_transport: rpcUrl ? 'json-rpc' : 'web-client',
     raw: rawSendResult,
   });

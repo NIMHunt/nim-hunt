@@ -50,6 +50,7 @@ const NIMIQ_PAY_URL = document.body.dataset.nimiqPayUrl || 'https://nimpay.app';
 const MAP_TILE_URL = document.body.dataset.mapTileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const MAP_TILE_ATTRIBUTION = document.body.dataset.mapTileAttribution || '&copy; OpenStreetMap contributors';
 const REPORT_DETAILS_MAX = Number.parseInt(document.body.dataset.reportDetailsMax || '300', 10);
+const DETAIL_MAP_MIN_ZOOM = 12;
 
 const COMMON_TEXT = getCommonText();
 const REPORT_REASON_OPTIONS = getReportReasonOptions();
@@ -785,21 +786,6 @@ function validSpotCoordinate(spot) {
     return Number.isFinite(lat) && Number.isFinite(long);
 }
 
-function metreBoundsAround(lat, long, radiusMetres) {
-    const radius = Math.max(1, Number(radiusMetres || 25));
-    const latNum = Number(lat);
-    const longNum = Number(long);
-    const metresPerDegreeLat = 111320;
-    const cosLat = Math.max(0.01, Math.abs(Math.cos(latNum * Math.PI / 180)));
-    const latDelta = radius / metresPerDegreeLat;
-    const longDelta = radius / (metresPerDegreeLat * cosLat);
-
-    return window.L.latLngBounds(
-        [latNum - latDelta, longNum - longDelta],
-        [latNum + latDelta, longNum + longDelta]
-    );
-}
-
 function buildSpotMapShell() {
     const map = document.createElement('div');
     map.className = 'spot-detail-map';
@@ -852,6 +838,7 @@ function renderLockedSpotMap(mapEl, spot) {
     const map = window.L.map(mapEl, {
         zoomControl: true,
         attributionControl: true,
+        minZoom: DETAIL_MAP_MIN_ZOOM,
         dragging: false,
         touchZoom: false,
         scrollWheelZoom: false,
@@ -887,20 +874,11 @@ function renderLockedSpotMap(mapEl, spot) {
     bindSpotMapPopup(radiusCircle, spot);
     bindSpotMapPopup(marker, spot);
 
-    const radiusBounds = metreBoundsAround(centre[0], centre[1], spot.radius).pad(0.18);
-    function applyRadiusZoomFloor() {
+    map.invalidateSize(false);
+    window.setTimeout(() => {
         map.invalidateSize(false);
-        const minZoom = Math.max(0, Math.min(19, map.getBoundsZoom(radiusBounds, false)));
-        map.setMinZoom(minZoom);
-        if (map.getZoom() < minZoom) {
-            map.setView(centre, minZoom, { animate: false });
-        } else {
-            map.panTo(centre, { animate: false });
-        }
-    }
-
-    applyRadiusZoomFloor();
-    window.setTimeout(applyRadiusZoomFloor, 0);
+        map.panTo(centre, { animate: false });
+    }, 0);
 }
 
 function buildRewardAmountLine(amountText) {

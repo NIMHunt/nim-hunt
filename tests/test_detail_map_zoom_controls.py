@@ -9,7 +9,8 @@ def source(path: str) -> str:
 
 def test_spot_detail_map_only_allows_explicit_zoom_controls():
     page = source("static/spot_detail.js")
-    assert "zoomControl: true" in page
+    assert "zoomControl: false" in page
+    assert "window.L.control.zoom({ position: 'topright' }).addTo(map);" in page
     assert "dragging: false" in page
     assert "touchZoom: false" in page
     assert "scrollWheelZoom: false" in page
@@ -32,7 +33,8 @@ def test_detail_maps_share_a_global_one_kilometre_zoom_floor():
 
 def test_claim_detail_keeps_gestures_locked_and_spot_centred():
     page = source("static/claim_detail.js")
-    assert "zoomControl: true" in page
+    assert "zoomControl: false" in page
+    assert "window.L.control.zoom({ position: 'topright' }).addTo(map);" in page
     assert "dragging: false" in page
     assert "touchZoom: false" in page
     assert "scrollWheelZoom: false" in page
@@ -45,5 +47,5 @@ def test_claim_detail_keeps_gestures_locked_and_spot_centred():
 def test_detail_map_cache_keys_are_bumped():
     spot = source("templates/spot.html")
     claim = source("templates/claim.html")
-    assert "/static/spot_detail.js?v=locked-global-zoom-v2-20260814-" in spot
-    assert "/static/claim_detail.js?v=locked-global-zoom-v2-20260814-" in claim
+    assert "/static/spot_detail.js?v=locked-global-zoom-right-v3-20260814-" in spot
+    assert "/static/claim_detail.js?v=locked-global-zoom-right-v3-20260814-" in claim

@@ -304,7 +304,7 @@ function renderLockedClaimMap(mapEl, claim) {
     const centre = [Number(spot.lat), Number(spot.long)];
     const colour = spotMapColour(spot);
     const map = window.L.map(mapEl, {
-        zoomControl: true,
+        zoomControl: false,
         attributionControl: true,
         minZoom: DETAIL_MAP_MIN_ZOOM, 
         dragging: false,
@@ -315,6 +315,8 @@ function renderLockedClaimMap(mapEl, claim) {
         keyboard: false,
         tap: false,
     });
+
+    window.L.control.zoom({ position: 'topright' }).addTo(map);
 
     window.L.tileLayer(MAP_TILE_URL, {
         maxZoom: 19,

@@ -1,0 +1,82 @@
+name: Repair chevron CSS scope
+
+on:
+  push:
+    branches:
+      - agent/chevron-fix
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/chevron-fix
+          fetch-depth: 0
+
+      - name: Restore main CSS and add only chevron rules
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout origin/main -- static/home.css
+          cat >> static/home.css <<'CSS'
+
+          /* Stable geometric chevron for collapsible Spot/Claim/FAQ rows. */
+          .spot-list-chevron {
+              position: relative;
+              width: 1.2em !important;
+              height: 1.2em !important;
+              display: inline-block !important;
+              flex: 0 0 1.2em !important;
+              transform: rotate(0deg);
+              transform-origin: 50% 50%;
+              transition: transform 140ms ease;
+          }
+
+          .spot-list-chevron::before {
+              content: "";
+              position: absolute;
+              left: 50%;
+              top: 50%;
+              width: 0.46em;
+              height: 0.46em;
+              border-right: 0.12em solid currentColor;
+              border-bottom: 0.12em solid currentColor;
+              transform: translate(-50%, -65%) rotate(45deg);
+          }
+
+          .spot-list-item.is-expanded .spot-list-chevron {
+              transform: rotate(180deg);
+          }
+
+          @media (prefers-reduced-motion: reduce) {
+              .spot-list-chevron {
+                  transition: none;
+              }
+          }
+          CSS
+
+      - name: Validate CSS scope
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          css = Path('static/home.css').read_text(encoding='utf-8')
+          assert css.count('Stable geometric chevron for collapsible Spot/Claim/FAQ rows.') == 1
+          assert '.spot-list-chevron::before' in css
+          assert 'text-indent: -9999px;' not in css
+          assert 'transform-origin: 50% 50%;' in css
+          assert 'overflow: hidden;' in css
+          PY
+
+      - name: Commit repair and remove helper workflow
+        run: |
+          rm .github/workflows/repair-chevron-css-scope.yml
+          git add -A
+          git commit -m "Keep chevron CSS change narrowly scoped"
+          git push

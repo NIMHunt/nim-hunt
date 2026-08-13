@@ -1,0 +1,42 @@
+name: Update wide-zoom cache test
+
+on:
+  push:
+    branches:
+      - agent/find-spots-wide-zoom-resilience
+
+permissions:
+  contents: write
+
+jobs:
+  update-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/find-spots-wide-zoom-resilience
+          fetch-depth: 0
+      - name: Update cache delivery expectations
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/test_find_spots_search_transport.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              'BOOTSTRAP_CACHE_VERSION = "initial-view-v1-20260803"',
+              'BOOTSTRAP_CACHE_VERSION = "wide-map-refresh-v1-20260813"',
+          )
+          text = text.replace(
+              'PAGE_CACHE_VERSION = "wrapped-search-v2-20260803"',
+              'PAGE_CACHE_VERSION = "wide-map-refresh-v1-20260813"',
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit test update and remove helper
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/update-wide-zoom-test.yml
+          git add tests/test_find_spots_search_transport.py
+          git commit -m "Update Find Spots cache delivery test"
+          git push origin HEAD:agent/find-spots-wide-zoom-resilience

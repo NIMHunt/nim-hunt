@@ -1,0 +1,81 @@
+name: Position detail map zoom controls
+
+on:
+  push:
+    branches:
+      - agent/detail-map-zoom-controls-right
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/detail-map-zoom-controls-right
+          fetch-depth: 0
+
+      - name: Move zoom controls to top right
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          for filename in ('static/spot_detail.js', 'static/claim_detail.js'):
+              path = Path(filename)
+              text = path.read_text(encoding='utf-8')
+              old = "        zoomControl: true,\n        attributionControl: true,"
+              new = "        zoomControl: false,\n        attributionControl: true,"
+              if old not in text:
+                  raise SystemExit(f'zoomControl anchor missing in {filename}')
+              text = text.replace(old, new, 1)
+
+              if filename.endswith('spot_detail.js'):
+                  anchor = "    }).setView(centre, 15);\n\n    window.L.tileLayer(MAP_TILE_URL, {"
+                  replacement = "    }).setView(centre, 15);\n\n    window.L.control.zoom({ position: 'topright' }).addTo(map);\n\n    window.L.tileLayer(MAP_TILE_URL, {"
+              else:
+                  anchor = "        tap: false,\n    });\n\n    window.L.tileLayer(MAP_TILE_URL, {"
+                  replacement = "        tap: false,\n    });\n\n    window.L.control.zoom({ position: 'topright' }).addTo(map);\n\n    window.L.tileLayer(MAP_TILE_URL, {"
+
+              if anchor not in text:
+                  raise SystemExit(f'control insertion anchor missing in {filename}')
+              text = text.replace(anchor, replacement, 1)
+              path.write_text(text, encoding='utf-8')
+
+          for filename in ('templates/spot.html', 'templates/claim.html'):
+              path = Path(filename)
+              text = path.read_text(encoding='utf-8')
+              text = text.replace('locked-global-zoom-v2-20260814', 'locked-global-zoom-right-v3-20260814')
+              path.write_text(text, encoding='utf-8')
+
+          test_path = Path('tests/test_detail_map_zoom_controls.py')
+          test = test_path.read_text(encoding='utf-8')
+          test = test.replace('assert "zoomControl: true" in page', 'assert "zoomControl: false" in page\n    assert "window.L.control.zoom({ position: \'topright\' }).addTo(map);" in page')
+          test = test.replace('assert "/static/spot_detail.js?v=locked-global-zoom-v2-20260814-" in spot', 'assert "/static/spot_detail.js?v=locked-global-zoom-right-v3-20260814-" in spot')
+          test = test.replace('assert "/static/claim_detail.js?v=locked-global-zoom-v2-20260814-" in claim', 'assert "/static/claim_detail.js?v=locked-global-zoom-right-v3-20260814-" in claim')
+          test_path.write_text(test, encoding='utf-8')
+          PY
+
+      - name: Validate focused behaviour
+        run: |
+          node --check static/spot_detail.js
+          node --check static/claim_detail.js
+          python - <<'PY'
+          from pathlib import Path
+          for filename in ('static/spot_detail.js', 'static/claim_detail.js'):
+              text = Path(filename).read_text(encoding='utf-8')
+              assert "zoomControl: false" in text
+              assert "window.L.control.zoom({ position: 'topright' }).addTo(map);" in text
+              assert "const DETAIL_MAP_MIN_ZOOM = 12;" in text
+              assert "doubleClickZoom: false" in text
+          PY
+
+      - name: Commit update and remove helper
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/position-detail-map-zoom-controls.yml
+          git add static/spot_detail.js static/claim_detail.js templates/spot.html templates/claim.html tests/test_detail_map_zoom_controls.py
+          git commit -m "Move detail map zoom controls right"
+          git push origin HEAD:agent/detail-map-zoom-controls-right

@@ -1,0 +1,36 @@
+name: Format detail map fix v2
+
+on:
+  push:
+    branches:
+      - agent/detail-map-zoom-limits
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/detail-map-zoom-limits
+          fetch-depth: 0
+      - name: Clean formatting
+        run: |
+          python -c "from pathlib import Path; p=Path('static/spot_detail.js'); s=p.read_text(); s=s.replace('function metreBoundsAround(lat, long, radiusMetres) {\n        const radius','function metreBoundsAround(lat, long, radiusMetres) {\n    const radius').replace('\n        const latNum','\n    const latNum').replace('\n        const longNum','\n    const longNum').replace('\n        const metresPerDegreeLat','\n    const metresPerDegreeLat').replace('\n        const cosLat','\n    const cosLat').replace('\n        const latDelta','\n    const latDelta').replace('\n        const longDelta','\n    const longDelta').replace('\n        return window.L.latLngBounds(','\n    return window.L.latLngBounds(').replace('\n            [latNum - latDelta, longNum - longDelta],','\n        [latNum - latDelta, longNum - longDelta],').replace('\n            [latNum + latDelta, longNum + longDelta]','\n        [latNum + latDelta, longNum + longDelta]').replace('\n        );\n    }\n\n    function buildSpotMapShell() {','\n    );\n}\n\nfunction buildSpotMapShell() {').replace('\n  map.setView(centre, minZoom, { animate: false });','\n            map.setView(centre, minZoom, { animate: false });').replace('\n  map.panTo(centre, { animate: false });','\n            map.panTo(centre, { animate: false });'); p.write_text(s)"
+          python -c "from pathlib import Path; p=Path('static/claim_detail.js'); s=p.read_text().replace('\n  map.setView(centre, minZoom, { animate: false });','\n            map.setView(centre, minZoom, { animate: false });'); p.write_text(s)"
+      - name: Validate
+        run: |
+          node --check static/spot_detail.js
+          node --check static/claim_detail.js
+          python -m pip install pytest >/dev/null
+          python -m pytest -q tests/test_detail_map_zoom_controls.py
+      - name: Commit and remove helper
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/format-detail-map-fix-v2.yml
+          git add static/spot_detail.js static/claim_detail.js
+          git commit -m "Format detail map zoom changes"
+          git push origin HEAD:agent/detail-map-zoom-limits

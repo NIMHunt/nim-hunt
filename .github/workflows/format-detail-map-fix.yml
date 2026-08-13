@@ -1,0 +1,91 @@
+name: Format detail map fix
+
+on:
+  push:
+    branches:
+      - agent/detail-map-zoom-limits
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/detail-map-zoom-limits
+          fetch-depth: 0
+
+      - name: Clean formatting
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          spot = Path('static/spot_detail.js')
+          text = spot.read_text(encoding='utf-8')
+          text = text.replace('''function metreBoundsAround(lat, long, radiusMetres) {
+                  const radius = Math.max(1, Number(radiusMetres || 25));
+                  const latNum = Number(lat);
+                  const longNum = Number(long);
+                  const metresPerDegreeLat = 111320;
+                  const cosLat = Math.max(0.01, Math.abs(Math.cos(latNum * Math.PI / 180)));
+                  const latDelta = radius / metresPerDegreeLat;
+                  const longDelta = radius / (metresPerDegreeLat * cosLat);
+
+                  return window.L.latLngBounds(
+                      [latNum - latDelta, longNum - longDelta],
+                      [latNum + latDelta, longNum + longDelta]
+                  );
+              }
+
+              function buildSpotMapShell() {''', '''function metreBoundsAround(lat, long, radiusMetres) {
+    const radius = Math.max(1, Number(radiusMetres || 25));
+    const latNum = Number(lat);
+    const longNum = Number(long);
+    const metresPerDegreeLat = 111320;
+    const cosLat = Math.max(0.01, Math.abs(Math.cos(latNum * Math.PI / 180)));
+    const latDelta = radius / metresPerDegreeLat;
+    const longDelta = radius / (metresPerDegreeLat * cosLat);
+
+    return window.L.latLngBounds(
+        [latNum - latDelta, longNum - longDelta],
+        [latNum + latDelta, longNum + longDelta]
+    );
+}
+
+function buildSpotMapShell() {''')
+          text = text.replace('''        if (map.getZoom() < minZoom) {
+  map.setView(centre, minZoom, { animate: false });
+        } else {
+  map.panTo(centre, { animate: false });
+        }''', '''        if (map.getZoom() < minZoom) {
+            map.setView(centre, minZoom, { animate: false });
+        } else {
+            map.panTo(centre, { animate: false });
+        }''')
+          spot.write_text(text, encoding='utf-8')
+
+          claim = Path('static/claim_detail.js')
+          text = claim.read_text(encoding='utf-8')
+          text = text.replace('''        if (map.getZoom() < minZoom) {
+  map.setView(centre, minZoom, { animate: false });
+        }''', '''        if (map.getZoom() < minZoom) {
+            map.setView(centre, minZoom, { animate: false });
+        }''')
+          claim.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Validate
+        run: |
+          node --check static/spot_detail.js
+          node --check static/claim_detail.js
+
+      - name: Commit and remove helper
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/format-detail-map-fix.yml
+          git add static/spot_detail.js static/claim_detail.js
+          git commit -m "Format detail map zoom changes"
+          git push origin HEAD:agent/detail-map-zoom-limits

@@ -39,3 +39,17 @@ def test_find_spots_builds_a_replacement_marker_layer_before_swapping():
 def test_find_spots_keeps_wide_world_browsing_enabled():
     initial_view = source("static/find_spots_initial_view.js")
     assert "FIND_SPOTS_MIN_ZOOM = 0" in initial_view
+
+
+def test_known_location_disables_double_click_recentering():
+    page = source("static/find_spots.js")
+
+    interaction = page.split("function setMapInteractionEnabled(enabled) {", 1)[1].split(
+        "function clearScheduledMapRefresh()", 1
+    )[0]
+    setup = page.split("function setupMap() {", 1)[1].split(
+        "async function initFindSpots()", 1
+    )[0]
+
+    assert "state.map.doubleClickZoom?.[method]?.();" in interaction
+    assert "doubleClickZoom: !state.hasUserLocation," in setup

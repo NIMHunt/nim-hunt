@@ -60,7 +60,7 @@ def _creation_fee_processing_response(meta: dict[str, Any]) -> JSONResponse:
     )
 
 
-_ASSET_VERSION = "special-user-badge-v1-20260727"
+_ASSET_VERSION = "stable-chevron-v1-20260813"
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _ALLOWED_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{2,8})*$")

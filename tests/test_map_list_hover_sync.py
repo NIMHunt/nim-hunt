@@ -66,4 +66,21 @@ def test_blue_outline_and_description_spacing_are_intentional_shared_rules():
 
 def test_asset_version_is_bumped():
     public_html = source("public_html.py")
-    assert '_ASSET_VERSION = "special-user-badge-v1-20260727"' in public_html
+    assert '_ASSET_VERSION = "stable-chevron-v1-20260813"' in public_html
+
+
+def test_collapsible_chevron_uses_stable_geometry():
+    css = source("static/home.css")
+    assert "Stable geometric chevron for collapsible Spot/Claim/FAQ rows." in css
+    assert ".spot-list-chevron::before" in css
+    assert "text-indent: -9999px;" not in css
+    for path in (
+        "templates/_faq_content.html",
+        "static/spot_ui.js",
+        "static/my_claims.js",
+        "static/find_spots.js",
+    ):
+        assert "⌄" not in source(path)
+    assert "transform-origin: 50% 50%;" in css
+    assert "transform: rotate(0deg);" in css
+    assert "transform: rotate(180deg);" in css

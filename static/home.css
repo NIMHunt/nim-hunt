@@ -3669,3 +3669,43 @@ h2 {
     color: #ffffff !important;
     box-shadow: 0 0 32px rgba(217, 68, 68, 0.22) !important;
 }
+
+
+/* Stable geometric chevron for collapsible Spot/Claim/FAQ rows.
+   The legacy text glyph remains in the DOM for compatibility, but is hidden
+   visually so font fallback cannot change the icon shape or rotation centre. */
+.spot-list-chevron {
+    position: relative;
+    width: 1.2em !important;
+    height: 1.2em !important;
+    display: inline-block !important;
+    flex: 0 0 1.2em !important;
+    overflow: hidden;
+    text-indent: -9999px;
+    line-height: 0 !important;
+    transform: rotate(0deg);
+    transform-origin: 50% 50%;
+    transition: transform 140ms ease;
+}
+
+.spot-list-chevron::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 0.46em;
+    height: 0.46em;
+    border-right: 0.12em solid currentColor;
+    border-bottom: 0.12em solid currentColor;
+    transform: translate(-50%, -65%) rotate(45deg);
+}
+
+.spot-list-item.is-expanded .spot-list-chevron {
+    transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .spot-list-chevron {
+        transition: none;
+    }
+}

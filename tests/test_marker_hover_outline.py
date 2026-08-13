@@ -31,7 +31,7 @@ def test_marker_shadow_and_cache_versions_are_preserved():
     my_claims = source("static/my_claims.js")
     assert ".spot-centre-marker {" in css
     assert "filter: drop-shadow(0 3px 4px rgba(31, 35, 72, 0.18));" in css
-    assert '_ASSET_VERSION = "special-user-badge-v1-20260727"' in public_html
+    assert '_ASSET_VERSION = "stable-chevron-v1-20260813"' in public_html
     assert "spot_map.js?v=my-spots-overview-v3-20260802" in my_spots
     assert "spot_map.js?v=marker-white-outline-v1-20260723" in my_claims
     assert "spot_ui.js?v=special-user-badge-v1-20260727" in my_spots

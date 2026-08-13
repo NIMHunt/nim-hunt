@@ -1,0 +1,115 @@
+name: Revise detail map global zoom floor
+
+on:
+  push:
+    branches:
+      - agent/detail-map-zoom-limits
+
+permissions:
+  contents: write
+
+jobs:
+  revise:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/detail-map-zoom-limits
+          fetch-depth: 0
+
+      - name: Apply global zoom floor
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          MIN_ZOOM = 12
+          CACHE = 'locked-global-zoom-v2-20260814'
+
+          spot_path = Path('static/spot_detail.js')
+          spot = spot_path.read_text(encoding='utf-8')
+          spot = spot.replace(
+              "const REPORT_DETAILS_MAX = Number.parseInt(document.body.dataset.reportDetailsMax || '300', 10);",
+              "const REPORT_DETAILS_MAX = Number.parseInt(document.body.dataset.reportDetailsMax || '300', 10);\nconst DETAIL_MAP_MIN_ZOOM = 12;",
+          )
+          start = spot.index('function metreBoundsAround(lat, long, radiusMetres) {')
+          end = spot.index('function buildSpotMapShell() {', start)
+          spot = spot[:start] + spot[end:]
+          spot = spot.replace(
+              "        zoomControl: true,\n        attributionControl: true,",
+              "        zoomControl: true,\n        attributionControl: true,\n        minZoom: DETAIL_MAP_MIN_ZOOM,",
+              1,
+          )
+          old = '''    const radiusBounds = metreBoundsAround(centre[0], centre[1], spot.radius).pad(0.18);
+    function applyRadiusZoomFloor() {
+        map.invalidateSize(false);
+        const minZoom = Math.max(0, Math.min(19, map.getBoundsZoom(radiusBounds, false)));
+        map.setMinZoom(minZoom);
+        if (map.getZoom() < minZoom) {
+            map.setView(centre, minZoom, { animate: false });
+        } else {
+            map.panTo(centre, { animate: false });
+        }
+    }
+
+    applyRadiusZoomFloor();
+    window.setTimeout(applyRadiusZoomFloor, 0);'''
+          new = '''    map.invalidateSize(false);
+    window.setTimeout(() => {
+        map.invalidateSize(false);
+        map.panTo(centre, { animate: false });
+    }, 0);'''
+          if old not in spot:
+              raise SystemExit('Spot Detail dynamic zoom block not found')
+          spot = spot.replace(old, new, 1)
+          spot_path.write_text(spot, encoding='utf-8')
+
+          claim_path = Path('static/claim_detail.js')
+          claim = claim_path.read_text(encoding='utf-8')
+          claim = claim.replace(
+              "const MAP_TILE_ATTRIBUTION = document.body.dataset.mapTileAttribution || '&copy; OpenStreetMap contributors';",
+              "const MAP_TILE_ATTRIBUTION = document.body.dataset.mapTileAttribution || '&copy; OpenStreetMap contributors';\nconst DETAIL_MAP_MIN_ZOOM = 12;",
+          )
+          claim = claim.replace(
+              "        zoomControl: true,\n        attributionControl: true,",
+              "        zoomControl: true,\n        attributionControl: true,\n        minZoom: DETAIL_MAP_MIN_ZOOM,",
+              1,
+          )
+          old = '''        const minZoom = Math.max(0, Math.min(19, map.getBoundsZoom(radiusBounds, false)));
+        map.setMinZoom(minZoom);
+        map.fitBounds(radiusBounds, { animate: false, maxZoom: 16 });
+        if (map.getZoom() < minZoom) {
+            map.setView(centre, minZoom, { animate: false });
+        }'''
+          new = '''        map.fitBounds(radiusBounds, { animate: false, maxZoom: 16 });
+        if (map.getZoom() < DETAIL_MAP_MIN_ZOOM) {
+            map.setView(centre, DETAIL_MAP_MIN_ZOOM, { animate: false });
+        }'''
+          if old not in claim:
+              raise SystemExit('Claim Detail dynamic zoom block not found')
+          claim = claim.replace(old, new, 1)
+          claim_path.write_text(claim, encoding='utf-8')
+
+          for template_name, module_name in [('templates/spot.html', 'spot_detail.js'), ('templates/claim.html', 'claim_detail.js')]:
+              path = Path(template_name)
+              text = path.read_text(encoding='utf-8')
+              text = text.replace('locked-radius-zoom-v1-20260814', CACHE)
+              path.write_text(text, encoding='utf-8')
+
+          test_path = Path('tests/test_detail_map_zoom_controls.py')
+          test_path.write_text('''from pathlib import Path\n\nROOT = Path(__file__).resolve().parents[1]\n\n\ndef source(path: str) -> str:\n    return (ROOT / path).read_text(encoding="utf-8")\n\n\ndef test_spot_detail_map_only_allows_explicit_zoom_controls():\n    page = source("static/spot_detail.js")\n    assert "zoomControl: true" in page\n    assert "dragging: false" in page\n    assert "touchZoom: false" in page\n    assert "scrollWheelZoom: false" in page\n    assert "doubleClickZoom: false" in page\n    assert "boxZoom: false" in page\n    assert "keyboard: false" in page\n    assert "map.on('moveend zoomend', keepCentred);" not in page\n\n\ndef test_detail_maps_share_a_global_one_kilometre_zoom_floor():\n    spot = source("static/spot_detail.js")\n    claim = source("static/claim_detail.js")\n\n    for page in (spot, claim):\n        assert "const DETAIL_MAP_MIN_ZOOM = 12;" in page\n        assert "minZoom: DETAIL_MAP_MIN_ZOOM," in page\n        assert "map.getBoundsZoom(" not in page\n        assert "map.setMinZoom(" not in page\n\n\ndef test_claim_detail_keeps_gestures_locked_and_spot_centred():\n    page = source("static/claim_detail.js")\n    assert "zoomControl: true" in page\n    assert "dragging: false" in page\n    assert "touchZoom: false" in page\n    assert "scrollWheelZoom: false" in page\n    assert "doubleClickZoom: false" in page\n    assert "bounds.extend(userLatLng);" not in page\n    assert "map.fitBounds(radiusBounds, { animate: false, maxZoom: 16 });" in page\n    assert "map.setView(centre, DETAIL_MAP_MIN_ZOOM, { animate: false });" in page\n\n\ndef test_detail_map_cache_keys_are_bumped():\n    spot = source("templates/spot.html")\n    claim = source("templates/claim.html")\n    assert "/static/spot_detail.js?v=locked-global-zoom-v2-20260814-" in spot\n    assert "/static/claim_detail.js?v=locked-global-zoom-v2-20260814-" in claim\n''', encoding='utf-8')
+          PY
+
+      - name: Validate focused behaviour
+        run: |
+          node --check static/spot_detail.js
+          node --check static/claim_detail.js
+          python -m pytest -q tests/test_detail_map_zoom_controls.py
+
+      - name: Commit revision and remove helper
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/revise-detail-map-global-zoom.yml
+          git add static/spot_detail.js static/claim_detail.js templates/spot.html templates/claim.html tests/test_detail_map_zoom_controls.py
+          git commit -m "Use a global detail map zoom floor"
+          git push origin HEAD:agent/detail-map-zoom-limits

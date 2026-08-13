@@ -36,6 +36,8 @@ def test_claim_detail_keeps_gestures_locked_and_limits_zoom_out_by_radius():
     assert "const radiusBounds = metreBoundsAround(centre[0], centre[1], spot.radius).pad(0.18);" in page
     assert "map.getBoundsZoom(radiusBounds, false)" in page
     assert "map.setMinZoom(minZoom);" in page
+    assert "bounds.extend(userLatLng);" not in page
+    assert "map.fitBounds(radiusBounds, { animate: false, maxZoom: 16 });" in page
 
 
 def test_detail_map_cache_keys_are_bumped():

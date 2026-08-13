@@ -337,7 +337,6 @@ function renderLockedClaimMap(mapEl, claim) {
         weight: 2,
     }).addTo(map);
 
-    const bounds = metreBoundsAround(centre[0], centre[1], spot.radius);
     if (shouldShowClaimLocation(claim)) {
         const userLatLng = [Number(claim.lat), Number(claim.long)];
         window.L.circleMarker(userLatLng, {
@@ -348,16 +347,14 @@ function renderLockedClaimMap(mapEl, claim) {
             opacity: 1,
             weight: 2,
         }).addTo(map);
-        bounds.extend(userLatLng);
     }
 
     const radiusBounds = metreBoundsAround(centre[0], centre[1], spot.radius).pad(0.18);
-    const paddedBounds = bounds.pad(0.18);
     function fitLockedClaimMap() {
         map.invalidateSize(false);
         const minZoom = Math.max(0, Math.min(19, map.getBoundsZoom(radiusBounds, false)));
         map.setMinZoom(minZoom);
-        map.fitBounds(paddedBounds, { animate: false, maxZoom: 16 });
+        map.fitBounds(radiusBounds, { animate: false, maxZoom: 16 });
         if (map.getZoom() < minZoom) {
             map.setView(centre, minZoom, { animate: false });
         }

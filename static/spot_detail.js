@@ -836,7 +836,7 @@ function renderLockedSpotMap(mapEl, spot) {
     const colour = badgeColourForSpot(spot);
 
     const map = window.L.map(mapEl, {
-        zoomControl: true,
+        zoomControl: false,
         attributionControl: true,
         minZoom: DETAIL_MAP_MIN_ZOOM,
         dragging: false,
@@ -847,6 +847,8 @@ function renderLockedSpotMap(mapEl, spot) {
         keyboard: false,
         tap: false,
     }).setView(centre, 15);
+
+    window.L.control.zoom({ position: 'topright' }).addTo(map);
 
     window.L.tileLayer(MAP_TILE_URL, {
         maxZoom: 19,

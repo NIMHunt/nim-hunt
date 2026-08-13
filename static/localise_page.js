@@ -1,3 +1,4 @@
+import './detail_map_controls.js?v=radius-zoom-v1-20260814';
 import {
     applyStaticInterfaceText,
     getReportReasonOptions,

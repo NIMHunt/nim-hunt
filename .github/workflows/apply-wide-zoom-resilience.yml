@@ -1,0 +1,305 @@
+name: Apply Find Spots wide-zoom resilience fix
+
+on:
+  push:
+    branches:
+      - agent/find-spots-wide-zoom-resilience
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/find-spots-wide-zoom-resilience
+          fetch-depth: 0
+
+      - name: Apply focused Find Spots fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          page_path = Path('static/find_spots.js')
+          page = page_path.read_text(encoding='utf-8')
+
+          old_state = "    locationRequestStatusDelayTimerId: null,\n};"
+          new_state = "    locationRequestStatusDelayTimerId: null,\n    mapRefreshTimerId: null,\n};"
+          if old_state not in page:
+              raise SystemExit('Find Spots state insertion point not found')
+          page = page.replace(old_state, new_state, 1)
+
+          old_constants = "const LOCATION_REQUEST_STATUS_DELAY_MS = 150;\nconst CREATE_SPOT_URL"
+          new_constants = "const LOCATION_REQUEST_STATUS_DELAY_MS = 150;\nconst MAP_REFRESH_DEBOUNCE_MS = 120;\nconst CREATE_SPOT_URL"
+          if old_constants not in page:
+              raise SystemExit('Find Spots debounce constant insertion point not found')
+          page = page.replace(old_constants, new_constants, 1)
+
+          start_marker = 'function renderMapSpots(spots) {'
+          end_marker = '\nasync function fetchInitialSpots() {'
+          start = page.find(start_marker)
+          end = page.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('renderMapSpots block not found')
+
+          replacement = '''function renderMapSpots(spots) {
+              const filters = getFilterParams();
+              const radiusCircles = [];
+              const dots = [];
+              const nextSpotLayer = L.layerGroup();
+              const nextMapLayersBySpotId = new Map();
+
+              for (const spot of spots) {
+                  const matchesFilters = spotMatchesFilters(spot, filters);
+                  const colour = matchesFilters ? markerColour(spot) : MAP_COLOURS.muted;
+                  const latLng = [Number(spot.lat), Number(spot.long)];
+                  let showTooltip = null;
+                  let hideTooltip = null;
+                  let radiusCircle = null;
+
+                  if (matchesFilters) {
+                      radiusCircle = L.circle(latLng, {
+                          radius: spot.radius,
+                          color: colour,
+                          opacity: 0.95,
+                          fillColor: colour,
+                          fillOpacity: 0.22,
+                          weight: 2.5,
+                          interactive: true,
+                          bubblingMouseEvents: false,
+                          className: 'spot-radius-circle',
+                      });
+
+                      const tooltip = L.tooltip({
+                          className: 'map-spot-title-tooltip',
+                          direction: 'top',
+                          offset: [0, -16],
+                          opacity: 1,
+                          interactive: false,
+                      })
+                          .setLatLng(latLng)
+                          .setContent(createMapSpotTooltipContent(spot));
+
+                      showTooltip = () => {
+                          if (!spotCentreWithinBounds(spot, state.map.getBounds())) return;
+                          if (!nextSpotLayer.hasLayer(tooltip)) nextSpotLayer.addLayer(tooltip);
+                      };
+                      hideTooltip = () => {
+                          if (nextSpotLayer.hasLayer(tooltip)) nextSpotLayer.removeLayer(tooltip);
+                      };
+                      radiusCircle.on('mouseover', showTooltip);
+                      radiusCircle.on('mouseout', hideTooltip);
+                      radiusCircles.push(radiusCircle);
+                  }
+
+                  const dot = L.circleMarker(latLng, {
+                      radius: MAP_MARKER_RADIUS,
+                      color: '#ffffff',
+                      fillColor: colour,
+                      fillOpacity: matchesFilters ? 1 : 0.68,
+                      weight: 2,
+                      interactive: matchesFilters,
+                      bubblingMouseEvents: false,
+                      className: `spot-centre-marker ${matchesFilters ? 'is-interactive' : 'is-muted'}`,
+                  });
+
+                  nextMapLayersBySpotId.set(Number(spot.id), {
+                      radiusCircle,
+                      dot,
+                      colour,
+                      matchesFilters,
+                  });
+
+                  if (matchesFilters) {
+                      dot.on('click', () => focusSpotInList(spot.id));
+                      dot.on('mouseover', () => {
+                          showTooltip?.();
+                          setSpotListMapHighlighted(spot.id, true);
+                      });
+                      dot.on('mouseout', () => {
+                          hideTooltip?.();
+                          setSpotListMapHighlighted(spot.id, false);
+                      });
+                  }
+                  dots.push(dot);
+              }
+
+              // Build the replacement layer completely before touching the working
+              // map. If creating any marker fails, the previous Spots stay visible.
+              for (const radiusCircle of radiusCircles) {
+                  radiusCircle.addTo(nextSpotLayer);
+              }
+              for (const dot of dots) {
+                  dot.addTo(nextSpotLayer);
+              }
+
+              try {
+                  nextSpotLayer.addTo(state.map);
+              } catch (err) {
+                  nextSpotLayer.remove();
+                  throw err;
+              }
+
+              const previousSpotLayer = state.spotLayer;
+              state.spotLayer = nextSpotLayer;
+              state.mapLayersBySpotId = nextMapLayersBySpotId;
+              previousSpotLayer?.remove();
+
+              for (const entry of state.listEntriesBySpotId.values()) {
+                  entry.item.classList.remove('is-map-highlighted');
+              }
+          }
+          '''.replace('          ', '')
+          page = page[:start] + replacement + page[end:]
+
+          old_refresh = '''async function refreshVisibleSpots() {
+              if (!state.map) return;
+
+              if (state.fetchController) {
+          '''.replace('          ', '')
+          new_refresh = '''async function refreshVisibleSpots() {
+              if (!state.map) return;
+              clearScheduledMapRefresh();
+
+              if (state.fetchController) {
+          '''.replace('          ', '')
+          if old_refresh not in page:
+              raise SystemExit('refreshVisibleSpots insertion point not found')
+          page = page.replace(old_refresh, new_refresh, 1)
+
+          old_moved = '''async function handleMapMoved() {
+              if (state.testLocationMode) syncTestLocationFromMapCentre();
+              await refreshVisibleSpots();
+          }
+          '''.replace('          ', '')
+          new_moved = '''function clearScheduledMapRefresh() {
+              if (!state.mapRefreshTimerId) return;
+              window.clearTimeout(state.mapRefreshTimerId);
+              state.mapRefreshTimerId = null;
+          }
+
+          function scheduleMapRefresh() {
+              clearScheduledMapRefresh();
+              state.mapRefreshTimerId = window.setTimeout(() => {
+                  state.mapRefreshTimerId = null;
+                  void refreshVisibleSpots();
+              }, MAP_REFRESH_DEBOUNCE_MS);
+          }
+
+          function handleMapMoved() {
+              if (state.testLocationMode) syncTestLocationFromMapCentre();
+              scheduleMapRefresh();
+          }
+          '''.replace('          ', '')
+          if old_moved not in page:
+              raise SystemExit('handleMapMoved block not found')
+          page = page.replace(old_moved, new_moved, 1)
+
+          old_listener = "    state.map.on('moveend zoomend', handleMapMoved);"
+          new_listener = "    state.map.on('moveend', handleMapMoved);"
+          if old_listener not in page:
+              raise SystemExit('Leaflet movement listener not found')
+          page = page.replace(old_listener, new_listener, 1)
+
+          old_unload = "window.addEventListener('beforeunload', stopLiveRefresh);"
+          new_unload = "window.addEventListener('beforeunload', () => {\n    stopLiveRefresh();\n    clearScheduledMapRefresh();\n});"
+          if old_unload not in page:
+              raise SystemExit('beforeunload listener not found')
+          page = page.replace(old_unload, new_unload, 1)
+
+          page_path.write_text(page, encoding='utf-8')
+
+          bootstrap_path = Path('static/find_spots_bootstrap.js')
+          bootstrap = bootstrap_path.read_text(encoding='utf-8')
+          old_page_import = "./find_spots.js?v=wrapped-search-v2-20260803-chevron-cache-compat-v2-20260813"
+          new_page_import = "./find_spots.js?v=wide-map-refresh-v1-20260813"
+          if old_page_import not in bootstrap:
+              raise SystemExit('Find Spots page cache key not found')
+          bootstrap_path.write_text(bootstrap.replace(old_page_import, new_page_import, 1), encoding='utf-8')
+
+          template_path = Path('templates/find_spots.html')
+          template = template_path.read_text(encoding='utf-8')
+          old_bootstrap = "/static/find_spots_bootstrap.js?v=initial-view-v1-20260803-{{ asset_version"
+          new_bootstrap = "/static/find_spots_bootstrap.js?v=wide-map-refresh-v1-20260813-{{ asset_version"
+          if old_bootstrap not in template:
+              raise SystemExit('Find Spots bootstrap cache key not found')
+          template_path.write_text(template.replace(old_bootstrap, new_bootstrap, 1), encoding='utf-8')
+
+          initial_test_path = Path('tests/test_find_spots_initial_view.py')
+          initial_test = initial_test_path.read_text(encoding='utf-8')
+          initial_test = initial_test.replace(
+              './find_spots.js?v=wrapped-search-v2-20260803-chevron-cache-compat-v2-20260813',
+              './find_spots.js?v=wide-map-refresh-v1-20260813',
+          )
+          initial_test = initial_test.replace(
+              '/static/find_spots_bootstrap.js?v=initial-view-v1-20260803-{{ asset_version',
+              '/static/find_spots_bootstrap.js?v=wide-map-refresh-v1-20260813-{{ asset_version',
+          )
+          initial_test_path.write_text(initial_test, encoding='utf-8')
+
+          resilience_test = '''from pathlib import Path
+
+          ROOT = Path(__file__).resolve().parents[1]
+
+
+          def source(path: str) -> str:
+              return (ROOT / path).read_text(encoding="utf-8")
+
+
+          def test_find_spots_debounces_zoom_refreshes_and_uses_one_leaflet_end_event():
+              page = source("static/find_spots.js")
+
+              assert "const MAP_REFRESH_DEBOUNCE_MS = 120;" in page
+              assert "mapRefreshTimerId: null" in page
+              assert "function scheduleMapRefresh()" in page
+              assert "state.map.on('moveend', handleMapMoved);" in page
+              assert "state.map.on('moveend zoomend', handleMapMoved);" not in page
+              assert "clearScheduledMapRefresh();" in page
+
+
+          def test_find_spots_builds_a_replacement_marker_layer_before_swapping():
+              page = source("static/find_spots.js")
+              render = page.split("function renderMapSpots(spots) {", 1)[1].split(
+                  "async function fetchInitialSpots() {", 1
+              )[0]
+
+              assert "const nextSpotLayer = L.layerGroup();" in render
+              assert "const nextMapLayersBySpotId = new Map();" in render
+              assert "state.spotLayer.clearLayers();" not in render
+              assert "nextSpotLayer.addTo(state.map);" in render
+              assert "const previousSpotLayer = state.spotLayer;" in render
+              assert "state.spotLayer = nextSpotLayer;" in render
+              assert "previousSpotLayer?.remove();" in render
+              assert render.index("nextSpotLayer.addTo(state.map);") < render.index(
+                  "previousSpotLayer?.remove();"
+              )
+
+
+          def test_find_spots_keeps_wide_world_browsing_enabled():
+              initial_view = source("static/find_spots_initial_view.js")
+              assert "FIND_SPOTS_MIN_ZOOM = 0" in initial_view
+          '''.replace('          ', '')
+          Path('tests/test_find_spots_refresh_resilience.py').write_text(resilience_test, encoding='utf-8')
+          PY
+
+      - name: Validate focused behaviour
+        run: |
+          node --check static/find_spots.js
+          node --test helpers/find_spots_search_transport.test.mjs
+          python -m pip install pytest >/dev/null
+          python -m pytest -q \
+            tests/test_find_spots_refresh_resilience.py \
+            tests/test_find_spots_initial_view.py \
+            tests/test_find_spots_search_transport.py
+
+      - name: Commit fix and remove helper
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-wide-zoom-resilience.yml
+          git add static/find_spots.js static/find_spots_bootstrap.js templates/find_spots.html tests/test_find_spots_initial_view.py tests/test_find_spots_refresh_resilience.py
+          git commit -m "Keep Find Spots visible after wide-map refresh failures"
+          git push origin HEAD:agent/find-spots-wide-zoom-resilience

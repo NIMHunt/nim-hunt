@@ -35,18 +35,18 @@ def test_faq_is_a_fourth_information_view_with_a_clean_route() -> None:
 def test_faq_reuses_spot_and_claim_collapsible_card_structure() -> None:
     partial = _read("templates/_faq_content.html")
 
-    assert partial.count('class="spot-list-item faq-item"') == 8
-    assert partial.count('class="spot-list-toggle faq-toggle"') == 8
-    assert partial.count('class="spot-list-title faq-question"') == 8
-    assert partial.count('class="spot-list-chevron"') == 8
-    assert partial.count('class="spot-list-detail faq-answer"') == 8
-    assert partial.count('class="nq-text faq-answer-copy"') == 8
-    assert partial.count('aria-expanded="false"') == 8
+    assert partial.count('class="spot-list-item faq-item"') == 9
+    assert partial.count('class="spot-list-toggle faq-toggle"') == 9
+    assert partial.count('class="spot-list-title faq-question"') == 9
+    assert partial.count('class="spot-list-chevron"') == 9
+    assert partial.count('class="spot-list-detail faq-answer"') == 9
+    assert partial.count('class="nq-text faq-answer-copy"') == 10
+    assert partial.count('aria-expanded="false"') == 9
 
     controls = re.findall(r'aria-controls="([^"]+)"', partial)
     answers = re.findall(r'id="(faq-answer-[^"]+)"', partial)
     assert controls == answers
-    assert len(set(answers)) == 8
+    assert len(set(answers)) == 9
 
 
 def test_faq_uses_final_copy_and_lowercase_feature_terms() -> None:
@@ -55,6 +55,7 @@ def test_faq_uses_final_copy_and_lowercase_feature_terms() -> None:
     for question in (
         "What is NimHunt?",
         "Is NimHunt free to use?",
+        "What fees do Spot creators pay?",
         "Do I need Nimiq Pay to use NimHunt?",
         "Why does NimHunt need my precise location?",
         "NimHunt says 'Location unavailable'. What should I do?",
@@ -66,6 +67,8 @@ def test_faq_uses_final_copy_and_lowercase_feature_terms() -> None:
 
     assert "NIM-funded geographic spots" in partial
     assert "users do not pay to make a claim or enter a prizedraw" in partial
+    assert "a small creation fee" in partial
+    assert "A small cancellation fee" in partial
     assert "clearer GPS signal" in partial
     assert "Successfully entering a prizedraw" in partial
     assert "one-time-use codes" in partial

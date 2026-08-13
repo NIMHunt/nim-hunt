@@ -1,0 +1,102 @@
+name: Refine chevron implementation
+
+on:
+  push:
+    branches:
+      - agent/chevron-fix
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/chevron-fix
+          fetch-depth: 0
+
+      - name: Merge latest main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+
+      - name: Remove legacy chevron glyph
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          css_path = Path('static/home.css')
+          css = css_path.read_text(encoding='utf-8')
+          css = css.replace(
+              '/* Stable geometric chevron for collapsible Spot/Claim/FAQ rows.\n'
+              '   The legacy text glyph remains in the DOM for compatibility, but is hidden\n'
+              '   visually so font fallback cannot change the icon shape or rotation centre. */',
+              '/* Stable geometric chevron for collapsible Spot/Claim/FAQ rows. */',
+          )
+          for legacy_rule in (
+              '    overflow: hidden;\n',
+              '    text-indent: -9999px;\n',
+              '    line-height: 0 !important;\n',
+          ):
+              css = css.replace(legacy_rule, '')
+          css_path.write_text(css, encoding='utf-8')
+
+          faq_path = Path('templates/_faq_content.html')
+          faq = faq_path.read_text(encoding='utf-8')
+          if '⌄' not in faq:
+              raise SystemExit('Expected legacy FAQ chevrons were not found')
+          faq_path.write_text(faq.replace('>⌄</span>', '></span>'), encoding='utf-8')
+
+          for filename in ('static/spot_ui.js', 'static/my_claims.js', 'static/find_spots.js'):
+              path = Path(filename)
+              text = path.read_text(encoding='utf-8')
+              lines = text.splitlines(keepends=True)
+              removed = [line for line in lines if '⌄' in line]
+              if not removed or any('chevron.textContent' not in line for line in removed):
+                  raise SystemExit(f'Unexpected legacy chevron usage in {filename}: {removed!r}')
+              path.write_text(''.join(line for line in lines if '⌄' not in line), encoding='utf-8')
+
+          test_path = Path('tests/test_map_list_hover_sync.py')
+          test = test_path.read_text(encoding='utf-8')
+          test = test.replace(
+              '    assert "text-indent: -9999px;" in css\n',
+              '    assert "text-indent: -9999px;" not in css\n'
+              '    for path in (\n'
+              '        "templates/_faq_content.html",\n'
+              '        "static/spot_ui.js",\n'
+              '        "static/my_claims.js",\n'
+              '        "static/find_spots.js",\n'
+              '    ):\n'
+              '        assert "⌄" not in source(path)\n',
+          )
+          test_path.write_text(test, encoding='utf-8')
+          PY
+
+      - name: Validate cleanup
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          css = Path('static/home.css').read_text(encoding='utf-8')
+          assert '.spot-list-chevron::before' in css
+          assert 'transform-origin: 50% 50%;' in css
+          assert 'text-indent: -9999px;' not in css
+          for filename in ('templates/_faq_content.html', 'static/spot_ui.js', 'static/my_claims.js', 'static/find_spots.js'):
+              assert '⌄' not in Path(filename).read_text(encoding='utf-8')
+          PY
+          node --check static/spot_ui.js
+          node --check static/my_claims.js
+          node --check static/find_spots.js
+          python -m compileall -q tests/test_map_list_hover_sync.py
+
+      - name: Commit cleanup and remove helper workflow
+        run: |
+          rm .github/workflows/refine-chevron-implementation.yml
+          git add -A
+          git commit -m "Remove legacy chevron glyph"
+          git push

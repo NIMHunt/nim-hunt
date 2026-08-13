@@ -73,7 +73,14 @@ def test_collapsible_chevron_uses_stable_geometry():
     css = source("static/home.css")
     assert "Stable geometric chevron for collapsible Spot/Claim/FAQ rows." in css
     assert ".spot-list-chevron::before" in css
-    assert "text-indent: -9999px;" in css
+    assert "text-indent: -9999px;" not in css
+    for path in (
+        "templates/_faq_content.html",
+        "static/spot_ui.js",
+        "static/my_claims.js",
+        "static/find_spots.js",
+    ):
+        assert "⌄" not in source(path)
     assert "transform-origin: 50% 50%;" in css
     assert "transform: rotate(0deg);" in css
     assert "transform: rotate(180deg);" in css

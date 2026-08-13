@@ -1557,7 +1557,6 @@ function renderList(spots) {
 
         const chevron = document.createElement('span');
         chevron.className = 'spot-list-chevron';
-        chevron.textContent = '⌄';
         chevron.setAttribute('aria-hidden', 'true');
 
         const actions = document.createElement('span');

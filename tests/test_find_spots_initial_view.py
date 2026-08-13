@@ -12,7 +12,7 @@ def source(path: str) -> str:
 def test_find_spots_initial_view_is_loaded_before_the_page_module():
     bootstrap = source("static/find_spots_bootstrap.js")
     install_import = "./find_spots_initial_view_install.js?v=initial-view-v1-20260803"
-    page_import = "./find_spots.js?v=wrapped-search-v2-20260803"
+    page_import = "./find_spots.js?v=wrapped-search-v2-20260803-chevron-cache-compat-v2-20260813"
 
     assert install_import in bootstrap
     assert page_import in bootstrap
@@ -21,7 +21,7 @@ def test_find_spots_initial_view_is_loaded_before_the_page_module():
 
 def test_find_spots_template_busts_the_bootstrap_cache():
     template = source("templates/find_spots.html")
-    assert "/static/find_spots_bootstrap.js?v=initial-view-v1-20260803" in template
+    assert "/static/find_spots_bootstrap.js?v=initial-view-v1-20260803-{{ asset_version" in template
 
 
 def test_find_spots_initial_view_uses_london_and_allows_a_wide_fit():

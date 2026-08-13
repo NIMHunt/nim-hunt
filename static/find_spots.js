@@ -14,7 +14,7 @@ import {
     metresToText,
     spotScheduleTooltip,
     unixToText,
-} from './spot_ui.js?v=special-user-badge-v1-20260727';
+} from './spot_ui.js?v=chevron-cache-compat-v2-20260813';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { formatNimFromLuna } from './nim_format.js';
 import {

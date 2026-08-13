@@ -3670,13 +3670,16 @@ h2 {
     box-shadow: 0 0 32px rgba(217, 68, 68, 0.22) !important;
 }
 
-/* Stable geometric chevron for collapsible Spot/Claim/FAQ rows. */
+/* Stable geometric chevron for collapsible Spot/Claim/FAQ rows.
+   Hide any legacy text glyph that may still be inserted by stale cached JS. */
 .spot-list-chevron {
     position: relative;
     width: 1.2em !important;
     height: 1.2em !important;
     display: inline-block !important;
     flex: 0 0 1.2em !important;
+    overflow: hidden;
+    text-indent: -9999px;
     transform: rotate(0deg);
     transform-origin: 50% 50%;
     transition: transform 140ms ease;

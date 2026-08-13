@@ -1,7 +1,7 @@
 import './my_spots_world_wrap_install.js?v=my-spots-world-wrap-v1-20260803';
 
 const NIMIQ_PAYMENT_MODULE_URL = './nimiq_payment.js?v=rapid-deposit-v1-20260805';
-const MY_SPOTS_MODULE_URL = './my_spots.js?v=rapid-deposit-v1-20260805';
+const MY_SPOTS_MODULE_URL = './my_spots.js?v=rapid-deposit-v1-20260805-chevron-cache-compat-v2-20260813';
 
 async function refreshCachedPaymentModule(url) {
     try {

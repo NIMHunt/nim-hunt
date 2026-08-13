@@ -785,7 +785,22 @@ function validSpotCoordinate(spot) {
     return Number.isFinite(lat) && Number.isFinite(long);
 }
 
-function buildSpotMapShell() {
+function metreBoundsAround(lat, long, radiusMetres) {
+        const radius = Math.max(1, Number(radiusMetres || 25));
+        const latNum = Number(lat);
+        const longNum = Number(long);
+        const metresPerDegreeLat = 111320;
+        const cosLat = Math.max(0.01, Math.abs(Math.cos(latNum * Math.PI / 180)));
+        const latDelta = radius / metresPerDegreeLat;
+        const longDelta = radius / (metresPerDegreeLat * cosLat);
+
+        return window.L.latLngBounds(
+            [latNum - latDelta, longNum - longDelta],
+            [latNum + latDelta, longNum + longDelta]
+        );
+    }
+
+    function buildSpotMapShell() {
     const map = document.createElement('div');
     map.className = 'spot-detail-map';
     map.setAttribute('aria-label', 'Spot map');
@@ -838,9 +853,9 @@ function renderLockedSpotMap(mapEl, spot) {
         zoomControl: true,
         attributionControl: true,
         dragging: false,
-        touchZoom: true,
-        scrollWheelZoom: true,
-        doubleClickZoom: true,
+        touchZoom: false,
+        scrollWheelZoom: false,
+        doubleClickZoom: false,
         boxZoom: false,
         keyboard: false,
         tap: false,
@@ -872,24 +887,20 @@ function renderLockedSpotMap(mapEl, spot) {
     bindSpotMapPopup(radiusCircle, spot);
     bindSpotMapPopup(marker, spot);
 
-    let recentring = false;
-    function keepCentred() {
-        if (recentring) return;
-
-        const current = map.getCenter();
-        const drifted = Math.abs(current.lat - centre[0]) > 0.000001 || Math.abs(current.lng - centre[1]) > 0.000001;
-        if (!drifted) return;
-
-        recentring = true;
-        map.setView(centre, map.getZoom(), { animate: false });
-        recentring = false;
+    const radiusBounds = metreBoundsAround(centre[0], centre[1], spot.radius).pad(0.18);
+    function applyRadiusZoomFloor() {
+        map.invalidateSize(false);
+        const minZoom = Math.max(0, Math.min(19, map.getBoundsZoom(radiusBounds, false)));
+        map.setMinZoom(minZoom);
+        if (map.getZoom() < minZoom) {
+  map.setView(centre, minZoom, { animate: false });
+        } else {
+  map.panTo(centre, { animate: false });
+        }
     }
 
-    map.on('moveend zoomend', keepCentred);
-    window.setTimeout(() => {
-        map.invalidateSize(false);
-        keepCentred();
-    }, 0);
+    applyRadiusZoomFloor();
+    window.setTimeout(applyRadiusZoomFloor, 0);
 }
 
 function buildRewardAmountLine(amountText) {

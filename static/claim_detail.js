@@ -351,13 +351,20 @@ function renderLockedClaimMap(mapEl, claim) {
         bounds.extend(userLatLng);
     }
 
+    const radiusBounds = metreBoundsAround(centre[0], centre[1], spot.radius).pad(0.18);
     const paddedBounds = bounds.pad(0.18);
-    map.invalidateSize(false);
-    map.fitBounds(paddedBounds, { animate: false, maxZoom: 16 });
-    window.setTimeout(() => {
+    function fitLockedClaimMap() {
         map.invalidateSize(false);
+        const minZoom = Math.max(0, Math.min(19, map.getBoundsZoom(radiusBounds, false)));
+        map.setMinZoom(minZoom);
         map.fitBounds(paddedBounds, { animate: false, maxZoom: 16 });
-    }, 0);
+        if (map.getZoom() < minZoom) {
+  map.setView(centre, minZoom, { animate: false });
+        }
+    }
+
+    fitLockedClaimMap();
+    window.setTimeout(fitLockedClaimMap, 0);
 }
 
 function buildClaimDetail(claim) {

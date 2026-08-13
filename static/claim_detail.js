@@ -19,6 +19,7 @@ const NIMIQ_PAY_URL = document.body.dataset.nimiqPayUrl || 'https://nimpay.app';
 const CLAIM_ID = Number.parseInt(document.body.dataset.claimId || '0', 10);
 const MAP_TILE_URL = document.body.dataset.mapTileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const MAP_TILE_ATTRIBUTION = document.body.dataset.mapTileAttribution || '&copy; OpenStreetMap contributors';
+const DETAIL_MAP_MIN_ZOOM = 12;
 
 const TEXT = makeClaimDetailText({ appName: APP_NAME, nimiqPayUrl: NIMIQ_PAY_URL });
 
@@ -305,6 +306,7 @@ function renderLockedClaimMap(mapEl, claim) {
     const map = window.L.map(mapEl, {
         zoomControl: true,
         attributionControl: true,
+        minZoom: DETAIL_MAP_MIN_ZOOM, 
         dragging: false,
         touchZoom: false,
         scrollWheelZoom: false,
@@ -337,7 +339,6 @@ function renderLockedClaimMap(mapEl, claim) {
         weight: 2,
     }).addTo(map);
 
-    const bounds = metreBoundsAround(centre[0], centre[1], spot.radius);
     if (shouldShowClaimLocation(claim)) {
         const userLatLng = [Number(claim.lat), Number(claim.long)];
         window.L.circleMarker(userLatLng, {
@@ -348,16 +349,19 @@ function renderLockedClaimMap(mapEl, claim) {
             opacity: 1,
             weight: 2,
         }).addTo(map);
-        bounds.extend(userLatLng);
     }
 
-    const paddedBounds = bounds.pad(0.18);
-    map.invalidateSize(false);
-    map.fitBounds(paddedBounds, { animate: false, maxZoom: 16 });
-    window.setTimeout(() => {
+    const radiusBounds = metreBoundsAround(centre[0], centre[1], spot.radius).pad(0.18);
+    function fitLockedClaimMap() {
         map.invalidateSize(false);
-        map.fitBounds(paddedBounds, { animate: false, maxZoom: 16 });
-    }, 0);
+        map.fitBounds(radiusBounds, { animate: false, maxZoom: 16 });
+        if (map.getZoom() < DETAIL_MAP_MIN_ZOOM) {
+            map.setView(centre, DETAIL_MAP_MIN_ZOOM, { animate: false });
+        }
+    }
+
+    fitLockedClaimMap();
+    window.setTimeout(fitLockedClaimMap, 0);
 }
 
 function buildClaimDetail(claim) {

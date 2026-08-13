@@ -50,6 +50,7 @@ const NIMIQ_PAY_URL = document.body.dataset.nimiqPayUrl || 'https://nimpay.app';
 const MAP_TILE_URL = document.body.dataset.mapTileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const MAP_TILE_ATTRIBUTION = document.body.dataset.mapTileAttribution || '&copy; OpenStreetMap contributors';
 const REPORT_DETAILS_MAX = Number.parseInt(document.body.dataset.reportDetailsMax || '300', 10);
+const DETAIL_MAP_MIN_ZOOM = 12;
 
 const COMMON_TEXT = getCommonText();
 const REPORT_REASON_OPTIONS = getReportReasonOptions();
@@ -837,10 +838,11 @@ function renderLockedSpotMap(mapEl, spot) {
     const map = window.L.map(mapEl, {
         zoomControl: true,
         attributionControl: true,
+        minZoom: DETAIL_MAP_MIN_ZOOM,
         dragging: false,
-        touchZoom: true,
-        scrollWheelZoom: true,
-        doubleClickZoom: true,
+        touchZoom: false,
+        scrollWheelZoom: false,
+        doubleClickZoom: false,
         boxZoom: false,
         keyboard: false,
         tap: false,
@@ -872,23 +874,10 @@ function renderLockedSpotMap(mapEl, spot) {
     bindSpotMapPopup(radiusCircle, spot);
     bindSpotMapPopup(marker, spot);
 
-    let recentring = false;
-    function keepCentred() {
-        if (recentring) return;
-
-        const current = map.getCenter();
-        const drifted = Math.abs(current.lat - centre[0]) > 0.000001 || Math.abs(current.lng - centre[1]) > 0.000001;
-        if (!drifted) return;
-
-        recentring = true;
-        map.setView(centre, map.getZoom(), { animate: false });
-        recentring = false;
-    }
-
-    map.on('moveend zoomend', keepCentred);
+    map.invalidateSize(false);
     window.setTimeout(() => {
         map.invalidateSize(false);
-        keepCentred();
+        map.panTo(centre, { animate: false });
     }, 0);
 }
 

@@ -1904,6 +1904,7 @@ function setMapInteractionEnabled(enabled) {
     state.map.dragging?.[method]?.();
     state.map.keyboard?.[method]?.();
     state.map.boxZoom?.[method]?.();
+    state.map.doubleClickZoom?.[method]?.();
 }
 
 function clearScheduledMapRefresh() {
@@ -1961,6 +1962,7 @@ function setupMap() {
         dragging: !state.hasUserLocation,
         keyboard: !state.hasUserLocation,
         boxZoom: !state.hasUserLocation,
+        doubleClickZoom: !state.hasUserLocation,
     }).setView(start, state.hasUserLocation ? 14 : 11);
 
     L.control.zoom({

@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MY_SPOTS_OVERVIEW_CACHE_VERSION = "my-spots-overview-v3-20260802"
-MY_SPOTS_PAGE_CACHE_VERSION = "rapid-deposit-v1-20260805"
+MY_SPOTS_PAGE_CACHE_VERSION = "rapid-deposit-v1-20260805-chevron-cache-compat-v2-20260813"
 MY_SPOTS_BOOTSTRAP_CACHE_VERSION = "nimiq-2-compat-v1-20260812"
 
 

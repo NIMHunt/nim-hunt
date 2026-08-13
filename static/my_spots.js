@@ -21,7 +21,7 @@ import {
     setCopyButtonIcon,
     spotScheduleSummary,
     unixToText,
-} from './spot_ui.js?v=special-user-badge-v1-20260727';
+} from './spot_ui.js?v=chevron-cache-compat-v2-20260813';
 import { createReusableSpotMap } from './spot_map.js?v=my-spots-overview-v3-20260802';
 import {
     mySpotsMapColourForSpot,

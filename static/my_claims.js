@@ -9,7 +9,7 @@ import {
     nimFromLunaText,
     spotPlaceText,
     unixToText,
-} from './spot_ui.js?v=special-user-badge-v1-20260727';
+} from './spot_ui.js?v=chevron-cache-compat-v2-20260813';
 import { createReusableSpotMap } from './spot_map.js?v=marker-white-outline-v1-20260723';
 import {
     createNoticePresenter,

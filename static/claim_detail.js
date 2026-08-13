@@ -359,7 +359,7 @@ function renderLockedClaimMap(mapEl, claim) {
         map.setMinZoom(minZoom);
         map.fitBounds(paddedBounds, { animate: false, maxZoom: 16 });
         if (map.getZoom() < minZoom) {
-  map.setView(centre, minZoom, { animate: false });
+            map.setView(centre, minZoom, { animate: false });
         }
     }
 

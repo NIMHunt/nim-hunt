@@ -786,21 +786,21 @@ function validSpotCoordinate(spot) {
 }
 
 function metreBoundsAround(lat, long, radiusMetres) {
-        const radius = Math.max(1, Number(radiusMetres || 25));
-        const latNum = Number(lat);
-        const longNum = Number(long);
-        const metresPerDegreeLat = 111320;
-        const cosLat = Math.max(0.01, Math.abs(Math.cos(latNum * Math.PI / 180)));
-        const latDelta = radius / metresPerDegreeLat;
-        const longDelta = radius / (metresPerDegreeLat * cosLat);
+    const radius = Math.max(1, Number(radiusMetres || 25));
+    const latNum = Number(lat);
+    const longNum = Number(long);
+    const metresPerDegreeLat = 111320;
+    const cosLat = Math.max(0.01, Math.abs(Math.cos(latNum * Math.PI / 180)));
+    const latDelta = radius / metresPerDegreeLat;
+    const longDelta = radius / (metresPerDegreeLat * cosLat);
 
-        return window.L.latLngBounds(
-            [latNum - latDelta, longNum - longDelta],
-            [latNum + latDelta, longNum + longDelta]
-        );
-    }
+    return window.L.latLngBounds(
+        [latNum - latDelta, longNum - longDelta],
+        [latNum + latDelta, longNum + longDelta]
+    );
+}
 
-    function buildSpotMapShell() {
+function buildSpotMapShell() {
     const map = document.createElement('div');
     map.className = 'spot-detail-map';
     map.setAttribute('aria-label', 'Spot map');
@@ -893,9 +893,9 @@ function renderLockedSpotMap(mapEl, spot) {
         const minZoom = Math.max(0, Math.min(19, map.getBoundsZoom(radiusBounds, false)));
         map.setMinZoom(minZoom);
         if (map.getZoom() < minZoom) {
-  map.setView(centre, minZoom, { animate: false });
+            map.setView(centre, minZoom, { animate: false });
         } else {
-  map.panTo(centre, { animate: false });
+            map.panTo(centre, { animate: false });
         }
     }
 

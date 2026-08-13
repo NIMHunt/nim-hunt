@@ -34,6 +34,7 @@ body {
     height: 1px;
     padding: 0;
     margin: -1px;
+    overflow: hidden;
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
     border: 0;
@@ -62,6 +63,7 @@ body {
 .hero-card {
     padding: 14px 10px 12px;
     text-align: center;
+    overflow: hidden;
     position: relative;
 }
 
@@ -432,6 +434,7 @@ h2 {
 
 .debug-card {
     padding: 0;
+    overflow: hidden;
 }
 
 .debug-toggle {
@@ -641,6 +644,7 @@ h2 {
 
 .map-card {
     padding: 10px;
+    overflow: hidden;
 }
 
 .spot-map {
@@ -648,6 +652,7 @@ h2 {
     height: min(50vh, 430px);
     min-height: 320px;
     border-radius: 22px;
+    overflow: hidden;
     background: var(--nh-bg-2);
 }
 
@@ -803,6 +808,7 @@ h2 {
     height: 1px;
     padding: 0;
     margin: -1px;
+    overflow: hidden;
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
     border: 0;
@@ -827,6 +833,7 @@ h2 {
     border-radius: 20px;
     background: rgba(255, 255, 255, 0.74);
     box-shadow: 0 8px 22px rgba(31, 35, 72, 0.06);
+    overflow: hidden;
 }
 
 .spot-list-item.is-map-highlighted {
@@ -863,6 +870,7 @@ h2 {
 }
 
 .spot-list-title {
+    overflow: hidden;
     color: var(--nh-text);
     font-weight: 900;
     line-height: 1.15;
@@ -1154,6 +1162,7 @@ h2 {
 }
 
 .spot-list-toggle .spot-list-meta {
+    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -1265,6 +1274,7 @@ h2 {
     margin: 0 0 0.85em;
     border: 1px solid var(--nh-border);
     border-radius: 18px;
+    overflow: hidden;
     background: var(--nh-bg-2);
 }
 
@@ -1309,6 +1319,7 @@ h2 {
 .nh-spot-popup-title {
     display: block;
     max-width: 100%;
+    overflow: hidden;
     color: var(--nh-text);
     font-weight: 900;
     text-overflow: ellipsis;
@@ -2515,6 +2526,7 @@ h2 {
     z-index: 7000;
     inset: 0;
     pointer-events: none;
+    overflow: hidden;
 }
 
 .nh-confetti span {
@@ -2869,6 +2881,7 @@ h2 {
 .spot-password-status {
     min-width: 0;
     flex: 1 1 auto;
+    overflow: hidden;
     color: var(--nh-muted);
     font-weight: 850;
     text-align: right;
@@ -3600,12 +3613,14 @@ h2 {
     flex: 1 1 auto;
     min-width: 0;
     max-width: 100%;
+    overflow: hidden;
 }
 
 .spot-list-title.is-truncated-title .spot-title-text {
     display: block;
     flex: 0 1 auto;
     min-width: 0;
+    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -3654,7 +3669,6 @@ h2 {
     color: #ffffff !important;
     box-shadow: 0 0 32px rgba(217, 68, 68, 0.22) !important;
 }
-
 
 /* Stable geometric chevron for collapsible Spot/Claim/FAQ rows. */
 .spot-list-chevron {

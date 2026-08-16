@@ -4,14 +4,30 @@
     const STORAGE_KEY = 'nimhunt-theme';
     const LIGHT_THEME = 'light';
     const DARK_THEME = 'dark';
+    const SYSTEM_THEME_QUERY = '(prefers-color-scheme: dark)';
     const TOGGLE_ID = 'theme-toggle';
 
-    function storedTheme() {
+    function explicitStoredTheme() {
         try {
-            return window.localStorage.getItem(STORAGE_KEY) === DARK_THEME ? DARK_THEME : LIGHT_THEME;
+            const stored = window.localStorage.getItem(STORAGE_KEY);
+            if (stored === DARK_THEME || stored === LIGHT_THEME) return stored;
+        } catch (_err) {
+            // Some embedded browsers disable storage. Fall through to the
+            // system preference so the initial theme still has a useful default.
+        }
+        return null;
+    }
+
+    function systemTheme() {
+        try {
+            return window.matchMedia?.(SYSTEM_THEME_QUERY).matches ? DARK_THEME : LIGHT_THEME;
         } catch (_err) {
             return LIGHT_THEME;
         }
+    }
+
+    function preferredTheme() {
+        return explicitStoredTheme() || systemTheme();
     }
 
     function storeTheme(theme) {
@@ -117,7 +133,32 @@
         updateToggle(documentObj, documentObj.documentElement.dataset.theme || LIGHT_THEME);
     }
 
-    applyTheme(storedTheme());
+    function installSystemThemeListener() {
+        let mediaQuery;
+        try {
+            mediaQuery = window.matchMedia?.(SYSTEM_THEME_QUERY);
+        } catch (_err) {
+            return;
+        }
+        if (!mediaQuery) return;
+
+        const syncUnpinnedTheme = (event) => {
+            // Once the user has used NimHunt's own toggle, their explicit
+            // choice wins over later operating-system theme changes.
+            if (explicitStoredTheme()) return;
+            applyTheme(event.matches ? DARK_THEME : LIGHT_THEME);
+        };
+
+        if (typeof mediaQuery.addEventListener === 'function') {
+            mediaQuery.addEventListener('change', syncUnpinnedTheme);
+        } else if (typeof mediaQuery.addListener === 'function') {
+            // Compatibility fallback for older embedded/WebKit browsers.
+            mediaQuery.addListener(syncUnpinnedTheme);
+        }
+    }
+
+    applyTheme(preferredTheme());
+    installSystemThemeListener();
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => installThemeUi(document), { once: true });
@@ -127,6 +168,10 @@
 
     window.addEventListener('storage', (event) => {
         if (event.key !== STORAGE_KEY) return;
-        applyTheme(event.newValue === DARK_THEME ? DARK_THEME : LIGHT_THEME);
+        if (event.newValue === DARK_THEME || event.newValue === LIGHT_THEME) {
+            applyTheme(event.newValue);
+            return;
+        }
+        applyTheme(systemTheme());
     });
 })();

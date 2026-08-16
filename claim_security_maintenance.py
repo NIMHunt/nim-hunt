@@ -4,7 +4,9 @@ Authentication challenges, sessions and rolling rate-limit buckets are useful
 only for a bounded time. Keeping expired entries forever would let repeated
 requests grow app_metadata indefinitely. This module piggybacks a small cleanup
 pass on NimHunt's existing settlement loop; durable claim audit records and
-wallet/device bindings are intentionally retained.
+wallet/device bindings are intentionally retained. A tiny persistent cursor is
+maintenance state rather than user/session state and lets bounded passes rotate
+through arbitrarily large ephemeral metadata sets.
 """
 
 from __future__ import annotations

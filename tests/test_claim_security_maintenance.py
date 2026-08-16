@@ -93,6 +93,30 @@ class ClaimSecurityMaintenanceTest(unittest.IsolatedAsyncioTestCase):
         async with schema.get_db() as db:
             self.assertEqual(await self._get(db, rate_key), [live])
 
+    async def test_durable_claim_rows_cannot_starve_ephemeral_cleanup_limit(self):
+        async with schema.get_db() as db:
+            now_row = await db.execute_fetchall("SELECT unixepoch() AS now;")
+            now = int(now_row[0]["now"])
+            for claim_id in range(20):
+                await self._put(
+                    db,
+                    f"{claim_security.CLAIM_RECORD_PREFIX}{claim_id:04d}",
+                    {"claim_id": claim_id, "manual_review": False},
+                )
+            session_key = f"{claim_security.SESSION_PREFIX}expired-after-durable-rows"
+            await self._put(db, session_key, {"expires_at": now - 1})
+            await db.commit()
+
+        result = await claim_security_maintenance.cleanup_expired_claim_security_metadata(limit=1)
+        self.assertEqual(result["checked_count"], 1)
+        self.assertEqual(result["deleted_count"], 1)
+
+        async with schema.get_db() as db:
+            self.assertIsNone(await self._get(db, session_key))
+            self.assertIsNotNone(
+                await self._get(db, f"{claim_security.CLAIM_RECORD_PREFIX}0000")
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

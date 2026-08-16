@@ -95,7 +95,7 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(decision["blocked"])
         self.assertEqual(decision["reason"], "allow")
 
-    async def test_public_claim_forces_verified_wallet_as_payout(self):
+    async def test_public_claim_forces_verified_wallet_and_ignores_browser_payout(self):
         verified = const.DEV_PLATFORM_FEE_ADDRESS
         delegate = mock.AsyncMock(return_value={"id": 7})
         binding = {"wallet_address": verified}
@@ -115,7 +115,7 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
                 user_id=4,
                 lat=51.5,
                 long=-0.1,
-                payout_address=None,
+                payout_address="client-controlled-value-is-ignored",
             )
 
         self.assertEqual(result, {"id": 7})

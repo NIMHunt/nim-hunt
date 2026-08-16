@@ -105,7 +105,7 @@ html[data-theme="dark"] .theme-toggle-symbol {
 }
 
 html[data-theme="dark"] {
-    /* Nimiq navy and its official darkened variant are the dark-mode neutrals. */
+    /* Nimiq navy anchors the dark palette; #151833 is its deeper companion. */
     --nh-bg-1: #1f2348;
     --nh-bg-2: #151833;
     --nh-text: #fafafa;
@@ -140,9 +140,17 @@ html[data-theme="dark"] .nq-style .nq-text-s {
 }
 
 html[data-theme="dark"] .spot-list-item,
-html[data-theme="dark"] .spot-list-item.is-claim-unavailable {
+html[data-theme="dark"] .spot-list-item.is-claim-unavailable,
+html[data-theme="dark"] .spot-list-link {
     background: rgba(255, 255, 255, 0.07);
     box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+}
+
+html[data-theme="dark"] .spot-list-item:hover,
+html[data-theme="dark"] .spot-list-item:focus-within,
+html[data-theme="dark"] .spot-list-link:hover,
+html[data-theme="dark"] .spot-list-link:focus {
+    box-shadow: 0 12px 26px rgba(0, 0, 0, 0.22);
 }
 
 html[data-theme="dark"] .empty-spots {

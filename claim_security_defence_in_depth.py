@@ -11,8 +11,6 @@ cannot cover:
   wallet challenge. A hostile or stale browser payout field is ignored.
 * A Spot's per-user claim limit is also enforced across every device account
   bound to the same verified Nimiq wallet, including duration-claim completion.
-* When a Spot owner's device has a verified wallet binding, that same wallet
-  cannot evade the own-Spot rule by presenting a different device identity.
 * A broader coordinated-burst rule catches several brand-new identities
   claiming geographically distant Spots even when submitted coordinates are
   deliberately moved away from the exact Spot centre.
@@ -247,32 +245,6 @@ async def _wallet_has_reached_spot_limit(
     )
 
 
-async def _verified_wallet_owns_spot(
-    db,
-    *,
-    spot_id: int,
-    wallet_address: str,
-) -> bool:
-    """Extend own-Spot protection across device IDs when the owner is verified."""
-    spot = await db_access.get_spot(db, spot_id=int(spot_id))
-    if spot is None:
-        return False
-    owner_id = int(spot.get(schema.SPOT_CREATED_BY) or 0)
-    if owner_id <= 0:
-        return False
-    owner_binding = await claim_security._metadata_get(
-        db,
-        claim_security._user_binding_key(owner_id),
-    )
-    owner_wallet = (
-        claim_security._canonical_optional_address(owner_binding.get("wallet_address"))
-        if isinstance(owner_binding, dict)
-        else None
-    )
-    canonical = claim_security._canonical_optional_address(wallet_address)
-    return owner_wallet is not None and canonical is not None and owner_wallet == canonical
-
-
 async def _create_claim_attempt_bound_to_verified_wallet(
     db,
     *,
@@ -298,13 +270,6 @@ async def _create_claim_attempt_bound_to_verified_wallet(
         )
         if verified_wallet is None:
             raise ValueError("The verified Nimiq wallet for this claim is invalid.")
-
-        if await _verified_wallet_owns_spot(
-            db,
-            spot_id=int(spot_id),
-            wallet_address=verified_wallet,
-        ):
-            raise ValueError("You cannot claim your own spot.")
 
         if await _wallet_has_reached_spot_limit(
             db,

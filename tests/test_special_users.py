@@ -8,6 +8,7 @@ import public_html
 def _spot(created_by: int) -> dict:
     return {
         schema.SPOT_ID: 42,
+        schema.SPOT_STATUS: const.SPOT_STATUS_PUBLISHED,
         schema.SPOT_CREATED_BY: created_by,
         schema.SPOT_TITLE: "Special-user test Spot",
         schema.SPOT_LAT: 51.5,

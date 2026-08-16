@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import tempfile
 import unittest
 from unittest import mock
 
+import cache
 import claim_payout_throttle
+import database as schema
 
 
 class ClaimPayoutThrottleTest(unittest.TestCase):
@@ -54,6 +58,61 @@ class ClaimPayoutThrottleTest(unittest.TestCase):
             )
         self.assertTrue(decision["allow"])
         self.assertEqual(decision["reason"], "within_global_payout_limits")
+
+
+class ClaimPayoutReservationTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=True)
+        self._old_path = schema.DB_PATH
+        schema.DB_PATH = self._tmp.name
+        await cache.force_all_cache_clear()
+        await schema.init_db()
+
+    async def asyncTearDown(self):
+        await cache.force_all_cache_clear()
+        schema.DB_PATH = self._old_path
+        self._tmp.close()
+
+    async def _reserve(self, *, claim_id: int, amount: int = 100) -> dict:
+        async with schema.get_db() as db:
+            return await claim_payout_throttle.reserve_payout_slot(
+                db,
+                claim_id=claim_id,
+                amount=amount,
+            )
+
+    async def test_concurrent_workers_cannot_both_take_last_payout_slot(self):
+        """BEGIN IMMEDIATE serialises the final-slot decision across connections."""
+        with (
+            mock.patch.object(claim_payout_throttle, "MAX_PAYOUT_COUNT", 1),
+            mock.patch.object(claim_payout_throttle, "MAX_PAYOUT_LUNA", 1_000_000),
+        ):
+            first, second = await asyncio.gather(
+                self._reserve(claim_id=101),
+                self._reserve(claim_id=202),
+            )
+
+        allowed = [result for result in (first, second) if result.get("allow")]
+        blocked = [result for result in (first, second) if not result.get("allow")]
+        self.assertEqual(len(allowed), 1)
+        self.assertEqual(len(blocked), 1)
+        self.assertEqual(blocked[0]["reason"], "global_payout_count_limit")
+
+    async def test_retrying_same_claim_reuses_reservation_without_extra_slot(self):
+        with (
+            mock.patch.object(claim_payout_throttle, "MAX_PAYOUT_COUNT", 1),
+            mock.patch.object(claim_payout_throttle, "MAX_PAYOUT_LUNA", 1_000_000),
+        ):
+            first = await self._reserve(claim_id=303)
+            retry = await self._reserve(claim_id=303)
+            unrelated = await self._reserve(claim_id=404)
+
+        self.assertTrue(first["allow"])
+        self.assertTrue(first.get("reservation_created"))
+        self.assertTrue(retry["allow"])
+        self.assertTrue(retry.get("reservation_reused"))
+        self.assertFalse(unrelated["allow"])
+        self.assertEqual(unrelated["reason"], "global_payout_count_limit")
 
 
 if __name__ == "__main__":

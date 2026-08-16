@@ -29,6 +29,14 @@
     -webkit-tap-highlight-color: transparent;
 }
 
+/* A native view transition crossfades the complete light/dark presentation
+   without slowing normal hover/focus interactions elsewhere in the app. */
+::view-transition-old(root),
+::view-transition-new(root) {
+    animation-duration: 0.4s;
+    animation-timing-function: ease;
+}
+
 .theme-toggle:hover,
 .theme-toggle:focus-visible {
     opacity: 1;
@@ -315,6 +323,11 @@ html[data-theme="dark"] .theme-toggle::before {
 }
 
 @media (prefers-reduced-motion: reduce) {
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+        animation-duration: 0.01ms;
+    }
+
     .theme-toggle::after,
     .theme-toggle::before {
         transition: none;

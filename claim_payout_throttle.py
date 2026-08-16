@@ -5,9 +5,9 @@ attacker. This guard limits how quickly NimHunt can automatically send claim
 rewards in aggregate. It never rejects or fails a CLAIM: excess payouts remain
 in the existing settlement queue and are retried after the rolling window.
 
-The defaults are intentionally generous for normal use but bound the damage of
-a fast scripted sweep. Operators can tune both limits with environment variables
-without changing code.
+The defaults deliberately cap the blast radius below the size of the scripted
+multi-Spot sweep that motivated this guard. Operators can tune both limits with
+environment variables without changing code.
 """
 
 from __future__ import annotations
@@ -38,8 +38,8 @@ def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
 
 
 WINDOW_SECONDS = _env_int("NIMHUNT_CLAIM_PAYOUT_THROTTLE_WINDOW_SECONDS", 10 * 60)
-MAX_PAYOUT_COUNT = _env_int("NIMHUNT_CLAIM_PAYOUT_THROTTLE_MAX_COUNT", 30)
-MAX_PAYOUT_NIM = _env_int("NIMHUNT_CLAIM_PAYOUT_THROTTLE_MAX_NIM", 25_000)
+MAX_PAYOUT_COUNT = _env_int("NIMHUNT_CLAIM_PAYOUT_THROTTLE_MAX_COUNT", 8)
+MAX_PAYOUT_NIM = _env_int("NIMHUNT_CLAIM_PAYOUT_THROTTLE_MAX_NIM", 10_000)
 MAX_PAYOUT_LUNA = MAX_PAYOUT_NIM * int(getattr(const, "LUNA_PER_NIM", 100_000))
 
 _DELEGATE: SubmitClaimReward | None = None

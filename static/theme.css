@@ -277,6 +277,22 @@ html[data-theme="dark"] .nq-style .spot-x-share-link:focus-visible {
     color: #ffffff !important;
 }
 
+/* These text elements have stronger component/Nimiq rules in the normal theme.
+   Pin them to the dark neutral palette so those later rules cannot leave them
+   using the light-theme foreground colours. */
+html[data-theme="dark"] body.nq-style .welcome-line {
+    color: var(--nh-text) !important;
+}
+
+html[data-theme="dark"] body.nq-style .spot-detail-description,
+html[data-theme="dark"] body.nq-style .spot-list-detail > .spot-detail-description {
+    color: var(--nh-muted) !important;
+}
+
+html[data-theme="dark"] body.nq-style .network-mode-banner .network-mode-label {
+    color: var(--nh-text) !important;
+}
+
 html[data-theme="dark"] .theme-toggle::after {
     background: #fafafa;
     color: #1f2348;

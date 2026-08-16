@@ -9,7 +9,7 @@ def source(path: str) -> str:
 
 def test_theme_head_is_loaded_by_every_page_shell():
     theme_head = source("templates/_theme_head.html")
-    assert "/static/theme.css?v=dark-mode-v6-20260816" in theme_head
+    assert "/static/theme.css?v=dark-mode-v7-20260816" in theme_head
     assert "/static/theme.js?v=dark-mode-v2-20260816" in theme_head
 
     for path in (
@@ -127,6 +127,15 @@ def test_dark_mode_recolours_static_information_prose_after_specificity_audit():
         ".how-to-closing-copy",
     ):
         assert f'html[data-theme="dark"] body.nq-style {selector}' in stylesheet
+
+
+def test_dark_mode_outlines_only_the_how_to_user_marker_in_white():
+    stylesheet = source("static/theme.css")
+
+    selector = 'html[data-theme="dark"] body.nq-style .how-to-guide .how-to-user-marker'
+    assert selector in stylesheet
+    rule = stylesheet.split(f"{selector} {{", 1)[1].split("}", 1)[0]
+    assert "border-color: #ffffff;" in rule
 
 
 def test_dark_mode_adapts_leaflet_chrome_but_not_map_tiles():

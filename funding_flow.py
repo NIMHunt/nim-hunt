@@ -3,6 +3,7 @@
 import sys
 
 from cancellation_safety import install as install_cancellation_safety
+from claim_auth_abuse_guard import install as install_claim_auth_abuse_guard
 from claim_code_policy import install as install_claim_code_policy
 from claim_location_guard import install as install_claim_location_guard
 from claim_network_security import install as install_claim_network_security
@@ -31,6 +32,7 @@ def install() -> None:
     install_claim_location_guard()
     install_claim_security()
     install_claim_network_security()
+    install_claim_auth_abuse_guard()
     install_claim_security_defence_in_depth()
     # The payout throttle must wrap the security-aware submitter rather than
     # replace it, so install it after claim_security and its extra safeguards.

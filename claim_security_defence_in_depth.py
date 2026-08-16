@@ -7,8 +7,7 @@ without duplicating either. It closes four residual gaps:
   on its own to reject a claim; carrier NAT, households and VPN exits can be
   shared by unrelated people.
 * Public claim payouts are forced to the Nimiq address proven by the signed
-  wallet challenge. A hostile client cannot authenticate with one key while
-  redirecting the reward to an unrelated address.
+  wallet challenge. A hostile or stale browser payout field is ignored.
 * A broader coordinated-burst rule catches several brand-new identities
   claiming geographically distant Spots even when submitted coordinates are
   deliberately moved away from the exact Spot centre.
@@ -178,11 +177,10 @@ async def _create_claim_attempt_bound_to_verified_wallet(
         if verified_wallet is None:
             raise ValueError("The verified Nimiq wallet for this claim is invalid.")
 
-        supplied = claim_security._canonical_optional_address(payout_address)
-        if supplied is not None and supplied != verified_wallet:
-            raise ValueError(
-                "The claim payout address must match the Nimiq wallet used for verification."
-            )
+        # listAccounts() and the signing confirmation can legitimately refer to
+        # different accounts. The cryptographically proven signer is the only
+        # payout destination the server trusts, so ignore the browser field
+        # rather than rejecting a legitimate claim because it is stale/different.
         payout_address = verified_wallet
 
     delegate = _CLAIM_ATTEMPT_DELEGATE

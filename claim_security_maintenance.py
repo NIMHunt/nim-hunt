@@ -92,10 +92,17 @@ async def cleanup_expired_claim_security_metadata(*, limit: int = MAX_ROWS_PER_P
                        {schema.APP_METADATA_VALUE} AS value
                 FROM {schema.APP_METADATA_TABLE_NAME}
                 WHERE {schema.APP_METADATA_KEY} LIKE ?
+                   OR {schema.APP_METADATA_KEY} LIKE ?
+                   OR {schema.APP_METADATA_KEY} LIKE ?
                 ORDER BY {schema.APP_METADATA_KEY}
                 LIMIT ?;
                 """,
-                (f"{claim_security.METADATA_PREFIX}%", limit),
+                (
+                    f"{claim_security.CHALLENGE_PREFIX}%",
+                    f"{claim_security.SESSION_PREFIX}%",
+                    f"{claim_security.RATE_PREFIX}%",
+                    limit,
+                ),
             )
 
             for row in rows:

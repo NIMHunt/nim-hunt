@@ -1,0 +1,301 @@
+/* NimHunt light/dark theme.
+ *
+ * Light mode intentionally inherits the existing application styles unchanged.
+ * Dark mode only remaps neutral surfaces/foregrounds; Nimiq's green, gold,
+ * orange, red and blue action colours remain untouched.
+ */
+
+.home-information-links {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+}
+
+.theme-toggle {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    align-self: center;
+    justify-self: center;
+    border: 0;
+    background: transparent;
+    color: var(--nh-text, #1f2348);
+    cursor: pointer;
+    font: inherit;
+    line-height: 1;
+    opacity: 0.82;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.theme-toggle:hover,
+.theme-toggle:focus-visible {
+    opacity: 1;
+}
+
+.theme-toggle:focus-visible {
+    outline: 2px solid rgba(5, 130, 202, 0.48);
+    outline-offset: 4px;
+    border-radius: 999px;
+}
+
+.theme-toggle-symbol {
+    width: 1.55em;
+    height: 1.55em;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 50%;
+    font-size: 1.35rem;
+    line-height: 1;
+}
+
+html:not([data-theme="dark"]) .theme-toggle-symbol {
+    background: #ffffff;
+    color: #1f2348;
+}
+
+html[data-theme="dark"] .theme-toggle-symbol {
+    background: transparent;
+    color: #fc8702;
+    font-size: 1.5rem;
+}
+
+/* Small custom tooltip; title remains present as a native/accessibility fallback. */
+.theme-toggle::after,
+.theme-toggle::before {
+    position: absolute;
+    left: 50%;
+    z-index: 1400;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%) translateY(0.25rem);
+    transition: opacity 120ms ease, transform 120ms ease;
+    visibility: hidden;
+}
+
+.theme-toggle::after {
+    content: attr(data-tooltip);
+    bottom: calc(100% + 0.7rem);
+    padding: 0.45rem 0.65rem;
+    border-radius: 8px;
+    background: rgba(31, 35, 72, 0.97);
+    color: #ffffff;
+    box-shadow: 0 8px 20px rgba(31, 35, 72, 0.22);
+    font-size: 0.82rem;
+    font-weight: 800;
+    line-height: 1.15;
+    white-space: nowrap;
+}
+
+.theme-toggle::before {
+    content: "";
+    bottom: calc(100% + 0.35rem);
+    border: 0.38rem solid transparent;
+    border-top-color: rgba(31, 35, 72, 0.97);
+}
+
+.theme-toggle:hover::after,
+.theme-toggle:hover::before,
+.theme-toggle:focus-visible::after,
+.theme-toggle:focus-visible::before {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+    visibility: visible;
+}
+
+html[data-theme="dark"] {
+    /* Nimiq navy and its official darkened variant are the dark-mode neutrals. */
+    --nh-bg-1: #1f2348;
+    --nh-bg-2: #151833;
+    --nh-text: #fafafa;
+    --nh-muted: #b9bbca;
+    --nh-soft-text: #d5d6e0;
+    --nh-card: rgba(31, 35, 72, 0.94);
+    --nh-border: rgba(255, 255, 255, 0.13);
+    --nh-shadow: 0 22px 60px rgba(0, 0, 0, 0.28);
+
+    min-height: 100%;
+    color-scheme: dark;
+    background: radial-gradient(circle at top, #2a305d 0%, var(--nh-bg-1) 42%, var(--nh-bg-2) 100%);
+}
+
+html[data-theme="dark"] body {
+    color: var(--nh-text);
+    background: transparent;
+}
+
+/* Nimiq typography normally assumes a light page. Keep semantic accent classes
+   untouched, but adapt its neutral text helpers for our dark page. */
+html[data-theme="dark"] .nq-style .nq-h1,
+html[data-theme="dark"] .nq-style .nq-h2,
+html[data-theme="dark"] .nq-style .nq-h3,
+html[data-theme="dark"] .nq-style .nq-text {
+    color: var(--nh-text);
+}
+
+html[data-theme="dark"] .nq-style .nq-label,
+html[data-theme="dark"] .nq-style .nq-text-s {
+    color: var(--nh-muted);
+}
+
+html[data-theme="dark"] .spot-list-item,
+html[data-theme="dark"] .spot-list-item.is-claim-unavailable {
+    background: rgba(255, 255, 255, 0.07);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+}
+
+html[data-theme="dark"] .empty-spots {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+html[data-theme="dark"] .create-spot-textarea {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+html[data-theme="dark"] .leaflet-tooltip.map-spot-title-tooltip {
+    background: #1f2348;
+    color: var(--nh-muted);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+}
+
+html[data-theme="dark"] .leaflet-tooltip-top.map-spot-title-tooltip::before {
+    border-top-color: #1f2348;
+}
+
+/* Neutral form chrome. Browser-native date/select icons follow color-scheme. */
+html[data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea {
+    color: var(--nh-text);
+}
+
+html[data-theme="dark"] select option {
+    background: #1f2348;
+    color: var(--nh-text);
+}
+
+html[data-theme="dark"] input::placeholder,
+html[data-theme="dark"] textarea::placeholder {
+    color: var(--nh-muted);
+    opacity: 0.72;
+}
+
+/* White/grey controls that are intentionally neutral rather than Nimiq action colours. */
+html[data-theme="dark"] .nq-style .spot-claim-button:not(.how-to-claim-button),
+html[data-theme="dark"] .nq-style .spot-claim-button.nq-button-pill:not(.how-to-claim-button) {
+    background: rgba(255, 255, 255, 0.10) !important;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18) !important;
+}
+
+html[data-theme="dark"] .nq-style .spot-claim-button:not(.how-to-claim-button):hover,
+html[data-theme="dark"] .nq-style .spot-claim-button:not(.how-to-claim-button):focus-visible {
+    background: rgba(255, 255, 255, 0.15) !important;
+}
+
+html[data-theme="dark"] .how-to-platform-switch {
+    border-color: var(--nh-border);
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.22);
+}
+
+html[data-theme="dark"] .how-to-platform-button.is-selected {
+    background: rgba(255, 255, 255, 0.14);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.22);
+}
+
+html[data-theme="dark"] .nq-style .notice-card .notice-guide-button {
+    border-color: var(--nh-border);
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--nh-muted);
+}
+
+html[data-theme="dark"] .nq-style .notice-card .notice-guide-button:hover,
+html[data-theme="dark"] .nq-style .notice-card .notice-guide-button:focus-visible {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--nh-text);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.16);
+}
+
+html[data-theme="dark"] .nq-style .notice-card .notice-guide-button:active {
+    background: rgba(255, 255, 255, 0.10);
+    color: var(--nh-text);
+}
+
+/* Leaflet's own UI is light by default. The map imagery itself is deliberately
+   left unchanged so geographic/Spot colours are not distorted. */
+html[data-theme="dark"] .leaflet-container {
+    background: #151833;
+}
+
+html[data-theme="dark"] .leaflet-popup-content-wrapper,
+html[data-theme="dark"] .leaflet-popup-tip,
+html[data-theme="dark"] .leaflet-tooltip {
+    background: #1f2348;
+    color: var(--nh-text);
+}
+
+html[data-theme="dark"] .leaflet-popup-content-wrapper,
+html[data-theme="dark"] .leaflet-tooltip {
+    border-color: var(--nh-border);
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.28);
+}
+
+html[data-theme="dark"] .leaflet-control-zoom a {
+    border-color: var(--nh-border);
+    background: #1f2348;
+    color: var(--nh-text);
+}
+
+html[data-theme="dark"] .leaflet-control-zoom a:hover,
+html[data-theme="dark"] .leaflet-control-zoom a:focus {
+    background: #292e5a;
+    color: #ffffff;
+}
+
+html[data-theme="dark"] .leaflet-control-attribution {
+    background: rgba(31, 35, 72, 0.88);
+    color: var(--nh-muted);
+}
+
+html[data-theme="dark"] .leaflet-control-attribution a {
+    color: #0582ca;
+}
+
+/* X's normal black-circle/white-X treatment already works on a dark page.
+   Only its transparent hover state needs a light icon counterpart. */
+html[data-theme="dark"] .nq-style .spot-x-share-link:hover,
+html[data-theme="dark"] .nq-style .spot-x-share-link:focus-visible {
+    color: #ffffff !important;
+}
+
+html[data-theme="dark"] .theme-toggle::after {
+    background: #fafafa;
+    color: #1f2348;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
+}
+
+html[data-theme="dark"] .theme-toggle::before {
+    border-top-color: #fafafa;
+}
+
+@media (max-width: 390px) {
+    .theme-toggle-symbol {
+        font-size: 1.2rem;
+    }
+
+    html[data-theme="dark"] .theme-toggle-symbol {
+        font-size: 1.35rem;
+    }
+
+    .theme-toggle::after {
+        font-size: 0.76rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .theme-toggle::after,
+    .theme-toggle::before {
+        transition: none;
+    }
+}

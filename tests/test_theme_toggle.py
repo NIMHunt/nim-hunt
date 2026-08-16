@@ -9,7 +9,7 @@ def source(path: str) -> str:
 
 def test_theme_head_is_loaded_by_every_page_shell():
     theme_head = source("templates/_theme_head.html")
-    assert "/static/theme.css?v=dark-mode-v2-20260816" in theme_head
+    assert "/static/theme.css?v=dark-mode-v3-20260816" in theme_head
     assert "/static/theme.js?v=dark-mode-v1-20260816" in theme_head
 
     for path in (
@@ -43,6 +43,19 @@ def test_theme_toggle_uses_requested_symbols_and_tooltips():
     assert "toggle.dataset.tooltip = presentation.label" in javascript
     assert "toggle.setAttribute('title', presentation.label)" in javascript
     assert "toggle.setAttribute('aria-label', presentation.label)" in javascript
+
+
+def test_theme_toggle_is_buttonless_and_uses_standard_tooltip_typography():
+    stylesheet = source("static/theme.css")
+
+    light_symbol_rule = stylesheet.split('html:not([data-theme="dark"]) .theme-toggle-symbol {', 1)[1].split("}", 1)[0]
+    tooltip_rule = stylesheet.split(".theme-toggle::after {", 1)[1].split("}", 1)[0]
+
+    assert "background: transparent;" in light_symbol_rule
+    assert "font-size: 1.2rem;" in tooltip_rule
+    assert "line-height: 1.25;" in tooltip_rule
+    assert "font-size: 0.82rem;" not in stylesheet
+    assert "font-size: 0.76rem;" not in stylesheet
 
 
 def test_theme_defaults_to_light_and_persists_an_explicit_choice():

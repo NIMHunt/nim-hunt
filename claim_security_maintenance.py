@@ -25,6 +25,7 @@ SettlementPass = Callable[[], Awaitable[RowDict]]
 logger = logging.getLogger(__name__)
 
 MAX_ROWS_PER_PASS = 500
+CLEANUP_CURSOR_KEY = f"{claim_security.METADATA_PREFIX}cleanup_cursor"
 _DELEGATE: SettlementPass | None = None
 _INSTALLED = False
 
@@ -76,34 +77,71 @@ def _prune_value(*, key: str, raw_value: str, now: int) -> tuple[str, Any | None
     return "keep", value
 
 
+async def _ephemeral_rows_after_cursor(
+    db,
+    *,
+    cursor: str,
+    limit: int,
+) -> list[Any]:
+    """Return the next lexicographic page of ephemeral metadata rows."""
+    return await db.execute_fetchall(
+        f"""
+        SELECT {schema.APP_METADATA_KEY} AS key,
+               {schema.APP_METADATA_VALUE} AS value
+        FROM {schema.APP_METADATA_TABLE_NAME}
+        WHERE {schema.APP_METADATA_KEY} > ?
+          AND (
+                {schema.APP_METADATA_KEY} LIKE ?
+             OR {schema.APP_METADATA_KEY} LIKE ?
+             OR {schema.APP_METADATA_KEY} LIKE ?
+          )
+        ORDER BY {schema.APP_METADATA_KEY}
+        LIMIT ?;
+        """,
+        (
+            str(cursor),
+            f"{claim_security.CHALLENGE_PREFIX}%",
+            f"{claim_security.SESSION_PREFIX}%",
+            f"{claim_security.RATE_PREFIX}%",
+            int(limit),
+        ),
+    )
+
+
 async def cleanup_expired_claim_security_metadata(*, limit: int = MAX_ROWS_PER_PASS) -> RowDict:
-    """Delete/prune expired ephemeral security rows in one bounded transaction."""
+    """Delete/prune one rotating page of expired ephemeral security metadata.
+
+    The last inspected key is persisted as a cursor. Without that cursor, a
+    permanently-live first page (for example frequently refreshed rate-limit
+    buckets) would be selected on every pass and expired rows after it would
+    never be examined. Reaching the end wraps to the first ephemeral row on the
+    next page selection, so every row remains reachable while each settlement
+    pass stays bounded.
+    """
     limit = max(1, int(limit))
     deleted = 0
     updated = 0
     checked = 0
+    wrapped = False
 
     async with get_db() as db:
         async with db_access.transaction(db, immediate=True):
             now = await db_access.get_unixepoch(db)
-            rows = await db.execute_fetchall(
-                f"""
-                SELECT {schema.APP_METADATA_KEY} AS key,
-                       {schema.APP_METADATA_VALUE} AS value
-                FROM {schema.APP_METADATA_TABLE_NAME}
-                WHERE {schema.APP_METADATA_KEY} LIKE ?
-                   OR {schema.APP_METADATA_KEY} LIKE ?
-                   OR {schema.APP_METADATA_KEY} LIKE ?
-                ORDER BY {schema.APP_METADATA_KEY}
-                LIMIT ?;
-                """,
-                (
-                    f"{claim_security.CHALLENGE_PREFIX}%",
-                    f"{claim_security.SESSION_PREFIX}%",
-                    f"{claim_security.RATE_PREFIX}%",
-                    limit,
-                ),
+            cursor_value = await claim_security._metadata_get(db, CLEANUP_CURSOR_KEY)
+            cursor = str(cursor_value) if isinstance(cursor_value, str) else ""
+
+            rows = await _ephemeral_rows_after_cursor(
+                db,
+                cursor=cursor,
+                limit=limit,
             )
+            if not rows and cursor:
+                wrapped = True
+                rows = await _ephemeral_rows_after_cursor(
+                    db,
+                    cursor="",
+                    limit=limit,
+                )
 
             for row in rows:
                 key = str(row["key"])
@@ -134,11 +172,23 @@ async def cleanup_expired_claim_security_metadata(*, limit: int = MAX_ROWS_PER_P
                     )
                     updated += 1
 
+            if rows:
+                # Persist the key we inspected, even if pruning deleted that row.
+                # A lexicographic cursor does not require the row itself to remain.
+                await claim_security._metadata_set(
+                    db,
+                    CLEANUP_CURSOR_KEY,
+                    str(rows[-1]["key"]),
+                )
+            else:
+                await claim_security._metadata_delete(db, CLEANUP_CURSOR_KEY)
+
     return {
         "ok": True,
         "checked_count": checked,
         "deleted_count": deleted,
         "updated_count": updated,
+        "wrapped": wrapped,
     }
 
 
@@ -167,6 +217,7 @@ def install() -> None:
 
 
 __all__ = [
+    "CLEANUP_CURSOR_KEY",
     "MAX_ROWS_PER_PASS",
     "cleanup_expired_claim_security_metadata",
     "install",

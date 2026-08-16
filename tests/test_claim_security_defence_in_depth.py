@@ -110,6 +110,11 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
             ),
             mock.patch.object(
                 defence,
+                "_verified_wallet_owns_spot",
+                new=mock.AsyncMock(return_value=False),
+            ),
+            mock.patch.object(
+                defence,
                 "_wallet_has_reached_spot_limit",
                 new=mock.AsyncMock(return_value=False),
             ),
@@ -141,12 +146,53 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
             ),
             mock.patch.object(
                 defence,
+                "_verified_wallet_owns_spot",
+                new=mock.AsyncMock(return_value=False),
+            ),
+            mock.patch.object(
+                defence,
                 "_wallet_has_reached_spot_limit",
                 new=mock.AsyncMock(return_value=True),
             ),
             mock.patch.object(defence, "_CLAIM_ATTEMPT_DELEGATE", delegate),
         ):
             with self.assertRaisesRegex(ValueError, "claim limit"):
+                await defence._create_claim_attempt_bound_to_verified_wallet(
+                    object(),
+                    spot_id=3,
+                    user_id=999,
+                    lat=51.5,
+                    long=-0.1,
+                    payout_address=None,
+                )
+
+        delegate.assert_not_awaited()
+
+    async def test_same_verified_wallet_cannot_claim_own_spot_with_new_device(self):
+        verified = const.DEV_PLATFORM_FEE_ADDRESS
+        delegate = mock.AsyncMock(return_value={"id": 7})
+        binding = {"wallet_address": verified}
+
+        with (
+            mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
+            mock.patch.object(
+                defence.claim_security,
+                "_metadata_get",
+                new=mock.AsyncMock(return_value=binding),
+            ),
+            mock.patch.object(
+                defence,
+                "_verified_wallet_owns_spot",
+                new=mock.AsyncMock(return_value=True),
+            ),
+            mock.patch.object(
+                defence,
+                "_wallet_has_reached_spot_limit",
+                new=mock.AsyncMock(return_value=False),
+            ),
+            mock.patch.object(defence, "_CLAIM_ATTEMPT_DELEGATE", delegate),
+        ):
+            with self.assertRaisesRegex(ValueError, "own spot"):
                 await defence._create_claim_attempt_bound_to_verified_wallet(
                     object(),
                     spot_id=3,

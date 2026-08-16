@@ -111,7 +111,6 @@ def test_roadmap_data_is_simple_customisable_and_current() -> None:
                     "Localisation",
                     "More Desktop Functionality",
                     "More Marketing",
-                    "Dark Mode",
                     "Admin Panel",
                 ],
             },

@@ -2,6 +2,7 @@
 
 import sys
 
+import constants as const
 from cancellation_safety import install as install_cancellation_safety
 from claim_auth_abuse_guard import install as install_claim_auth_abuse_guard
 from claim_code_policy import install as install_claim_code_policy
@@ -18,7 +19,6 @@ from claim_security_response_delivery import (
 )
 from claim_settlement_security import install as install_claim_settlement_security
 from claim_wallet_hourly_limit import install as install_claim_wallet_hourly_limit
-import constants as const
 from funding_fee_worker import install as install_fee_worker
 from funding_monitor import funding_flow_diagnostics
 from funding_monitor import install as install_monitor

@@ -7,6 +7,8 @@ import claim_security_defence_in_depth as defence
 import constants as const
 import database as schema
 
+VALID_NIMIQ_PAY_PAYOUT = "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF"
+
 
 class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
     def _event(
@@ -96,7 +98,57 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(decision["blocked"])
         self.assertEqual(decision["reason"], "allow")
 
-    async def test_public_claim_forces_verified_wallet_and_ignores_browser_payout(self):
+    async def test_public_claim_preserves_nimiq_pay_payout_while_signer_drives_limits(self):
+        verified = const.DEV_PLATFORM_FEE_ADDRESS
+        delegate = mock.AsyncMock(return_value={"id": 7})
+        binding = {"wallet_address": verified}
+
+        with (
+            mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
+            mock.patch.object(
+                defence.claim_security,
+                "_metadata_get",
+                new=mock.AsyncMock(return_value=binding),
+            ),
+            mock.patch.object(
+                defence,
+                "_verified_wallet_owns_spot",
+                new=mock.AsyncMock(return_value=False),
+            ) as owns_spot,
+            mock.patch.object(
+                defence,
+                "_wallet_has_reached_spot_limit",
+                new=mock.AsyncMock(return_value=False),
+            ) as reached_limit,
+            mock.patch.object(defence, "_CLAIM_ATTEMPT_DELEGATE", delegate),
+        ):
+            result = await defence._create_claim_attempt_bound_to_verified_wallet(
+                object(),
+                spot_id=3,
+                user_id=4,
+                lat=51.5,
+                long=-0.1,
+                payout_address=VALID_NIMIQ_PAY_PAYOUT,
+            )
+
+        self.assertEqual(result, {"id": 7})
+        owns_spot.assert_awaited_once_with(
+            mock.ANY,
+            spot_id=3,
+            wallet_address=verified,
+        )
+        reached_limit.assert_awaited_once_with(
+            mock.ANY,
+            spot_id=3,
+            wallet_address=verified,
+        )
+        self.assertEqual(
+            delegate.await_args.kwargs["payout_address"],
+            defence.claim_security._canonical_optional_address(VALID_NIMIQ_PAY_PAYOUT),
+        )
+        self.assertNotEqual(delegate.await_args.kwargs["payout_address"], verified)
+
+    async def test_public_claim_requires_valid_nimiq_pay_payout_address(self):
         verified = const.DEV_PLATFORM_FEE_ADDRESS
         delegate = mock.AsyncMock(return_value={"id": 7})
         binding = {"wallet_address": verified}
@@ -120,17 +172,19 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
             ),
             mock.patch.object(defence, "_CLAIM_ATTEMPT_DELEGATE", delegate),
         ):
-            result = await defence._create_claim_attempt_bound_to_verified_wallet(
-                object(),
-                spot_id=3,
-                user_id=4,
-                lat=51.5,
-                long=-0.1,
-                payout_address="client-controlled-value-is-ignored",
-            )
+            for payout_address in (None, "", "not-a-nimiq-address"):
+                with self.subTest(payout_address=payout_address):
+                    with self.assertRaisesRegex(ValueError, "valid Nimiq Pay payout address"):
+                        await defence._create_claim_attempt_bound_to_verified_wallet(
+                            object(),
+                            spot_id=3,
+                            user_id=4,
+                            lat=51.5,
+                            long=-0.1,
+                            payout_address=payout_address,
+                        )
 
-        self.assertEqual(result, {"id": 7})
-        self.assertEqual(delegate.await_args.kwargs["payout_address"], verified)
+        delegate.assert_not_awaited()
 
     async def test_same_verified_wallet_cannot_reset_spot_limit_with_new_device(self):
         verified = const.DEV_PLATFORM_FEE_ADDRESS

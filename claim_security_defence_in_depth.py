@@ -1,21 +1,21 @@
 """Second-layer claim safeguards for public NimHunt deployments.
 
-This module deliberately builds on ``claim_security.py`` instead of duplicating
-its authentication and payout machinery.  It closes four residual gaps:
+This module builds on ``claim_security.py`` and the Railway-aware network helper
+without duplicating either. It closes four residual gaps:
 
-* Railway's documented ``X-Real-IP`` header is used for secondary source-network
-  fingerprints.  Source IP is never sufficient on its own to reject a claim;
-  carrier NAT, household networks and reverse proxies make that unsafe.
+* Source IP remains useful for rate limits and correlation, but is never enough
+  on its own to reject a claim; carrier NAT, households and VPN exits can be
+  shared by unrelated people.
 * Public claim payouts are forced to the Nimiq address proven by the signed
-  wallet challenge.  A hostile client cannot authenticate with one key while
+  wallet challenge. A hostile client cannot authenticate with one key while
   redirecting the reward to an unrelated address.
 * A broader coordinated-burst rule catches several brand-new identities
-  claiming geographically distant Spots even when the attacker deliberately
-  adds noise to the submitted coordinates to avoid the exact-centre detector.
-* The default payout observation window is long enough for the broad burst rule
-  to see a sweep before the earliest suspicious payout is released.
+  claiming geographically distant Spots even when submitted coordinates are
+  deliberately moved away from the exact Spot centre.
+* The default payout observation window is long enough for that broader rule to
+  see a fast sweep before the earliest suspicious payout is released.
 
-All rules remain claim-specific.  Nothing here globally disables Spot creation
+All rules remain claim-specific. Nothing here globally disables Spot creation
 or claiming.
 """
 
@@ -30,59 +30,21 @@ import db_access
 
 RowDict = dict[str, Any]
 
-_BROAD_BURST_WINDOW_SECONDS = int(
+BROAD_BURST_WINDOW_SECONDS = int(
     os.getenv("NIMHUNT_CLAIM_SECURITY_BROAD_BURST_WINDOW_SECONDS", 15 * 60)
 )
-_BROAD_BURST_MIN_IDENTITIES = int(
+BROAD_BURST_MIN_IDENTITIES = int(
     os.getenv("NIMHUNT_CLAIM_SECURITY_BROAD_BURST_MIN_IDENTITIES", 5)
 )
-_BROAD_BURST_MIN_SPREAD_METRES = int(
+BROAD_BURST_MIN_SPREAD_METRES = int(
     os.getenv("NIMHUNT_CLAIM_SECURITY_BROAD_BURST_MIN_SPREAD_METRES", 50_000)
 )
-_DEFAULT_PAYOUT_OBSERVATION_SECONDS = 20 * 60
+DEFAULT_PAYOUT_OBSERVATION_SECONDS = 20 * 60
 
 _ORIGINAL_PRECLAIM_RISK = claim_security._preclaim_risk
 _ORIGINAL_RECORD_CLAIM_EVENT = claim_security._record_claim_event
 _ORIGINAL_CREATE_CLAIM_ATTEMPT = db_access.create_claim_attempt
 _INSTALLED = False
-
-
-def _header_value(headers: Any, name: str) -> str:
-    wanted = str(name).lower()
-    if hasattr(headers, "get"):
-        value = headers.get(name) or headers.get(wanted)
-        return str(value or "").strip()
-
-    for key, value in headers or []:
-        try:
-            clean_key = bytes(key).decode("latin-1").lower()
-            clean_value = bytes(value).decode("latin-1").strip()
-        except (TypeError, ValueError):
-            continue
-        if clean_key == wanted:
-            return clean_value
-    return ""
-
-
-def _request_ip(request) -> str:
-    """Return Railway's documented client IP, with a direct-client fallback."""
-    real_ip = _header_value(request.headers, "x-real-ip")
-    if real_ip:
-        return real_ip
-    if request.client and request.client.host:
-        return str(request.client.host)
-    return "unknown"
-
-
-def _scope_ip(scope: dict[str, Any]) -> str:
-    """ASGI equivalent of :func:`_request_ip`."""
-    real_ip = _header_value(scope.get("headers", []), "x-real-ip")
-    if real_ip:
-        return real_ip
-    client = scope.get("client")
-    if isinstance(client, (list, tuple)) and client:
-        return str(client[0])
-    return "unknown"
 
 
 def _preclaim_risk_without_ip_only_block(events: list[RowDict], target: RowDict) -> RowDict:
@@ -93,15 +55,14 @@ def _preclaim_risk_without_ip_only_block(events: list[RowDict], target: RowDict)
     return decision
 
 
-def _broad_new_identity_burst_claim_ids(events: list[RowDict], *, now: int) -> list[int]:
-    """Detect a likely Sybil sweep without relying on exact Spot-centre GPS.
+def broad_new_identity_burst_claim_ids(events: list[RowDict], *, now: int) -> list[int]:
+    """Detect a likely Sybil sweep without relying on exact-centre GPS.
 
-    This intentionally requires several independent new wallets, devices and
-    Spots plus a large geographic spread.  It therefore catches the attack
-    pattern NimHunt experienced while keeping a single traveller, household,
-    VPN, or inaccurate GPS reading from being sufficient evidence.
+    The rule requires several independent new wallets, devices and Spots plus a
+    large geographic spread. A single traveller, household, VPN, or inaccurate
+    GPS reading therefore cannot trigger it.
     """
-    cutoff = int(now) - max(60, _BROAD_BURST_WINDOW_SECONDS)
+    cutoff = int(now) - max(60, BROAD_BURST_WINDOW_SECONDS)
     candidates: list[RowDict] = []
 
     for event in events:
@@ -125,7 +86,7 @@ def _broad_new_identity_burst_claim_ids(events: list[RowDict], *, now: int) -> l
             continue
         candidates.append(event)
 
-    minimum = max(4, _BROAD_BURST_MIN_IDENTITIES)
+    minimum = max(4, BROAD_BURST_MIN_IDENTITIES)
     if len(candidates) < minimum:
         return []
 
@@ -149,7 +110,7 @@ def _broad_new_identity_burst_claim_ids(events: list[RowDict], *, now: int) -> l
 
     if claim_security._max_spread_metres(candidates) < max(
         10_000,
-        _BROAD_BURST_MIN_SPREAD_METRES,
+        BROAD_BURST_MIN_SPREAD_METRES,
     ):
         return []
 
@@ -180,7 +141,7 @@ async def _record_claim_event_with_broad_burst(
         async with db_access.transaction(db, immediate=True):
             now = await db_access.get_unixepoch(db)
             events = await claim_security._load_recent_events(db, now=now)
-            suspicious_ids = _broad_new_identity_burst_claim_ids(events, now=now)
+            suspicious_ids = broad_new_identity_burst_claim_ids(events, now=now)
             if suspicious_ids:
                 await claim_security._mark_manual_review(
                     db,
@@ -236,29 +197,31 @@ async def _create_claim_attempt_bound_to_verified_wallet(
 
 
 def install() -> None:
-    """Install defence-in-depth patches after the primary claim-security layer."""
+    """Install the extra claim safeguards after the primary security layer."""
     global _INSTALLED
     if _INSTALLED:
         return
 
-    claim_security._request_ip = _request_ip
-    claim_security._scope_ip = _scope_ip
     claim_security._preclaim_risk = _preclaim_risk_without_ip_only_block
     claim_security._record_claim_event = _record_claim_event_with_broad_burst
     db_access.create_claim_attempt = _create_claim_attempt_bound_to_verified_wallet
 
-    # Honour an explicit operator setting.  Otherwise use a conservative default
+    # Honour an explicit operator setting. Otherwise use a conservative default
     # long enough for the broad coordinated-sweep detector to observe the burst.
     if not os.getenv("NIMHUNT_CLAIM_PAYOUT_SECURITY_HOLD_SECONDS", "").strip():
         claim_security.PAYOUT_HOLD_SECONDS = max(
             int(claim_security.PAYOUT_HOLD_SECONDS),
-            _DEFAULT_PAYOUT_OBSERVATION_SECONDS,
+            DEFAULT_PAYOUT_OBSERVATION_SECONDS,
         )
 
     _INSTALLED = True
 
 
 __all__ = [
+    "BROAD_BURST_MIN_IDENTITIES",
+    "BROAD_BURST_MIN_SPREAD_METRES",
+    "BROAD_BURST_WINDOW_SECONDS",
+    "DEFAULT_PAYOUT_OBSERVATION_SECONDS",
+    "broad_new_identity_burst_claim_ids",
     "install",
-    "_broad_new_identity_burst_claim_ids",
 ]

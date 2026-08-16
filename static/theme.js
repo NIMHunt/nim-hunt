@@ -59,6 +59,25 @@
         return normalizedTheme;
     }
 
+    function switchTheme(theme, { persist = false, documentObj = document } = {}) {
+        const normalizedTheme = theme === DARK_THEME ? DARK_THEME : LIGHT_THEME;
+        const reduceMotion = documentObj.defaultView?.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+        if (!reduceMotion && typeof documentObj.startViewTransition === 'function') {
+            const transition = documentObj.startViewTransition(() => {
+                applyTheme(normalizedTheme, { persist, documentObj });
+            });
+
+            // A cancelled navigation or browser interruption can reject this
+            // promise. The theme itself has already been applied, so there is
+            // nothing useful to report to the user in that case.
+            transition.finished.catch(() => {});
+            return normalizedTheme;
+        }
+
+        return applyTheme(normalizedTheme, { persist, documentObj });
+    }
+
     function createToggle(documentObj = document) {
         if (documentObj.getElementById(TOGGLE_ID)) return documentObj.getElementById(TOGGLE_ID);
 
@@ -83,7 +102,7 @@
             const currentTheme = documentObj.documentElement.dataset.theme === DARK_THEME
                 ? DARK_THEME
                 : LIGHT_THEME;
-            applyTheme(currentTheme === DARK_THEME ? LIGHT_THEME : DARK_THEME, {
+            switchTheme(currentTheme === DARK_THEME ? LIGHT_THEME : DARK_THEME, {
                 persist: true,
                 documentObj,
             });

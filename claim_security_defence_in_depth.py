@@ -22,13 +22,14 @@ or claiming.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import claim_security
 import constants as const
 import db_access
 
 RowDict = dict[str, Any]
+ClaimAttempt = Callable[..., Awaitable[RowDict]]
 
 BROAD_BURST_WINDOW_SECONDS = int(
     os.getenv("NIMHUNT_CLAIM_SECURITY_BROAD_BURST_WINDOW_SECONDS", 15 * 60)
@@ -43,7 +44,7 @@ DEFAULT_PAYOUT_OBSERVATION_SECONDS = 20 * 60
 
 _ORIGINAL_PRECLAIM_RISK = claim_security._preclaim_risk
 _ORIGINAL_RECORD_CLAIM_EVENT = claim_security._record_claim_event
-_ORIGINAL_CREATE_CLAIM_ATTEMPT = db_access.create_claim_attempt
+_CLAIM_ATTEMPT_DELEGATE: ClaimAttempt | None = None
 _INSTALLED = False
 
 
@@ -184,7 +185,10 @@ async def _create_claim_attempt_bound_to_verified_wallet(
             )
         payout_address = verified_wallet
 
-    return await _ORIGINAL_CREATE_CLAIM_ATTEMPT(
+    delegate = _CLAIM_ATTEMPT_DELEGATE
+    if delegate is None:  # pragma: no cover - runtime requires install().
+        raise RuntimeError("claim payout identity binding is not installed")
+    return await delegate(
         db,
         spot_id=int(spot_id),
         user_id=int(user_id),
@@ -198,12 +202,16 @@ async def _create_claim_attempt_bound_to_verified_wallet(
 
 def install() -> None:
     """Install the extra claim safeguards after the primary security layer."""
-    global _INSTALLED
+    global _CLAIM_ATTEMPT_DELEGATE, _INSTALLED
     if _INSTALLED:
         return
 
     claim_security._preclaim_risk = _preclaim_risk_without_ip_only_block
     claim_security._record_claim_event = _record_claim_event_with_broad_burst
+
+    # Capture at install time, after claim_code_policy has wrapped this function.
+    # Capturing at module import would silently bypass the one-time-code policy.
+    _CLAIM_ATTEMPT_DELEGATE = db_access.create_claim_attempt
     db_access.create_claim_attempt = _create_claim_attempt_bound_to_verified_wallet
 
     # Honour an explicit operator setting. Otherwise use a conservative default

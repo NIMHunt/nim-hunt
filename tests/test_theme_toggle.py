@@ -9,7 +9,7 @@ def source(path: str) -> str:
 
 def test_theme_head_is_loaded_by_every_page_shell():
     theme_head = source("templates/_theme_head.html")
-    assert "/static/theme.css?v=dark-mode-v3-20260816" in theme_head
+    assert "/static/theme.css?v=dark-mode-v4-20260816" in theme_head
     assert "/static/theme.js?v=dark-mode-v1-20260816" in theme_head
 
     for path in (
@@ -90,6 +90,7 @@ def test_dark_mode_explicitly_recolours_reported_text_components():
 
     assert 'html[data-theme="dark"] body.nq-style .welcome-line' in stylesheet
     assert 'html[data-theme="dark"] body.nq-style .spot-detail-description' in stylesheet
+    assert 'html[data-theme="dark"] body.nq-style .empty-spots' in stylesheet
     assert 'html[data-theme="dark"] body.nq-style .network-mode-banner .network-mode-label' in stylesheet
     assert "color: var(--nh-text) !important;" in stylesheet
     assert "color: var(--nh-muted) !important;" in stylesheet

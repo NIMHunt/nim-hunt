@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import status
 from fastapi.responses import RedirectResponse
 
+import claim_security
 import constants as const
 import database as schema
 from social_card_images import (
@@ -282,12 +283,18 @@ async def metadata_for_request(
 
 
 class SocialPreviewMiddleware:
-    """Serve clean information URLs and inject metadata into HTML responses."""
+    """Serve clean information URLs, claim guards, and HTML metadata."""
 
     def __init__(self, app: Callable[..., Awaitable[None]]) -> None:
         self.app = app
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        # Claim security needs the raw ASGI request before FastAPI creates or
+        # refreshes a claim. It consumes only the explicitly protected POST
+        # paths; every other request continues through this middleware normally.
+        if await claim_security.guard_http_request(self.app, scope, receive, send):
+            return
+
         if scope.get("type") != "http" or scope.get("method") not in {"GET", "HEAD"}:
             await self.app(scope, receive, send)
             return

@@ -130,3 +130,16 @@ test('browser utils arms interaction retry and reloads after successful re-authe
     assert.match(source, /window\.location\.reload\(\)/);
     assert.match(source, /'device_wallet_mismatch'/);
 });
+
+test('claim-detail pages can recover both signature and device-lookup failures', async () => {
+    const source = await readFile(new URL('./browser_utils.js', import.meta.url), 'utf8');
+
+    assert.match(
+        source,
+        /return path === '\/spots' \|\| path\.startsWith\('\/claim\/'\);/,
+    );
+    assert.match(source, /return path\.startsWith\('\/claim\/'\) \? 'body' : undefined;/);
+    assert.match(source, /CLAIM_SECURITY_RELOAD_RETRY/);
+    assert.match(source, /!claimSecurityInteractionRetry\?\.isArmed\(\)/);
+    assert.match(source, /armClaimSecurityRetryOnInteraction\(CLAIM_SECURITY_RELOAD_RETRY\)/);
+});

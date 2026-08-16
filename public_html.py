@@ -471,51 +471,55 @@ def _serialise_spot_for_map(
     }
 
 
+_PUBLIC_SPOT_DETAIL_STATUSES = frozenset(
+    {
+        const.SPOT_STATUS_PUBLISHED,
+        const.SPOT_STATUS_COMPLETED,
+        const.SPOT_STATUS_CANCELLED,
+    }
+)
+
+
+def _spot_visible_on_public_detail_page(spot: dict[str, Any]) -> bool:
+    """Return whether an existing Spot may remain readable through its public link."""
+    try:
+        status_code = int(spot[schema.SPOT_STATUS])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return status_code in _PUBLIC_SPOT_DETAIL_STATUSES
+
 
 async def _get_public_spot_detail_row(db, *, spot_ref: str) -> dict[str, Any] | None:
-    """Return one public SPOT detail row by numeric id or public link/slug."""
+    """Return one published or historical public Spot by numeric id or link/slug."""
     spot_ref = str(spot_ref or "").strip()
     if not spot_ref:
         return None
 
     if spot_ref.isdigit():
-        cur = await db.execute(
-            f"""
-            SELECT
-                s.*,
-                u.{schema.USER_DISPLAY_NAME} AS creator_display_name,
-                u.{schema.USER_STATUS} AS creator_status
-            FROM {schema.SPOT_VIEW_PUBLIC_LIST} s
-            JOIN {schema.USER_TABLE_NAME} u
-                ON u.{schema.USER_ID} = s.{schema.SPOT_CREATED_BY}
-            WHERE s.{schema.SPOT_ID} = ?
-               OR s.{schema.SPOT_LINK} = ?;
-            """,
-            (int(spot_ref), spot_ref),
-        )
-    else:
-        cur = await db.execute(
-            f"""
-            SELECT
-                s.*,
-                u.{schema.USER_DISPLAY_NAME} AS creator_display_name,
-                u.{schema.USER_STATUS} AS creator_status
-            FROM {schema.SPOT_VIEW_PUBLIC_LIST} s
-            JOIN {schema.USER_TABLE_NAME} u
-                ON u.{schema.USER_ID} = s.{schema.SPOT_CREATED_BY}
-            WHERE s.{schema.SPOT_LINK} = ?;
-            """,
-            (spot_ref,),
-        )
+        spot = await db_access.get_spot_owner_summary(db, spot_id=int(spot_ref))
+        if spot is not None and _spot_visible_on_public_detail_page(spot):
+            return spot
 
-    row = await cur.fetchone()
-    return dict(row) if row is not None else None
+    linked_spot = await db_access.get_spot_by_link(db, link=spot_ref)
+    if linked_spot is None:
+        return None
+
+    spot = await db_access.get_spot_owner_summary(
+        db,
+        spot_id=int(linked_spot[schema.SPOT_ID]),
+    )
+    if spot is None or not _spot_visible_on_public_detail_page(spot):
+        return None
+    return spot
 
 
 def _serialise_public_spot_for_detail(spot: dict[str, Any], *, now: int) -> dict[str, Any]:
     """Shape one public SPOT for the standalone Spot detail page."""
     link = spot.get(schema.SPOT_LINK)
     spot_id = int(spot[schema.SPOT_ID])
+    status_label = _owner_spot_status_label(spot, now=now)
+    if _owner_spot_effectively_complete(spot):
+        status_label = "completed"
 
     return {
         "id": spot_id,
@@ -537,7 +541,7 @@ def _serialise_public_spot_for_detail(spot: dict[str, Any], *, now: int) -> dict
         "starts_at": spot.get(schema.SPOT_STARTS_AT),
         "ends_at": _spot_absolute_ends_at(spot),
         "ends_after": spot.get(schema.SPOT_ENDS_AT),
-        "status_label": _spot_status_label(spot, now=now),
+        "status_label": status_label,
         "is_prizedraw": _spot_is_prizedraw_row(spot),
         "prize_count": spot.get(schema.PRIZEDRAW_PRIZE_COUNT),
         "claim_count": int(spot.get("claim_count") or 0),
@@ -1352,22 +1356,12 @@ async def create_spot_full_form_legacy_redirect(spot_id: int) -> RedirectRespons
 
 @router.get("/spot/{spot_ref}", response_class=HTMLResponse)
 async def spot_detail_page(request: Request, spot_ref: str) -> HTMLResponse:
-    """Public standalone page for one published, non-expired SPOT."""
+    """Public standalone page for one published or historical SPOT."""
     async with get_db() as db:
         now = await db_access.get_unixepoch(db)
         spot_row = await _get_public_spot_detail_row(db, spot_ref=spot_ref)
 
     if spot_row is None:
-        existing_spot = None
-        async with get_db() as db:
-            if str(spot_ref).isdigit():
-                existing_spot = await db_access.get_spot(db, spot_id=int(spot_ref))
-            if existing_spot is None:
-                existing_spot = await db_access.get_spot_by_link(db, link=str(spot_ref))
-
-        if existing_spot is not None:
-            return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
-
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Spot not found")
 
     spot = _serialise_public_spot_for_detail(spot_row, now=now)
@@ -2286,7 +2280,6 @@ def _map_config_payload() -> dict[str, Any]:
     }
 
 
-
 # ---------------------------------------------------------------------------
 # API routes used by Create Spot
 # ---------------------------------------------------------------------------
@@ -2316,8 +2309,6 @@ async def _creator_api_user_or_response(db, payload: HomeSessionRequest) -> tupl
         }, status.HTTP_403_FORBIDDEN
 
     return user, meta, status.HTTP_200_OK
-
-
 
 
 # Small, replaceable reverse-geocoding helper for the Create Spot map.
@@ -3295,7 +3286,7 @@ async def home_session(payload: HomeSessionRequest) -> JSONResponse:
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User could not be loaded after creation.",
+            detail="User could not be loaded after creation",
         )
 
     public_user = _public_user(user)

@@ -220,6 +220,12 @@ html[data-theme="dark"] .how-to-platform-button.is-selected {
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.22);
 }
 
+/* The How To user marker deliberately stays navy, but needs the same white
+   edge treatment as Spot markers when displayed against a dark page. */
+html[data-theme="dark"] body.nq-style .how-to-guide .how-to-user-marker {
+    border-color: #ffffff;
+}
+
 html[data-theme="dark"] .nq-style .notice-card .notice-guide-button {
     border-color: var(--nh-border);
     background: rgba(255, 255, 255, 0.07);

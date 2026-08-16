@@ -5,6 +5,7 @@ import sys
 from cancellation_safety import install as install_cancellation_safety
 from claim_code_policy import install as install_claim_code_policy
 from claim_location_guard import install as install_claim_location_guard
+from claim_network_security import install as install_claim_network_security
 from claim_security import install as install_claim_security
 from claim_settlement_security import install as install_claim_settlement_security
 from funding_fee_worker import install as install_fee_worker
@@ -24,6 +25,7 @@ def install() -> None:
     install_claim_code_policy()
     install_claim_location_guard()
     install_claim_security()
+    install_claim_network_security()
     install_claim_settlement_security()
     # Preserve Nimiq Pay's ordinary account before cancellation/remainder guards
     # can submit money. The cancellation lease then wraps the corrected flow.

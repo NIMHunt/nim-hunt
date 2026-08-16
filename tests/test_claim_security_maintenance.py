@@ -160,6 +160,12 @@ class ClaimSecurityMaintenanceTest(unittest.IsolatedAsyncioTestCase):
                 await self._get(db, f"{claim_security.CHALLENGE_PREFIX}0500")
             )
 
+        third = await claim_security_maintenance.cleanup_expired_claim_security_metadata(
+            limit=500
+        )
+        self.assertTrue(third["wrapped"])
+        self.assertEqual(third["checked_count"], 500)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,7 +9,7 @@ def source(path: str) -> str:
 
 def test_theme_head_is_loaded_by_every_page_shell():
     theme_head = source("templates/_theme_head.html")
-    assert "/static/theme.css?v=dark-mode-v5-20260816" in theme_head
+    assert "/static/theme.css?v=dark-mode-v6-20260816" in theme_head
     assert "/static/theme.js?v=dark-mode-v2-20260816" in theme_head
 
     for path in (
@@ -58,7 +58,7 @@ def test_theme_toggle_is_buttonless_and_uses_standard_tooltip_typography():
     assert "font-size: 0.76rem;" not in stylesheet
 
 
-def test_theme_switch_uses_a_point_four_second_view_transition():
+def test_theme_switch_uses_a_point_two_five_second_view_transition():
     javascript = source("static/theme.js")
     stylesheet = source("static/theme.css")
 
@@ -66,7 +66,8 @@ def test_theme_switch_uses_a_point_four_second_view_transition():
     assert "switchTheme(currentTheme === DARK_THEME ? LIGHT_THEME : DARK_THEME" in javascript
     assert "::view-transition-old(root)" in stylesheet
     assert "::view-transition-new(root)" in stylesheet
-    assert "animation-duration: 0.4s;" in stylesheet
+    assert "animation-duration: 0.25s;" in stylesheet
+    assert "animation-duration: 0.4s;" not in stylesheet
     assert "prefers-reduced-motion: reduce" in stylesheet
 
 
@@ -106,6 +107,26 @@ def test_dark_mode_explicitly_recolours_reported_text_components():
     assert 'html[data-theme="dark"] body.nq-style .network-mode-banner .network-mode-label' in stylesheet
     assert "color: var(--nh-text) !important;" in stylesheet
     assert "color: var(--nh-muted) !important;" in stylesheet
+
+
+def test_dark_mode_recolours_static_information_prose_after_specificity_audit():
+    stylesheet = source("static/theme.css")
+
+    for selector in (
+        ".home-information-links a",
+        ".static-page-copy",
+        ".roadmap-heading",
+        ".roadmap-items > .roadmap-item",
+        ".faq-question",
+        ".faq-answer > .faq-answer-copy",
+        ".how-to-platform-button",
+        ".how-to-story .how-to-step > .how-to-step-copy",
+        ".how-to-spot-key-title",
+        ".how-to-spot-key-copy",
+        ".how-to-spot-key-icon",
+        ".how-to-closing-copy",
+    ):
+        assert f'html[data-theme="dark"] body.nq-style {selector}' in stylesheet
 
 
 def test_dark_mode_adapts_leaflet_chrome_but_not_map_tiles():

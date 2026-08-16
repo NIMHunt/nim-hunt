@@ -8,7 +8,9 @@ from claim_location_guard import install as install_claim_location_guard
 from claim_network_security import install as install_claim_network_security
 from claim_payout_throttle import install as install_claim_payout_throttle
 from claim_security import install as install_claim_security
-from claim_security_defence_in_depth import install as install_claim_security_defence_in_depth
+from claim_security_defence_in_depth import (
+    install as install_claim_security_defence_in_depth,
+)
 from claim_security_maintenance import install as install_claim_security_maintenance
 from claim_settlement_security import install as install_claim_settlement_security
 from funding_fee_worker import install as install_fee_worker

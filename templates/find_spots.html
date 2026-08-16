@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="{{ leaflet_css_url }}">
     <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-ui-polish-v1-20260704') }}-mobile-location-v2-20260728">
     <link rel="stylesheet" href="/static/x_share.css?v=x-share-v4-20260726">
+    {% include "_theme_head.html" %}
 </head>
 <body
     class="nq-style"
@@ -35,8 +36,6 @@
             <button id="notice-ok" class="nq-button light-blue" data-i18n="common.ok">OK</button>
         </section>
     </div>
-
-
 
     <div id="report-backdrop" class="notice-backdrop" hidden>
         <section class="notice-card nh-confirm-card report-spot-card" role="dialog" aria-modal="true" aria-labelledby="report-title">

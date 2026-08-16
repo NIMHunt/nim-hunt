@@ -1,4 +1,5 @@
 import { getPreferredLanguage } from './localisation.js';
+import { createClaimAuthInteractionRetry } from './claim_auth_retry.js';
 
 // Small browser-side helpers shared by NimHunt page modules.
 // Keep these helpers free of page-specific state so reusing them cannot change
@@ -9,6 +10,7 @@ const MINI_APP_SDK_URL = 'https://esm.sh/@nimiq/mini-app-sdk';
 let miniAppSdkPromise = null;
 let claimSecurityPromise = null;
 let claimSecurityDeviceId = null;
+let claimSecurityInteractionRetry = null;
 
 function delay(milliseconds) {
     return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -118,6 +120,36 @@ function claimSecurityRequiredOnCurrentPage() {
     return path === '/spots' || path.startsWith('/claim/');
 }
 
+function claimSecurityRetrySupportedOnCurrentPage() {
+    return String(window.location?.pathname || '') === '/spots';
+}
+
+function getClaimSecurityInteractionRetry() {
+    if (!claimSecurityRetrySupportedOnCurrentPage()) return null;
+    if (claimSecurityInteractionRetry) return claimSecurityInteractionRetry;
+    if (typeof document === 'undefined') return null;
+
+    claimSecurityInteractionRetry = createClaimAuthInteractionRetry({
+        documentRef: document,
+        retry: async (deviceId) => {
+            await ensureClaimSecuritySession(deviceId);
+            // find_spots.js intentionally caches its first identity bootstrap.
+            // Rebuild that page state after a user-driven retry succeeds so the
+            // newly authenticated user and claim statuses are immediately used.
+            window.location.reload();
+        },
+    });
+    return claimSecurityInteractionRetry;
+}
+
+function armClaimSecurityRetryOnInteraction(deviceId) {
+    getClaimSecurityInteractionRetry()?.arm(deviceId);
+}
+
+function disarmClaimSecurityRetryOnInteraction() {
+    claimSecurityInteractionRetry?.disarm();
+}
+
 async function securityJson(url, body, fallback) {
     const response = await fetch(url, {
         method: 'POST',
@@ -192,10 +224,18 @@ export async function ensureClaimSecuritySession(deviceIdHash) {
     })();
 
     try {
-        return await claimSecurityPromise;
+        const result = await claimSecurityPromise;
+        disarmClaimSecurityRetryOnInteraction();
+        return result;
     } catch (error) {
         claimSecurityPromise = null;
         claimSecurityDeviceId = null;
+        // /spots performs an eager identity check during page setup. If the user
+        // declines that signature or a transient error occurs, its page-level
+        // identity promise is already resolved. Arm one user-driven retry on the
+        // next Claim/Report interaction instead of prompting on background map
+        // refreshes or requiring a manual page reload.
+        armClaimSecurityRetryOnInteraction(deviceId);
         throw error;
     }
 }

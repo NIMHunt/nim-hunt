@@ -9,8 +9,8 @@ def source(path: str) -> str:
 
 def test_theme_head_is_loaded_by_every_page_shell():
     theme_head = source("templates/_theme_head.html")
-    assert "/static/theme.css?v=dark-mode-v7-20260816" in theme_head
-    assert "/static/theme.js?v=dark-mode-v2-20260816" in theme_head
+    assert "/static/theme.css?v=dark-mode-v8-20260816" in theme_head
+    assert "/static/theme.js?v=dark-mode-v3-20260816" in theme_head
 
     for path in (
         "templates/_home_shell.html",
@@ -71,14 +71,21 @@ def test_theme_switch_uses_a_point_two_five_second_view_transition():
     assert "prefers-reduced-motion: reduce" in stylesheet
 
 
-def test_theme_defaults_to_light_and_persists_an_explicit_choice():
+def test_theme_follows_system_until_user_makes_an_explicit_choice():
     javascript = source("static/theme.js")
 
     assert "const STORAGE_KEY = 'nimhunt-theme'" in javascript
-    assert "window.localStorage.getItem(STORAGE_KEY) === DARK_THEME ? DARK_THEME : LIGHT_THEME" in javascript
+    assert "const SYSTEM_THEME_QUERY = '(prefers-color-scheme: dark)'" in javascript
+    assert "if (stored === DARK_THEME || stored === LIGHT_THEME) return stored;" in javascript
+    assert "return explicitStoredTheme() || systemTheme();" in javascript
+    assert "window.matchMedia?.(SYSTEM_THEME_QUERY).matches ? DARK_THEME : LIGHT_THEME" in javascript
+    assert "applyTheme(preferredTheme());" in javascript
     assert "window.localStorage.setItem(STORAGE_KEY, theme)" in javascript
     assert "persist: true" in javascript
+    assert "if (explicitStoredTheme()) return;" in javascript
+    assert "mediaQuery.addEventListener('change', syncUnpinnedTheme)" in javascript
     assert "window.addEventListener('storage'" in javascript
+    assert "applyTheme(systemTheme());" in javascript
 
 
 def test_dark_mode_changes_neutrals_without_redefining_action_colours():
@@ -96,6 +103,34 @@ def test_dark_mode_changes_neutrals_without_redefining_action_colours():
         "--nh-highlight-blue:",
     ):
         assert accent_variable not in stylesheet
+
+
+def test_dark_mode_keeps_validation_locked_controls_visible():
+    stylesheet = source("static/theme.css")
+
+    for selector in (
+        ".display-name-actions #display-name-save.is-disabled-by-validation",
+        ".action-button[aria-disabled=\"true\"]",
+        ".create-spot-modal-actions .nq-button.is-disabled-by-validation",
+        ".create-spot-modal-actions .nq-button:disabled",
+        ".create-spot-page-actions .nq-button:disabled",
+        "#create-spot-save[aria-disabled=\"true\"]",
+        ".create-spot-open-button.is-locked",
+        ".spot-owner-action-button[aria-disabled=\"true\"]",
+        ".report-confirm-tooltip-target .nq-button:disabled",
+    ):
+        assert f'html[data-theme="dark"] body.nq-style {selector}' in stylesheet
+
+    locked_rule = stylesheet.split(
+        'html[data-theme="dark"] body.nq-style .display-name-actions #display-name-save.is-disabled-by-validation,',
+        1,
+    )[1].split("}", 1)[0]
+    assert "opacity: 1 !important;" in locked_rule
+    assert "background: rgba(255, 255, 255, 0.12) !important;" in locked_rule
+    assert "color: var(--nh-soft-text) !important;" in locked_rule
+    assert "box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15) !important;" in locked_rule
+
+    assert 'html[data-theme="dark"] body.nq-style .filter-toggle.is-off' in stylesheet
 
 
 def test_dark_mode_explicitly_recolours_reported_text_components():

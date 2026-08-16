@@ -9,8 +9,8 @@ def source(path: str) -> str:
 
 def test_theme_head_is_loaded_by_every_page_shell():
     theme_head = source("templates/_theme_head.html")
-    assert "/static/theme.css?v=dark-mode-v4-20260816" in theme_head
-    assert "/static/theme.js?v=dark-mode-v1-20260816" in theme_head
+    assert "/static/theme.css?v=dark-mode-v5-20260816" in theme_head
+    assert "/static/theme.js?v=dark-mode-v2-20260816" in theme_head
 
     for path in (
         "templates/_home_shell.html",
@@ -56,6 +56,18 @@ def test_theme_toggle_is_buttonless_and_uses_standard_tooltip_typography():
     assert "line-height: 1.25;" in tooltip_rule
     assert "font-size: 0.82rem;" not in stylesheet
     assert "font-size: 0.76rem;" not in stylesheet
+
+
+def test_theme_switch_uses_a_point_four_second_view_transition():
+    javascript = source("static/theme.js")
+    stylesheet = source("static/theme.css")
+
+    assert "typeof documentObj.startViewTransition === 'function'" in javascript
+    assert "switchTheme(currentTheme === DARK_THEME ? LIGHT_THEME : DARK_THEME" in javascript
+    assert "::view-transition-old(root)" in stylesheet
+    assert "::view-transition-new(root)" in stylesheet
+    assert "animation-duration: 0.4s;" in stylesheet
+    assert "prefers-reduced-motion: reduce" in stylesheet
 
 
 def test_theme_defaults_to_light_and_persists_an_explicit_choice():

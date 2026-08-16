@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { createClaimAuthInteractionRetry } from './claim_auth_retry.js';
@@ -118,4 +119,14 @@ test('disarm removes the pending interaction retry', async () => {
 
     assert.equal(attempts, 0);
     assert.equal(retry.isArmed(), false);
+});
+
+test('browser utils arms interaction retry and reloads after successful re-authentication', async () => {
+    const source = await readFile(new URL('./browser_utils.js', import.meta.url), 'utf8');
+
+    assert.match(source, /armClaimSecurityRetryOnInteraction\(deviceId\)/);
+    assert.match(source, /if \(claimSecurityErrorIsRetryable\(error\)\)/);
+    assert.match(source, /await ensureClaimSecuritySession\(deviceId\)/);
+    assert.match(source, /window\.location\.reload\(\)/);
+    assert.match(source, /'device_wallet_mismatch'/);
 });

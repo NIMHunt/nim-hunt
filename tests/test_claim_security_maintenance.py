@@ -117,6 +117,49 @@ class ClaimSecurityMaintenanceTest(unittest.IsolatedAsyncioTestCase):
                 await self._get(db, f"{claim_security.CLAIM_RECORD_PREFIX}0000")
             )
 
+    async def test_live_first_page_cannot_starve_expired_rows_after_limit(self):
+        async with schema.get_db() as db:
+            now_row = await db.execute_fetchall("SELECT unixepoch() AS now;")
+            now = int(now_row[0]["now"])
+
+            # More live rows than one cleanup pass can inspect. Before cursor
+            # pagination, every pass selected these same first 500 keys forever.
+            for index in range(501):
+                await self._put(
+                    db,
+                    f"{claim_security.CHALLENGE_PREFIX}{index:04d}",
+                    {"expires_at": now + 3600},
+                )
+
+            expired_key = f"{claim_security.CHALLENGE_PREFIX}9999-expired"
+            await self._put(db, expired_key, {"expires_at": now - 1})
+            await db.commit()
+
+        first = await claim_security_maintenance.cleanup_expired_claim_security_metadata(
+            limit=500
+        )
+        self.assertEqual(first["checked_count"], 500)
+        self.assertEqual(first["deleted_count"], 0)
+
+        async with schema.get_db() as db:
+            self.assertIsNotNone(await self._get(db, expired_key))
+            self.assertEqual(
+                await self._get(db, claim_security_maintenance.CLEANUP_CURSOR_KEY),
+                f"{claim_security.CHALLENGE_PREFIX}0499",
+            )
+
+        second = await claim_security_maintenance.cleanup_expired_claim_security_metadata(
+            limit=500
+        )
+        self.assertEqual(second["checked_count"], 2)
+        self.assertEqual(second["deleted_count"], 1)
+
+        async with schema.get_db() as db:
+            self.assertIsNone(await self._get(db, expired_key))
+            self.assertIsNotNone(
+                await self._get(db, f"{claim_security.CHALLENGE_PREFIX}0500")
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

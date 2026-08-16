@@ -21,13 +21,27 @@ class FakeDocument {
     }
 
     click({ matches = true } = {}) {
-        const listener = this.listeners.get('click');
-        if (!listener) return;
-        listener.handler({
+        const event = {
+            defaultPrevented: false,
+            propagationStopped: false,
+            immediatePropagationStopped: false,
+            preventDefault() {
+                this.defaultPrevented = true;
+            },
+            stopPropagation() {
+                this.propagationStopped = true;
+            },
+            stopImmediatePropagation() {
+                this.immediatePropagationStopped = true;
+                this.propagationStopped = true;
+            },
             target: {
                 closest: () => (matches ? {} : null),
             },
-        });
+        };
+        const listener = this.listeners.get('click');
+        if (listener) listener.handler(event);
+        return event;
     }
 }
 
@@ -44,18 +58,21 @@ test('retry waits for a matching claim/report interaction', async () => {
     retry.arm('ABC123');
     assert.equal(retry.isArmed(), true);
 
-    documentRef.click({ matches: false });
+    const unrelated = documentRef.click({ matches: false });
     await flush();
     assert.deepEqual(calls, []);
     assert.equal(retry.isArmed(), true);
+    assert.equal(unrelated.defaultPrevented, false);
 
-    documentRef.click({ matches: true });
+    const matching = documentRef.click({ matches: true });
     await flush();
     assert.deepEqual(calls, ['abc123']);
     assert.equal(retry.isArmed(), false);
+    assert.equal(matching.defaultPrevented, true);
+    assert.equal(matching.immediatePropagationStopped, true);
 });
 
-test('failed retry re-arms for the next explicit interaction', async () => {
+test('failed retry re-arms for the next explicit interaction without starting the page action', async () => {
     const documentRef = new FakeDocument();
     let attempts = 0;
     const retry = createClaimAuthInteractionRetry({
@@ -67,18 +84,22 @@ test('failed retry re-arms for the next explicit interaction', async () => {
     });
 
     retry.arm('device');
-    documentRef.click();
+    const first = documentRef.click();
     await flush();
     assert.equal(attempts, 1);
     assert.equal(retry.isArmed(), true);
+    assert.equal(first.defaultPrevented, true);
+    assert.equal(first.immediatePropagationStopped, true);
 
-    documentRef.click();
+    const second = documentRef.click();
     await flush();
     assert.equal(attempts, 2);
     assert.equal(retry.isArmed(), false);
+    assert.equal(second.defaultPrevented, true);
+    assert.equal(second.immediatePropagationStopped, true);
 });
 
-test('an in-flight retry cannot be duplicated by extra clicks', async () => {
+test('an in-flight retry cannot be duplicated and keeps swallowing claim/report clicks', async () => {
     const documentRef = new FakeDocument();
     let attempts = 0;
     let release;
@@ -92,16 +113,37 @@ test('an in-flight retry cannot be duplicated by extra clicks', async () => {
     });
 
     retry.arm('device');
-    documentRef.click();
+    const first = documentRef.click();
     await flush();
-    documentRef.click();
+    const second = documentRef.click();
     await flush();
     assert.equal(attempts, 1);
     assert.equal(retry.isInFlight(), true);
+    assert.equal(first.defaultPrevented, true);
+    assert.equal(second.defaultPrevented, true);
+    assert.equal(second.immediatePropagationStopped, true);
 
     release();
     await flush();
     assert.equal(retry.isInFlight(), false);
+});
+
+test('claim-detail body retries do not consume ordinary page interactions', async () => {
+    const documentRef = new FakeDocument();
+    let attempts = 0;
+    const retry = createClaimAuthInteractionRetry({
+        documentRef,
+        selector: 'body',
+        retry: async () => { attempts += 1; },
+    });
+
+    retry.arm('device');
+    const click = documentRef.click();
+    await flush();
+
+    assert.equal(attempts, 1);
+    assert.equal(click.defaultPrevented, false);
+    assert.equal(click.immediatePropagationStopped, false);
 });
 
 test('disarm removes the pending interaction retry', async () => {
@@ -114,11 +156,12 @@ test('disarm removes the pending interaction retry', async () => {
 
     retry.arm('device');
     retry.disarm();
-    documentRef.click();
+    const click = documentRef.click();
     await flush();
 
     assert.equal(attempts, 0);
     assert.equal(retry.isArmed(), false);
+    assert.equal(click.defaultPrevented, false);
 });
 
 test('browser utils arms interaction retry and reloads after successful re-authentication', async () => {

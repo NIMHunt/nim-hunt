@@ -107,7 +107,7 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
                 "_metadata_get",
                 new=mock.AsyncMock(return_value=binding),
             ),
-            mock.patch.object(defence, "_ORIGINAL_CREATE_CLAIM_ATTEMPT", delegate),
+            mock.patch.object(defence, "_CLAIM_ATTEMPT_DELEGATE", delegate),
         ):
             result = await defence._create_claim_attempt_bound_to_verified_wallet(
                 object(),

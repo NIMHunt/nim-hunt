@@ -72,6 +72,16 @@ def test_dark_mode_changes_neutrals_without_redefining_action_colours():
         assert accent_variable not in stylesheet
 
 
+def test_dark_mode_explicitly_recolours_reported_text_components():
+    stylesheet = source("static/theme.css")
+
+    assert 'html[data-theme="dark"] body.nq-style .welcome-line' in stylesheet
+    assert 'html[data-theme="dark"] body.nq-style .spot-detail-description' in stylesheet
+    assert 'html[data-theme="dark"] body.nq-style .network-mode-banner .network-mode-label' in stylesheet
+    assert "color: var(--nh-text) !important;" in stylesheet
+    assert "color: var(--nh-muted) !important;" in stylesheet
+
+
 def test_dark_mode_adapts_leaflet_chrome_but_not_map_tiles():
     stylesheet = source("static/theme.css")
 

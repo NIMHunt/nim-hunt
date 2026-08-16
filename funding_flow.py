@@ -3,11 +3,13 @@
 import sys
 
 import constants as const
+import funding_monitor
 from cancellation_safety import install as install_cancellation_safety
 from claim_auth_abuse_guard import install as install_claim_auth_abuse_guard
 from claim_code_policy import install as install_claim_code_policy
 from claim_location_guard import install as install_claim_location_guard
 from claim_network_security import install as install_claim_network_security
+from claim_payout_diagnostics import claim_payout_diagnostics
 from claim_payout_throttle import install as install_claim_payout_throttle
 from claim_security import install as install_claim_security
 from claim_security_defence_in_depth import (
@@ -20,12 +22,18 @@ from claim_security_response_delivery import (
 from claim_settlement_security import install as install_claim_settlement_security
 from claim_wallet_hourly_limit import install as install_claim_wallet_hourly_limit
 from funding_fee_worker import install as install_fee_worker
-from funding_monitor import funding_flow_diagnostics
 from funding_monitor import install as install_monitor
 from funding_status import install as install_status
 from refund_address_safety import install as install_refund_address_safety
 
 _INSTALLED = False
+
+
+async def funding_flow_diagnostics():
+    """Return financial-worker diagnostics plus aggregate claim deferral state."""
+    diagnostics = await funding_monitor.funding_flow_diagnostics()
+    diagnostics["claim_payout_diagnostics"] = await claim_payout_diagnostics()
+    return diagnostics
 
 
 def install() -> None:

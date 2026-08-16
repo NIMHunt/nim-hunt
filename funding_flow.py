@@ -13,7 +13,9 @@ from claim_security_defence_in_depth import (
     install as install_claim_security_defence_in_depth,
 )
 from claim_security_maintenance import install as install_claim_security_maintenance
-from claim_security_response_delivery import install as install_claim_security_response_delivery
+from claim_security_response_delivery import (
+    install as install_claim_security_response_delivery,
+)
 from claim_settlement_security import install as install_claim_settlement_security
 from funding_fee_worker import install as install_fee_worker
 from funding_monitor import funding_flow_diagnostics

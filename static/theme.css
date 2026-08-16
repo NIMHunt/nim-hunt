@@ -33,7 +33,7 @@
    without slowing normal hover/focus interactions elsewhere in the app. */
 ::view-transition-old(root),
 ::view-transition-new(root) {
-    animation-duration: 0.4s;
+    animation-duration: 0.25s;
     animation-timing-function: ease;
 }
 
@@ -299,6 +299,24 @@ html[data-theme="dark"] body.nq-style .empty-spots {
 }
 
 html[data-theme="dark"] body.nq-style .network-mode-banner .network-mode-label {
+    color: var(--nh-text) !important;
+}
+
+/* Static/information-page prose can also compete with Nimiq element and
+   component selectors. Keep neutral text on plain surfaces tied to the dark
+   palette without changing coloured action-card contrast. */
+html[data-theme="dark"] body.nq-style .home-information-links a,
+html[data-theme="dark"] body.nq-style .static-page-copy,
+html[data-theme="dark"] body.nq-style .roadmap-heading,
+html[data-theme="dark"] body.nq-style .roadmap-items > .roadmap-item,
+html[data-theme="dark"] body.nq-style .faq-question,
+html[data-theme="dark"] body.nq-style .faq-answer > .faq-answer-copy,
+html[data-theme="dark"] body.nq-style .how-to-platform-button,
+html[data-theme="dark"] body.nq-style .how-to-story .how-to-step > .how-to-step-copy,
+html[data-theme="dark"] body.nq-style .how-to-spot-key-title,
+html[data-theme="dark"] body.nq-style .how-to-spot-key-copy,
+html[data-theme="dark"] body.nq-style .how-to-spot-key-icon,
+html[data-theme="dark"] body.nq-style .how-to-closing-copy {
     color: var(--nh-text) !important;
 }
 

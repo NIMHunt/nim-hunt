@@ -18,6 +18,7 @@ from claim_security_response_delivery import (
 )
 from claim_settlement_security import install as install_claim_settlement_security
 from claim_wallet_hourly_limit import install as install_claim_wallet_hourly_limit
+import constants as const
 from funding_fee_worker import install as install_fee_worker
 from funding_monitor import funding_flow_diagnostics
 from funding_monitor import install as install_monitor
@@ -30,6 +31,15 @@ _INSTALLED = False
 def install() -> None:
     """Install production runtime hooks without polluting isolated unit tests."""
     global _INSTALLED
+
+    # The old development shortcut silently turned a browser with no Nimiq Pay
+    # identity into TEST_USER_ID. That no longer represents the claim security
+    # model: public Testnet requires an actual device plus wallet signature, and
+    # a desktop fallback can create misleading local claims without a genuine
+    # payout identity. Keep TEST_USER_ID as a spoof.py fixture owner, but never
+    # make it the implicit current user of the running application.
+    const.DEFAULT_TO_TEST_USER = False
+
     if _INSTALLED or "pytest" in sys.modules:
         return
     install_claim_code_policy()

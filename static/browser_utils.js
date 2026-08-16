@@ -7,6 +7,8 @@ import { getPreferredLanguage } from './localisation.js';
 const DEVICE_IDENTIFIER_PATTERN = /^[0-9a-fA-F]{64}$/;
 const MINI_APP_SDK_URL = 'https://esm.sh/@nimiq/mini-app-sdk';
 let miniAppSdkPromise = null;
+let claimSecurityPromise = null;
+let claimSecurityDeviceId = null;
 
 function delay(milliseconds) {
     return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -111,6 +113,93 @@ export function responseErrorText(data, fallback = 'Request failed.') {
     return fallback;
 }
 
+function claimSecurityRequiredOnCurrentPage() {
+    const path = String(window.location?.pathname || '');
+    return path === '/spots' || path.startsWith('/claim/');
+}
+
+async function securityJson(url, body, fallback) {
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) {
+        const error = new Error(responseErrorText(data, fallback));
+        error.data = data;
+        error.status = response.status;
+        throw error;
+    }
+    return data;
+}
+
+export async function ensureClaimSecuritySession(deviceIdHash) {
+    const deviceId = String(deviceIdHash || '').trim().toLowerCase();
+    if (!DEVICE_IDENTIFIER_PATTERN.test(deviceId)) {
+        throw new Error('A valid Nimiq Pay device identifier is required for claim verification.');
+    }
+
+    if (claimSecurityPromise && claimSecurityDeviceId === deviceId) {
+        return claimSecurityPromise;
+    }
+
+    claimSecurityDeviceId = deviceId;
+    claimSecurityPromise = (async () => {
+        const status = await securityJson(
+            '/api/security/session',
+            { device_id_hash: deviceId },
+            'NimHunt could not check your claim-verification session.',
+        );
+        if (status.authenticated) return status;
+
+        const challenge = await securityJson(
+            '/api/security/challenge',
+            { device_id_hash: deviceId },
+            'NimHunt could not prepare wallet verification.',
+        );
+
+        const sdk = await loadNimiqMiniAppSdk({ timeoutMs: 7000, retries: 1 });
+        const nimiq = await withTimeout(
+            Promise.resolve().then(() => sdk.init()),
+            7000,
+            'Nimiq Pay did not finish preparing wallet verification.',
+        );
+        const signed = await withTimeout(
+            Promise.resolve().then(() => nimiq.sign(challenge.message)),
+            30000,
+            'Nimiq Pay did not complete wallet verification in time.',
+        );
+        if (
+            !signed
+            || typeof signed.publicKey !== 'string'
+            || typeof signed.signature !== 'string'
+        ) {
+            throw new Error('Nimiq Pay returned an invalid wallet-verification signature.');
+        }
+
+        return securityJson(
+            '/api/security/verify',
+            {
+                device_id_hash: deviceId,
+                challenge_id: challenge.challenge_id,
+                public_key: signed.publicKey,
+                signature: signed.signature,
+            },
+            'NimHunt could not verify your Nimiq account.',
+        );
+    })();
+
+    try {
+        return await claimSecurityPromise;
+    } catch (error) {
+        claimSecurityPromise = null;
+        claimSecurityDeviceId = null;
+        throw error;
+    }
+}
+
 export async function requestDeviceIdentifierHash(
     requestDeviceIdentifier,
     reason,
@@ -127,7 +216,17 @@ export async function requestDeviceIdentifierHash(
             if (typeof identifier !== 'string' || !DEVICE_IDENTIFIER_PATTERN.test(identifier)) {
                 throw new Error('Nimiq Pay returned an invalid device identifier.');
             }
-            return identifier.toLowerCase();
+            const cleanIdentifier = identifier.toLowerCase();
+
+            // Device IDs remain useful for continuity, but they are client data
+            // and must not be accepted as proof of identity for a payout. On
+            // claim-capable pages, bind the device to a server-verified Nimiq
+            // signature before returning it to the page module.
+            if (claimSecurityRequiredOnCurrentPage()) {
+                await ensureClaimSecuritySession(cleanIdentifier);
+            }
+
+            return cleanIdentifier;
         } catch (error) {
             lastError = error;
             if (attempt < retries) await delay(retryDelayMs);

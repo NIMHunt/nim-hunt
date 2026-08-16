@@ -5,6 +5,7 @@ from unittest import mock
 
 import claim_security_defence_in_depth as defence
 import constants as const
+import database as schema
 
 
 class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
@@ -107,6 +108,11 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
                 "_metadata_get",
                 new=mock.AsyncMock(return_value=binding),
             ),
+            mock.patch.object(
+                defence,
+                "_wallet_has_reached_spot_limit",
+                new=mock.AsyncMock(return_value=False),
+            ),
             mock.patch.object(defence, "_CLAIM_ATTEMPT_DELEGATE", delegate),
         ):
             result = await defence._create_claim_attempt_bound_to_verified_wallet(
@@ -120,6 +126,90 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, {"id": 7})
         self.assertEqual(delegate.await_args.kwargs["payout_address"], verified)
+
+    async def test_same_verified_wallet_cannot_reset_spot_limit_with_new_device(self):
+        verified = const.DEV_PLATFORM_FEE_ADDRESS
+        delegate = mock.AsyncMock(return_value={"id": 7})
+        binding = {"wallet_address": verified}
+
+        with (
+            mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
+            mock.patch.object(
+                defence.claim_security,
+                "_metadata_get",
+                new=mock.AsyncMock(return_value=binding),
+            ),
+            mock.patch.object(
+                defence,
+                "_wallet_has_reached_spot_limit",
+                new=mock.AsyncMock(return_value=True),
+            ),
+            mock.patch.object(defence, "_CLAIM_ATTEMPT_DELEGATE", delegate),
+        ):
+            with self.assertRaisesRegex(ValueError, "claim limit"):
+                await defence._create_claim_attempt_bound_to_verified_wallet(
+                    object(),
+                    spot_id=3,
+                    user_id=999,
+                    lat=51.5,
+                    long=-0.1,
+                    payout_address=None,
+                )
+
+        delegate.assert_not_awaited()
+
+    async def test_duration_promotion_rechecks_wallet_limit(self):
+        verified = const.DEV_PLATFORM_FEE_ADDRESS
+        pending = {
+            schema.CLAIM_ID: 12,
+            schema.CLAIM_SPOT_ID: 3,
+            schema.CLAIM_RECIPIENT: 999,
+            schema.CLAIM_STATUS: const.CLAIM_STATUS_PENDING,
+        }
+        failed = {**pending, schema.CLAIM_STATUS: const.CLAIM_STATUS_FAILED}
+        delegate = mock.AsyncMock(return_value={**pending, schema.CLAIM_STATUS: const.CLAIM_STATUS_SUCCESS})
+
+        with (
+            mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
+            mock.patch.object(
+                defence.db_access,
+                "get_claim",
+                new=mock.AsyncMock(side_effect=[pending, failed]),
+            ),
+            mock.patch.object(
+                defence.db_access,
+                "is_prizedraw",
+                new=mock.AsyncMock(return_value=False),
+            ),
+            mock.patch.object(
+                defence.claim_security,
+                "_metadata_get",
+                new=mock.AsyncMock(return_value={"wallet_address": verified}),
+            ),
+            mock.patch.object(
+                defence,
+                "_wallet_has_reached_spot_limit",
+                new=mock.AsyncMock(return_value=True),
+            ),
+            mock.patch.object(
+                defence.db_access,
+                "set_claim_status_to_failed",
+                new=mock.AsyncMock(),
+            ) as fail_claim,
+            mock.patch.object(defence, "_PROMOTE_CLAIM_DELEGATE", delegate),
+        ):
+            result = await defence._promote_claim_with_verified_wallet_limit(
+                object(),
+                claim_id=12,
+            )
+
+        fail_claim.assert_awaited_once_with(mock.ANY, claim_id=12)
+        delegate.assert_not_awaited()
+        self.assertEqual(result[schema.CLAIM_STATUS], const.CLAIM_STATUS_FAILED)
+        self.assertEqual(
+            result["capacity_promotion"]["reason"],
+            "verified_wallet_claim_limit_reached",
+        )
 
 
 if __name__ == "__main__":

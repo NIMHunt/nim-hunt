@@ -48,6 +48,12 @@ class ClaimAuthAbuseGuardTest(unittest.IsolatedAsyncioTestCase):
 
         return receive
 
+    def _send_to(self, messages):
+        async def send(message):
+            messages.append(message)
+
+        return send
+
     async def test_repeated_verify_attempt_is_rate_limited_before_inner_app(self):
         body = json.dumps({"device_id_hash": "a" * 64}).encode()
         app_calls = 0
@@ -84,13 +90,13 @@ class ClaimAuthAbuseGuardTest(unittest.IsolatedAsyncioTestCase):
                 app,
                 self._scope(),
                 self._receive(body),
-                first_messages.append,
+                self._send_to(first_messages),
             )
             consumed_again = await claim_auth_abuse_guard.guard_http_request_with_verify_rate_limit(
                 app,
                 self._scope(),
                 self._receive(body),
-                second_messages.append,
+                self._send_to(second_messages),
             )
 
         self.assertTrue(consumed)

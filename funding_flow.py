@@ -9,6 +9,7 @@ from claim_network_security import install as install_claim_network_security
 from claim_payout_throttle import install as install_claim_payout_throttle
 from claim_security import install as install_claim_security
 from claim_security_defence_in_depth import install as install_claim_security_defence_in_depth
+from claim_security_maintenance import install as install_claim_security_maintenance
 from claim_settlement_security import install as install_claim_settlement_security
 from funding_fee_worker import install as install_fee_worker
 from funding_monitor import funding_flow_diagnostics
@@ -33,6 +34,7 @@ def install() -> None:
     # replace it, so install it after claim_security and its extra safeguards.
     install_claim_payout_throttle()
     install_claim_settlement_security()
+    install_claim_security_maintenance()
     # Preserve Nimiq Pay's ordinary account before cancellation/remainder guards
     # can submit money. The cancellation lease then wraps the corrected flow.
     install_refund_address_safety()

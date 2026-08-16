@@ -5,6 +5,7 @@ import json
 import unittest
 from unittest import mock
 
+import claim_security
 import claim_security_response_delivery
 
 
@@ -26,7 +27,7 @@ class ClaimSecurityResponseDeliveryTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
             events.append("background-finish")
 
-        async def original_guard(wrapped_app, scope, receive, send):
+        async def installed_guard(wrapped_app, scope, receive, send):
             captured: list[dict] = []
 
             async def capture(message):
@@ -49,8 +50,8 @@ class ClaimSecurityResponseDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch.object(
             claim_security_response_delivery,
-            "_ORIGINAL_GUARD",
-            original_guard,
+            "_DELEGATE",
+            installed_guard,
         ):
             consumed = await claim_security_response_delivery.guard_http_request_with_response_delivery(
                 app,
@@ -79,7 +80,7 @@ class ClaimSecurityResponseDeliveryTest(unittest.IsolatedAsyncioTestCase):
             )
             raise RuntimeError("settlement exploded")
 
-        async def original_guard(wrapped_app, scope, receive, send):
+        async def installed_guard(wrapped_app, scope, receive, send):
             captured: list[dict] = []
 
             async def capture(message):
@@ -98,8 +99,8 @@ class ClaimSecurityResponseDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch.object(
             claim_security_response_delivery,
-            "_ORIGINAL_GUARD",
-            original_guard,
+            "_DELEGATE",
+            installed_guard,
         ):
             with self.assertLogs(claim_security_response_delivery.logger, level="ERROR"):
                 consumed = await claim_security_response_delivery.guard_http_request_with_response_delivery(
@@ -119,7 +120,7 @@ class ClaimSecurityResponseDeliveryTest(unittest.IsolatedAsyncioTestCase):
         async def app(_scope, _receive, _send):
             raise RuntimeError("handler failed before response")
 
-        async def original_guard(wrapped_app, scope, receive, send):
+        async def installed_guard(wrapped_app, scope, receive, send):
             await wrapped_app(scope, receive, send)
             return True
 
@@ -131,8 +132,8 @@ class ClaimSecurityResponseDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch.object(
             claim_security_response_delivery,
-            "_ORIGINAL_GUARD",
-            original_guard,
+            "_DELEGATE",
+            installed_guard,
         ):
             with self.assertRaisesRegex(RuntimeError, "handler failed before response"):
                 await claim_security_response_delivery.guard_http_request_with_response_delivery(
@@ -141,6 +142,22 @@ class ClaimSecurityResponseDeliveryTest(unittest.IsolatedAsyncioTestCase):
                     receive,
                     send,
                 )
+
+    def test_install_wraps_guard_present_at_install_time(self):
+        async def verification_limiter(*_args, **_kwargs):
+            return True
+
+        with (
+            mock.patch.object(claim_security_response_delivery, "_INSTALLED", False),
+            mock.patch.object(claim_security_response_delivery, "_DELEGATE", None),
+            mock.patch.object(claim_security, "guard_http_request", verification_limiter),
+        ):
+            claim_security_response_delivery.install()
+            self.assertIs(claim_security_response_delivery._DELEGATE, verification_limiter)
+            self.assertIs(
+                claim_security.guard_http_request,
+                claim_security_response_delivery.guard_http_request_with_response_delivery,
+            )
 
 
 if __name__ == "__main__":

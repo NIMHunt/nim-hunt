@@ -9,6 +9,7 @@ export function createClaimAuthInteractionRetry({
     documentRef,
     retry,
     selector = DEFAULT_CLAIM_AUTH_RETRY_SELECTOR,
+    consumeMatchingInteraction = selector === DEFAULT_CLAIM_AUTH_RETRY_SELECTOR,
 } = {}) {
     if (!documentRef || typeof documentRef.addEventListener !== 'function') {
         throw new Error('A document-like event target is required.');
@@ -41,17 +42,41 @@ export function createClaimAuthInteractionRetry({
         removeListener();
     };
 
+    const consumeEvent = (event) => {
+        if (!consumeMatchingInteraction) return;
+        event?.preventDefault?.();
+        if (typeof event?.stopImmediatePropagation === 'function') {
+            event.stopImmediatePropagation();
+        } else {
+            event?.stopPropagation?.();
+        }
+    };
+
     function handleClick(event) {
         const target = event?.target;
         const matched = typeof target?.closest === 'function'
             ? target.closest(selector)
             : null;
-        if (!matched || !armedDeviceId || inFlight) return;
+        if (!matched) return;
+
+        // On Find Spots the retry owns Claim/Report clicks until wallet
+        // authentication finishes. Do not let the same click also enter the
+        // page action, where it could change CLAIM to "Confirming…" or open the
+        // report/claim modal while the signing dialog is still unresolved.
+        // Keep consuming matching clicks while the retry is in flight as well,
+        // so a fast second tap cannot start the underlying action prematurely.
+        if (armedDeviceId || inFlight) consumeEvent(event);
+        if (!armedDeviceId || inFlight) return;
 
         const deviceId = armedDeviceId;
         armedDeviceId = null;
-        removeListener();
         inFlight = true;
+
+        // For the Find Spots controls, keep the capture listener attached while
+        // the wallet dialog is open so extra Claim/Report clicks are swallowed.
+        // Claim-detail pages use a broad `body` selector and deliberately do not
+        // consume normal page interactions, preserving their previous behavior.
+        if (!consumeMatchingInteraction) removeListener();
 
         Promise.resolve()
             .then(() => retry(deviceId))
@@ -62,6 +87,7 @@ export function createClaimAuthInteractionRetry({
             })
             .finally(() => {
                 inFlight = false;
+                if (!armedDeviceId) removeListener();
             });
     }
 

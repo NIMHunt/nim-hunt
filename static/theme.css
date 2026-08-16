@@ -209,6 +209,39 @@ html[data-theme="dark"] .nq-style .spot-claim-button:not(.how-to-claim-button):f
     background: rgba(255, 255, 255, 0.15) !important;
 }
 
+/* Validation-locked controls were previously made disabled mainly by lowering
+   the entire button to 48% opacity. On a dark card that also fades the button's
+   background into the card, making the control look absent rather than locked.
+   Give the recurring locked/inactive controls an explicit muted surface instead. */
+html[data-theme="dark"] body.nq-style .display-name-actions #display-name-save.is-disabled-by-validation,
+html[data-theme="dark"] body.nq-style .action-button.disabled,
+html[data-theme="dark"] body.nq-style .action-button[aria-disabled="true"],
+html[data-theme="dark"] body.nq-style .create-spot-modal-actions .nq-button.is-disabled-by-validation,
+html[data-theme="dark"] body.nq-style .create-spot-modal-actions .nq-button:disabled,
+html[data-theme="dark"] body.nq-style .create-spot-page-actions .nq-button.is-disabled-by-validation,
+html[data-theme="dark"] body.nq-style .create-spot-page-actions .nq-button:disabled,
+html[data-theme="dark"] body.nq-style #create-spot-save[aria-disabled="true"],
+html[data-theme="dark"] body.nq-style .create-spot-open-button.is-locked,
+html[data-theme="dark"] body.nq-style .spot-owner-action-button[aria-disabled="true"],
+html[data-theme="dark"] body.nq-style .spot-owner-action-button.is-disabled-by-validation,
+html[data-theme="dark"] body.nq-style .report-confirm-tooltip-target .nq-button:disabled {
+    filter: none !important;
+    opacity: 1 !important;
+    background: rgba(255, 255, 255, 0.12) !important;
+    color: var(--nh-soft-text) !important;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15) !important;
+}
+
+/* Off filter pills are still interactive, so keep them a little quieter than
+   locked buttons while ensuring their shape remains obvious on the dark map UI. */
+html[data-theme="dark"] body.nq-style .filter-toggle.is-off {
+    filter: none;
+    opacity: 0.72;
+    background: rgba(255, 255, 255, 0.10) !important;
+    color: var(--nh-soft-text) !important;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12) !important;
+}
+
 html[data-theme="dark"] .how-to-platform-switch {
     border-color: var(--nh-border);
     background: rgba(255, 255, 255, 0.06);

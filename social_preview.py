@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import html
 import os
+import re
 import urllib.parse
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 import claim_security
 import constants as const
@@ -33,6 +34,19 @@ INFORMATION_PATHS = {
     "/roadmap": "roadmap",
 }
 INFORMATION_VIEW_PATHS = {view: path for path, view in INFORMATION_PATHS.items()}
+
+# FastAPI's ``{spot_id}`` / ``{claim_id}`` path parameters are validated after
+# routing. Claim security, however, runs before FastAPI and intentionally accepts
+# only the canonical positive-decimal spelling. If a request has the exact shape
+# of a protected claim route but uses another spelling (for example ``01`` or
+# ``+1``), fail closed here rather than letting it fall around the security guard
+# and reach FastAPI's integer coercion.
+_PROTECTED_CLAIM_PATH_SHAPE_RE = re.compile(
+    r"^/api/(?:spot/[^/]+/claim|claim/[^/]+/(?:detail|location))$"
+)
+_CANONICAL_PROTECTED_CLAIM_PATH_RE = re.compile(
+    r"^/api/(?:spot/[1-9][0-9]*/claim|claim/[1-9][0-9]*/(?:detail|location))$"
+)
 
 
 @dataclass(frozen=True)
@@ -243,6 +257,23 @@ def information_scope(scope: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _is_noncanonical_protected_claim_path(scope: dict[str, Any]) -> bool:
+    """Return True for protected claim-route shapes with a noncanonical ID.
+
+    Rejecting these spellings before FastAPI routing is intentionally stricter
+    than trying to reproduce Pydantic's integer coercion here. It means a path
+    such as ``/api/spot/01/claim`` cannot bypass the raw-ASGI security matcher,
+    while NimHunt's own canonical URLs remain unchanged.
+    """
+    if scope.get("type") != "http" or str(scope.get("method") or "").upper() != "POST":
+        return False
+    path = str(scope.get("path") or "")
+    return bool(
+        _PROTECTED_CLAIM_PATH_SHAPE_RE.fullmatch(path)
+        and not _CANONICAL_PROTECTED_CLAIM_PATH_RE.fullmatch(path)
+    )
+
+
 async def metadata_for_request(
     path: str,
     query_string: bytes = b"",
@@ -289,6 +320,21 @@ class SocialPreviewMiddleware:
         self.app = app
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        # Never let an alternate integer spelling route around claim_security's
+        # deliberately canonical raw-path regexes. These URLs are not emitted by
+        # NimHunt, so rejecting them has no normal-user compatibility cost.
+        if _is_noncanonical_protected_claim_path(scope):
+            response = JSONResponse(
+                {
+                    "ok": False,
+                    "code": "invalid_resource_id",
+                    "message": "Use the canonical positive integer ID for this claim route.",
+                },
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+            await response(scope, receive, send)
+            return
+
         # Claim security needs the raw ASGI request before FastAPI creates or
         # refreshes a claim. It consumes only the explicitly protected POST
         # paths; every other request continues through this middleware normally.

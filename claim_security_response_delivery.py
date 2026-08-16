@@ -7,17 +7,20 @@ runs ``BackgroundTasks`` only after its final response-body ``send`` returns, so
 capturing that send until the whole app call finishes accidentally also waits
 for settlement before the browser receives anything.
 
-This adapter creates a narrow response boundary around the existing guard:
+This adapter creates a narrow response boundary around the *currently installed*
+claim guard:
 
 * the FastAPI request runs in a task;
 * the task is paused immediately after emitting its final response body, before
   Starlette can begin BackgroundTasks;
-* the unchanged claim-security guard records any successful claim and forwards
-  the captured response to the real client;
+* the existing claim-security guard chain records any successful claim and
+  forwards the captured response to the real client;
 * only then is the FastAPI task released to run settlement work.
 
-No authentication, risk, audit, or payout decision is reimplemented here. The
-existing guard remains authoritative; this module changes only response timing.
+No authentication, rate-limit, risk, audit, or payout decision is reimplemented
+here. The installer deliberately captures ``claim_security.guard_http_request``
+at install time so wrappers installed earlier (notably verification abuse
+limiting) remain in the chain.
 """
 
 from __future__ import annotations
@@ -40,7 +43,7 @@ ASGIApp = Callable[
 
 logger = logging.getLogger(__name__)
 
-_ORIGINAL_GUARD = claim_security.guard_http_request
+_DELEGATE = None
 _INSTALLED = False
 
 
@@ -58,12 +61,10 @@ async def guard_http_request_with_response_delivery(
     receive: Callable[..., Awaitable[dict[str, Any]]],
     send: Callable[[dict[str, Any]], Awaitable[None]],
 ) -> bool:
-    """Run the existing guard while pausing BackgroundTasks after the response.
-
-    Unprotected requests never invoke ``app`` through this adapter because the
-    underlying guard returns ``False`` first, so their ordinary middleware path
-    is unchanged.
-    """
+    """Run the installed guard chain while pausing work after the response."""
+    delegate = _DELEGATE
+    if delegate is None:  # pragma: no cover - runtime requires install().
+        raise RuntimeError("claim response-delivery guard is not installed")
 
     release_background = asyncio.Event()
     app_task: asyncio.Task[Any] | None = None
@@ -100,7 +101,7 @@ async def guard_http_request_with_response_delivery(
 
         if response_waiter in done:
             # ``app_task`` is now deliberately blocked inside ``gated_send``.
-            # Returning lets the existing claim guard inspect the completed
+            # Returning lets the installed claim guard inspect the completed
             # response, persist its security record, and forward it to the user.
             return
 
@@ -113,7 +114,7 @@ async def guard_http_request_with_response_delivery(
         raise RuntimeError("Protected claim request ended without a complete HTTP response")
 
     try:
-        consumed = await _ORIGINAL_GUARD(
+        consumed = await delegate(
             app_until_response_complete,
             scope,
             receive,
@@ -128,8 +129,8 @@ async def guard_http_request_with_response_delivery(
     if app_task is None:
         return consumed
 
-    # The existing guard has now persisted the security record (for successful
-    # claim creation) and sent the response to the real ASGI ``send`` callable.
+    # The installed guard chain has now persisted the security record (for
+    # successful claim creation) and sent the response to the real ASGI send.
     # Release Starlette's BackgroundTasks only after that boundary is complete.
     release_background.set()
     try:
@@ -143,10 +144,11 @@ async def guard_http_request_with_response_delivery(
 
 
 def install() -> None:
-    """Install the response-ordering adapter around the primary claim guard."""
-    global _INSTALLED
+    """Wrap the guard chain that exists at installation time."""
+    global _DELEGATE, _INSTALLED
     if _INSTALLED:
         return
+    _DELEGATE = claim_security.guard_http_request
     claim_security.guard_http_request = guard_http_request_with_response_delivery
     _INSTALLED = True
 

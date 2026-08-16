@@ -7,6 +7,7 @@ import { createClaimAuthInteractionRetry } from './claim_auth_retry.js';
 
 const DEVICE_IDENTIFIER_PATTERN = /^[0-9a-fA-F]{64}$/;
 const MINI_APP_SDK_URL = 'https://esm.sh/@nimiq/mini-app-sdk';
+const CLAIM_SECURITY_RELOAD_RETRY = '__reload_claim_security_page__';
 let miniAppSdkPromise = null;
 let claimSecurityPromise = null;
 let claimSecurityDeviceId = null;
@@ -121,7 +122,16 @@ function claimSecurityRequiredOnCurrentPage() {
 }
 
 function claimSecurityRetrySupportedOnCurrentPage() {
-    return String(window.location?.pathname || '') === '/spots';
+    const path = String(window.location?.pathname || '');
+    return path === '/spots' || path.startsWith('/claim/');
+}
+
+function claimSecurityRetrySelectorForCurrentPage() {
+    const path = String(window.location?.pathname || '');
+    // A claim-detail page may have no claim/report button at all. Any deliberate
+    // tap/click there is therefore enough to retry a failed authentication and
+    // recover status polling / duration heartbeats without a manual reload.
+    return path.startsWith('/claim/') ? 'body' : undefined;
 }
 
 function claimSecurityErrorIsRetryable(error) {
@@ -139,11 +149,14 @@ function getClaimSecurityInteractionRetry() {
 
     claimSecurityInteractionRetry = createClaimAuthInteractionRetry({
         documentRef: document,
+        selector: claimSecurityRetrySelectorForCurrentPage(),
         retry: async (deviceId) => {
-            await ensureClaimSecuritySession(deviceId);
-            // find_spots.js intentionally caches its first identity bootstrap.
-            // Rebuild that page state after a user-driven retry succeeds so the
-            // newly authenticated user and claim statuses are immediately used.
+            // When device lookup itself failed there is no identifier to reuse;
+            // a user-driven reload reruns the complete device/session/signing
+            // bootstrap. Otherwise retry the known device directly first.
+            if (deviceId !== CLAIM_SECURITY_RELOAD_RETRY) {
+                await ensureClaimSecuritySession(deviceId);
+            }
             window.location.reload();
         },
     });
@@ -238,12 +251,10 @@ export async function ensureClaimSecuritySession(deviceIdHash) {
     } catch (error) {
         claimSecurityPromise = null;
         claimSecurityDeviceId = null;
-        // /spots performs an eager identity check during page setup. If the user
-        // declines that signature or a transient error occurs, its page-level
-        // identity promise is already resolved. Arm one user-driven retry on the
-        // next Claim/Report interaction instead of prompting on background map
-        // refreshes or requiring a manual page reload. Permanent binding/payload
-        // errors deliberately stay failed until their underlying cause changes.
+        // Claim-capable pages may bootstrap identity before the user interacts
+        // with the page. A decline or transient failure must not permanently
+        // poison that page state, but background refreshes also must not nag the
+        // wallet. Arm a retry for the next deliberate interaction instead.
         if (claimSecurityErrorIsRetryable(error)) {
             armClaimSecurityRetryOnInteraction(deviceId);
         } else {
@@ -285,5 +296,18 @@ export async function requestDeviceIdentifierHash(
             if (attempt < retries) await delay(retryDelayMs);
         }
     }
+
+    // If the failure happened before a valid device ID existed, the session
+    // helper could not arm its normal device-specific retry. Give claim-capable
+    // pages a user-driven full-bootstrap retry instead. Do not overwrite a more
+    // precise device-specific retry that is already armed.
+    if (
+        claimSecurityRetrySupportedOnCurrentPage()
+        && claimSecurityErrorIsRetryable(lastError)
+        && !claimSecurityInteractionRetry?.isArmed()
+    ) {
+        armClaimSecurityRetryOnInteraction(CLAIM_SECURITY_RELOAD_RETRY);
+    }
+
     throw lastError || new Error('Nimiq Pay could not identify this device.');
 }

@@ -13,6 +13,7 @@ from claim_security_defence_in_depth import (
     install as install_claim_security_defence_in_depth,
 )
 from claim_security_maintenance import install as install_claim_security_maintenance
+from claim_security_response_delivery import install as install_claim_security_response_delivery
 from claim_settlement_security import install as install_claim_settlement_security
 from funding_fee_worker import install as install_fee_worker
 from funding_monitor import funding_flow_diagnostics
@@ -34,6 +35,9 @@ def install() -> None:
     install_claim_network_security()
     install_claim_auth_abuse_guard()
     install_claim_security_defence_in_depth()
+    # Keep the primary security guard authoritative while restoring FastAPI's
+    # intended response-before-BackgroundTasks ordering for protected routes.
+    install_claim_security_response_delivery()
     # The payout throttle must wrap the security-aware submitter rather than
     # replace it, so install it after claim_security and its extra safeguards.
     install_claim_payout_throttle()

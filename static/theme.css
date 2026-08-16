@@ -285,7 +285,8 @@ html[data-theme="dark"] body.nq-style .welcome-line {
 }
 
 html[data-theme="dark"] body.nq-style .spot-detail-description,
-html[data-theme="dark"] body.nq-style .spot-list-detail > .spot-detail-description {
+html[data-theme="dark"] body.nq-style .spot-list-detail > .spot-detail-description,
+html[data-theme="dark"] body.nq-style .empty-spots {
     color: var(--nh-muted) !important;
 }
 

@@ -124,6 +124,14 @@ function claimSecurityRetrySupportedOnCurrentPage() {
     return String(window.location?.pathname || '') === '/spots';
 }
 
+function claimSecurityErrorIsRetryable(error) {
+    const code = String(error?.data?.code || '').trim().toLowerCase();
+    return !new Set([
+        'device_wallet_mismatch',
+        'invalid_device',
+    ]).has(code);
+}
+
 function getClaimSecurityInteractionRetry() {
     if (!claimSecurityRetrySupportedOnCurrentPage()) return null;
     if (claimSecurityInteractionRetry) return claimSecurityInteractionRetry;
@@ -234,8 +242,13 @@ export async function ensureClaimSecuritySession(deviceIdHash) {
         // declines that signature or a transient error occurs, its page-level
         // identity promise is already resolved. Arm one user-driven retry on the
         // next Claim/Report interaction instead of prompting on background map
-        // refreshes or requiring a manual page reload.
-        armClaimSecurityRetryOnInteraction(deviceId);
+        // refreshes or requiring a manual page reload. Permanent binding/payload
+        // errors deliberately stay failed until their underlying cause changes.
+        if (claimSecurityErrorIsRetryable(error)) {
+            armClaimSecurityRetryOnInteraction(deviceId);
+        } else {
+            disarmClaimSecurityRetryOnInteraction();
+        }
         throw error;
     }
 }

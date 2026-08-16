@@ -114,9 +114,9 @@ async def cleanup_expired_claim_security_metadata(*, limit: int = MAX_ROWS_PER_P
     The last inspected key is persisted as a cursor. Without that cursor, a
     permanently-live first page (for example frequently refreshed rate-limit
     buckets) would be selected on every pass and expired rows after it would
-    never be examined. Reaching the end wraps to the first ephemeral row on the
-    next page selection, so every row remains reachable while each settlement
-    pass stays bounded.
+    never be examined. When a later pass finds no rows after the cursor, that
+    same pass wraps to the first ephemeral row. This keeps every row reachable
+    while each settlement pass remains bounded.
     """
     limit = max(1, int(limit))
     deleted = 0

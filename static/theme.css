@@ -51,7 +51,7 @@
 }
 
 html:not([data-theme="dark"]) .theme-toggle-symbol {
-    background: #ffffff;
+    background: transparent;
     color: #1f2348;
 }
 
@@ -61,7 +61,7 @@ html[data-theme="dark"] .theme-toggle-symbol {
     font-size: 1.5rem;
 }
 
-/* Small custom tooltip; title remains present as a native/accessibility fallback. */
+/* Custom tooltip; title remains present as a native/accessibility fallback. */
 .theme-toggle::after,
 .theme-toggle::before {
     position: absolute;
@@ -77,14 +77,14 @@ html[data-theme="dark"] .theme-toggle-symbol {
 .theme-toggle::after {
     content: attr(data-tooltip);
     bottom: calc(100% + 0.7rem);
-    padding: 0.45rem 0.65rem;
-    border-radius: 8px;
+    padding: 10px 12px;
+    border-radius: 12px;
     background: rgba(31, 35, 72, 0.97);
     color: #ffffff;
     box-shadow: 0 8px 20px rgba(31, 35, 72, 0.22);
-    font-size: 0.82rem;
+    font-size: 1.2rem;
     font-weight: 800;
-    line-height: 1.15;
+    line-height: 1.25;
     white-space: nowrap;
 }
 
@@ -310,10 +310,6 @@ html[data-theme="dark"] .theme-toggle::before {
 
     html[data-theme="dark"] .theme-toggle-symbol {
         font-size: 1.35rem;
-    }
-
-    .theme-toggle::after {
-        font-size: 0.76rem;
     }
 }
 

@@ -17,6 +17,7 @@ from claim_security_response_delivery import (
     install as install_claim_security_response_delivery,
 )
 from claim_settlement_security import install as install_claim_settlement_security
+from claim_wallet_hourly_limit import install as install_claim_wallet_hourly_limit
 from funding_fee_worker import install as install_fee_worker
 from funding_monitor import funding_flow_diagnostics
 from funding_monitor import install as install_monitor
@@ -37,8 +38,12 @@ def install() -> None:
     install_claim_network_security()
     install_claim_auth_abuse_guard()
     install_claim_security_defence_in_depth()
-    # Keep the primary security guard authoritative while restoring FastAPI's
-    # intended response-before-BackgroundTasks ordering for protected routes.
+    # The authoritative hourly wallet limit is derived from durable claim rows
+    # and rechecked inside the serialized claim transaction. Install it after
+    # defence-in-depth so it preserves that wrapper's wallet/payout protections.
+    install_claim_wallet_hourly_limit()
+    # Keep the primary security guard chain authoritative while restoring
+    # FastAPI's intended response-before-BackgroundTasks ordering.
     install_claim_security_response_delivery()
     # The payout throttle must wrap the security-aware submitter rather than
     # replace it, so install it after claim_security and its extra safeguards.

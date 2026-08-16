@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 from unittest import mock
 
 import claim_payout_diagnostics
-import constants as const
 import database as schema
 import funding_flow
 

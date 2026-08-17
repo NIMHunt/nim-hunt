@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import unittest
 from contextlib import asynccontextmanager
+import unittest
 from unittest import mock
 
 import claim_payout_diagnostics

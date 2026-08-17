@@ -9,6 +9,10 @@ import database as schema
 import funding_flow
 
 
+CLAIM_TARGET = "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF"
+VERIFIED_WALLET = "NQ48 LH6Q 7PFD LJYF 7PGB NJXL F8CX GHTJ YEKG"
+
+
 class ClaimPayoutDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
     async def test_aggregates_security_hold_reasons_without_exposing_claim_details(self):
         fake_db = object()
@@ -77,6 +81,11 @@ class ClaimPayoutDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
                 fake_decision,
             ),
             mock.patch.object(
+                claim_payout_diagnostics,
+                "_latest_confirmed_standard_payout_comparison",
+                mock.AsyncMock(return_value={"present": False}),
+            ),
+            mock.patch.object(
                 claim_payout_diagnostics.settlement_updater,
                 "settlement_refresher_status",
                 return_value=settlement_status,
@@ -100,12 +109,65 @@ class ClaimPayoutDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
             result["last_standard_pass"]["result_reason_counts"],
             {"security_hold": 1, "security_record_missing": 1},
         )
+        self.assertEqual(result["latest_confirmed_standard_payout"], {"present": False})
 
         rendered = repr(result).lower()
         self.assertNotIn("wallet_address", rendered)
         self.assertNotIn("device_id", rendered)
         self.assertNotIn("payout_address", rendered)
         self.assertNotIn("ip_hash", rendered)
+        self.assertNotIn("tx_hash", rendered)
+
+    async def test_latest_confirmed_payout_compares_addresses_without_exposing_values(self):
+        fake_db = object()
+        latest = {
+            "claim_id": 42,
+            "transaction_recipient": VERIFIED_WALLET,
+            "settled_at": 1_900,
+        }
+        claim = {
+            schema.CLAIM_ID: 42,
+            schema.CLAIM_PAYOUT_ADDRESS: CLAIM_TARGET,
+        }
+        security_record = {
+            "payout_address": CLAIM_TARGET,
+            "verified_wallet": VERIFIED_WALLET,
+        }
+
+        with (
+            mock.patch.object(
+                claim_payout_diagnostics,
+                "_latest_confirmed_standard_payout",
+                mock.AsyncMock(return_value=latest),
+            ),
+            mock.patch.object(
+                claim_payout_diagnostics.db_access,
+                "get_claim",
+                mock.AsyncMock(return_value=claim),
+            ),
+            mock.patch.object(
+                claim_payout_diagnostics.claim_security,
+                "_metadata_get",
+                mock.AsyncMock(return_value=security_record),
+            ),
+        ):
+            result = await claim_payout_diagnostics._latest_confirmed_standard_payout_comparison(
+                fake_db,
+                now=2_000,
+            )
+
+        self.assertTrue(result["present"])
+        self.assertTrue(result["claim_record_present"])
+        self.assertTrue(result["security_record_present"])
+        self.assertEqual(result["age_seconds"], 100)
+        self.assertFalse(result["transaction_recipient_matches_claim_target"])
+        self.assertTrue(result["claim_target_matches_security_target"])
+        self.assertFalse(result["claim_target_matches_verified_wallet"])
+        self.assertTrue(result["transaction_recipient_matches_verified_wallet"])
+
+        rendered = repr(result)
+        self.assertNotIn(CLAIM_TARGET, rendered)
+        self.assertNotIn(VERIFIED_WALLET, rendered)
 
     async def test_funding_flow_includes_claim_payout_diagnostics(self):
         base = {"network": "MainAlbatross", "pending_count": 0}

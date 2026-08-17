@@ -46,7 +46,7 @@ class CancellationFeeLifecycleTest(unittest.IsolatedAsyncioTestCase):
                     claim_duration=0,
                     max_claims_per_user=1,
                     max_total_claims=2,
-                    total_value=200 * const.LUNA_PER_NIM,
+                    total_value=const.MIN_SPOT_TOTAL_VALUE,
                     starts_at=int(time.time()) + 3600,
                     ends_at=const.MIN_SPOT_ENDS_AFTER_SECONDS,
                     auto_reverse_geocode=False,
@@ -76,7 +76,7 @@ class CancellationFeeLifecycleTest(unittest.IsolatedAsyncioTestCase):
     async def test_cancellation_fee_stays_submittable_and_spot_stays_retryable(self):
         spot_id = await self._create_funded_published_spot()
         cancellation_fee = 5 * const.LUNA_PER_NIM
-        expected_refund = (200 * const.LUNA_PER_NIM) - cancellation_fee
+        expected_refund = const.MIN_SPOT_TOTAL_VALUE - cancellation_fee
         refund_address = "NQ00 NIMHUNT DEV FUNDING WALLET"
 
         async with schema.get_db() as db:

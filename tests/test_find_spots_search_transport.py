@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TRANSPORT_CACHE_VERSION = "wrapped-search-v1-20260803"
 BOOTSTRAP_CACHE_VERSION = "anchored-map-v2-20260814"
-PAGE_CACHE_VERSION = "anchored-map-v2-20260814"
+PAGE_CACHE_VERSION = "demo-native-ui-v1-20260817"
 
 
 def source(path: str) -> str:

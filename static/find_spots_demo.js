@@ -1,6 +1,9 @@
 export const DEMO_SPOT_ID = -2147483001;
 export const DEMO_RADIUS_METRES = 200;
-export const DEMO_DISTANCE_METRES = 250;
+// Keep this as a single constant so the temporary testing distance can be
+// restored to the normal 250 m hunt distance without touching the geometry.
+export const DEMO_DISTANCE_METRES = 100;
+export const GLOBAL_MAP_ZOOM = 0;
 export const DEMO_COLOUR = '#8f5bd7';
 export const DEMO_STORAGE_KEY = 'nimhunt-demo-spot-v1';
 export const DEMO_COMPLETED_KEY = 'nimhunt-demo-completed-v1';
@@ -82,6 +85,11 @@ export function spotInSearchViewport(spot, urlLike, origin = 'http://localhost')
     if ([minLat, maxLat, minLong, maxLong].some((value) => value === null)) return false;
     return Number(spot.lat) >= minLat && Number(spot.lat) <= maxLat
         && Number(spot.long) >= minLong && Number(spot.long) <= maxLong;
+}
+
+export function mapIsFullyZoomedOut(map) {
+    const zoom = Number(map?.getZoom?.());
+    return Number.isFinite(zoom) && zoom <= GLOBAL_MAP_ZOOM;
 }
 
 function readJson(storage, key) {
@@ -173,7 +181,8 @@ export function renderEmptyState(runtime) {
         && runtime.userLocation
         && !runtime.demoSpot
         && !runtime.completed;
-    const renderKey = canDemo ? 'demo-and-global' : 'global-only';
+    const showGlobalLink = !mapIsFullyZoomedOut(runtime.map);
+    const renderKey = `${canDemo ? 'demo' : 'no-demo'}-${showGlobalLink ? 'global-link' : 'global-view'}`;
 
     // The MutationObserver below also watches this element. Do not rewrite an
     // already-correct empty state: replaceChildren() itself is a child-list
@@ -206,18 +215,29 @@ export function renderEmptyState(runtime) {
         wrapper.append(line);
     }
 
-    const globalLine = runtime.document.createElement('span');
-    globalLine.append(runtime.document.createTextNode(canDemo ? 'Or would you like to ' : 'Would you like to '));
-    const globalLink = runtime.document.createElement('a');
-    globalLink.href = '#spot-map';
-    globalLink.className = 'welcome-link';
-    globalLink.textContent = 'check out global spots?';
-    globalLink.addEventListener('click', (event) => {
-        event.preventDefault();
-        showGlobalSpots(runtime);
-    });
-    globalLine.append(globalLink);
-    wrapper.append(globalLine);
+    if (showGlobalLink) {
+        const globalLine = runtime.document.createElement('span');
+        globalLine.append(runtime.document.createTextNode(canDemo ? 'Or would you like to ' : 'Would you like to '));
+        const globalLink = runtime.document.createElement('a');
+        globalLink.href = '#spot-map';
+        globalLink.className = 'welcome-link';
+        globalLink.textContent = 'check out global spots?';
+        globalLink.addEventListener('click', (event) => {
+            event.preventDefault();
+            showGlobalSpots(runtime);
+        });
+        globalLine.append(globalLink);
+        wrapper.append(globalLine);
+    }
+
+    const createLine = runtime.document.createElement('span');
+    createLine.append(runtime.document.createTextNode(canDemo || showGlobalLink ? 'Or be the first to ' : 'Be the first to '));
+    const createLink = runtime.document.createElement('a');
+    createLink.href = runtime.document.body?.dataset?.createSpotUrl || '/create';
+    createLink.className = 'welcome-link';
+    createLink.textContent = 'make one';
+    createLine.append(createLink, runtime.document.createTextNode('.'));
+    wrapper.append(createLine);
 
     empty.classList.add('demo-empty-state');
     empty.dataset.nimHuntDemoRender = renderKey;
@@ -250,7 +270,9 @@ function createDemo(runtime) {
 function showGlobalSpots(runtime) {
     scrollMapIntoView(runtime.document);
     if (runtime.map?.setView) {
-        runtime.map.setView([20, 0], 0, { animate: true });
+        runtime.refreshRequested = false;
+        runtime.map.setView([20, 0], GLOBAL_MAP_ZOOM, { animate: true });
+        renderEmptyState(runtime);
     } else {
         runtime.refreshRequested = 'global';
     }
@@ -332,6 +354,7 @@ function captureMap(runtime) {
         const id = typeof target === 'string' ? target : target?.id;
         if (id === 'spot-map') {
             runtime.map = map;
+            map.on?.('zoomend', () => renderEmptyState(runtime));
             if (runtime.searchWhenMapReady) {
                 runtime.searchWhenMapReady = false;
                 runtime.window.setTimeout(() => map.fire?.('moveend'), 0);

@@ -46,7 +46,7 @@ test('demo claim status is claimable inside the radius and unavailable outside i
     const inside = makeDemoClaimStatus(runtime);
     assert.equal(inside.allowed, true);
     assert.equal(inside.action, 'claim');
-    assert.equal(inside.kind, 'standard');
+    assert.equal(inside.kind, 'demo');
     assert.equal(inside.within_radius, true);
     assert.equal(inside.reward_amount, 0);
 
@@ -63,7 +63,7 @@ test('demo claim status is claimable inside the radius and unavailable outside i
     assert.equal(outside.within_radius, false);
 });
 
-test('Demo Spot creation requests the ordinary NimHunt notice with a Let’s Go button', () => {
+test('Demo Spot creation requests the ordinary NimHunt notice with the welcome-card Let’s Go! copy', () => {
     let dispatched = null;
     class FakeCustomEvent {
         constructor(type, { detail } = {}) {
@@ -88,7 +88,7 @@ test('Demo Spot creation requests the ordinary NimHunt notice with a Let’s Go 
         dispatched.detail.body,
         "We've placed a practice spot nearby. Head into the purple area and claim it just like a real NimHunt spot.",
     );
-    assert.equal(dispatched.detail.buttonText, "Let's Go");
+    assert.equal(dispatched.detail.buttonText, "Let's Go!");
 });
 
 test('demo spot is injected only into a search viewport that contains it', () => {
@@ -228,4 +228,19 @@ test('Demo Spot map colour is handled by the ordinary marker renderer, not post-
     assert.match(findSpotsSource, /demo:\s*'#8f5bd7'/);
     assert.match(findSpotsSource, /if \(spot\.demo\) return MAP_COLOURS\.demo;/);
     assert.doesNotMatch(demoSource, /styleDemoLayers|resolvedDemoColour|demo-spot-created-toast/);
+});
+
+test('Demo Spot list and completion page use the purple/dark-mode presentation and a single OK action', () => {
+    const css = readFileSync(new URL('../static/ux_accessibility.css', import.meta.url), 'utf8');
+    const success = readFileSync(new URL('../static/demo_claim_success.html', import.meta.url), 'utf8');
+
+    assert.match(css, /\.spot-list-item\.is-claim-demo\s*\{[^}]*background:\s*#8f5bd7;/s);
+    assert.match(css, /\.spot-claim-button\.is-demo\s*\{[^}]*color:\s*#8f5bd7\s*!important;/s);
+    assert.doesNotMatch(css, /\.spot-list-item\.is-demo-spot\s*\{[^}]*box-shadow:/s);
+    assert.match(css, /html\[data-theme="dark"\] body\.nq-style \.demo-success-card h2/);
+    assert.match(css, /html\[data-theme="dark"\] body\.nq-style \.demo-success-card p/);
+
+    assert.match(success, /<a class="nq-button light-blue" href="\/find-spots">OK<\/a>/);
+    assert.doesNotMatch(success, />Find spots<\/a>\s*<a/);
+    assert.doesNotMatch(success, />Home<\/a>/);
 });

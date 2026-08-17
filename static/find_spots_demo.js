@@ -143,7 +143,7 @@ export function showDemoCreatedNotice(runtime) {
     return dispatchDemoEvent(runtime, 'nimhunt:demo-notice', {
         title: 'Demo Spot created!',
         body: "We've placed a practice spot nearby. Head into the purple area and claim it just like a real NimHunt spot.",
-        buttonText: "Let's Go",
+        buttonText: "Let's Go!",
     });
 }
 
@@ -164,7 +164,7 @@ export function makeDemoClaimStatus(runtime) {
     return {
         allowed,
         action: allowed ? 'claim' : 'unavailable',
-        kind: allowed ? 'standard' : 'unavailable',
+        kind: allowed ? 'demo' : 'unavailable',
         reason: allowed ? 'ok' : (locationKnown ? 'outside_radius' : 'location_unknown'),
         user_ok: userOk,
         own_spot: false,

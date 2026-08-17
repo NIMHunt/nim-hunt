@@ -8,7 +8,6 @@ import claim_payout_diagnostics
 import database as schema
 import funding_flow
 
-
 CLAIM_TARGET = "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF"
 VERIFIED_WALLET = "NQ48 LH6Q 7PFD LJYF 7PGB NJXL F8CX GHTJ YEKG"
 

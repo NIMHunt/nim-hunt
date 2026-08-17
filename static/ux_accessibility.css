@@ -22,31 +22,8 @@
     gap: 0.35rem;
 }
 
-.demo-spot-toast {
-    position: fixed;
-    left: 50%;
-    bottom: max(1rem, env(safe-area-inset-bottom));
-    z-index: 1100;
-    width: min(32rem, calc(100vw - 2rem));
-    transform: translateX(-50%);
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    padding: 0.9rem 1rem;
-    border-radius: 0.75rem;
-    box-shadow: 0 0.5rem 1.6rem rgba(31, 35, 72, 0.22);
-    color: inherit;
-}
-
-.demo-spot-toast[hidden] { display: none; }
-
 .spot-list-item.is-demo-spot {
-    box-shadow: inset 3px 0 0 var(--nimhunt-demo-colour, #8f5bd7);
-}
-
-/* A Demo Spot is session-only, so it intentionally has no public/shareable URL. */
-.spot-list-item.is-demo-spot .spot-detail-line:has(.spot-detail-link-row) {
-    display: none;
+    box-shadow: inset 3px 0 0 #8f5bd7;
 }
 
 .demo-success-card {

@@ -85,6 +85,7 @@ const CLAIM_CAPTCHA_MAX = Number.parseInt(document.body.dataset.claimCaptchaMax 
 const MAP_COLOURS = {
     standard: '#21bca5',
     prizedraw: '#ffc435',
+    demo: '#8f5bd7',
     muted: '#8c90a8',
     highlight: '#0582ca',
 };
@@ -1434,7 +1435,7 @@ function buildSpotDetail(spot) {
         appendBulletLine(lines, `Must remain on Spot for ${duration}`);
     }
 
-    appendBulletLine(lines, buildSpotLinkControl(spot));
+    if (!spot.demo) appendBulletLine(lines, buildSpotLinkControl(spot));
     appendBulletLine(
         lines,
         'Created by ',
@@ -1446,7 +1447,7 @@ function buildSpotDetail(spot) {
     detail.append(lines);
     const cancelControl = buildOwnerCancelControl(spot);
     if (cancelControl) detail.append(cancelControl);
-    detail.append(buildReportControl(spot));
+    if (!spot.demo) detail.append(buildReportControl(spot));
 
     return detail;
 }
@@ -1543,6 +1544,7 @@ function renderList(spots) {
         const item = document.createElement('li');
         item.className = 'spot-list-item';
         item.dataset.spotId = String(spotId);
+        if (spot.demo) item.classList.add('is-demo-spot');
 
         const summary = document.createElement('div');
         summary.className = 'spot-list-toggle';
@@ -1620,6 +1622,7 @@ function renderList(spots) {
 }
 
 function markerColour(spot) {
+    if (spot.demo) return MAP_COLOURS.demo;
     return spot.is_prizedraw ? MAP_COLOURS.prizedraw : MAP_COLOURS.standard;
 }
 
@@ -1995,6 +1998,25 @@ async function initFindSpots() {
     await refreshVisibleSpots();
     scheduleLiveRefresh();
 }
+
+window.addEventListener('nimhunt:demo-notice', (event) => {
+    const notice = event?.detail;
+    if (!notice?.title || !notice?.body) return;
+    showNotice(notice);
+});
+
+window.addEventListener('nimhunt:demo-location', (event) => {
+    const location = event?.detail || {};
+    const lat = Number(location.lat);
+    const long = Number(location.long);
+    if (state.testLocationMode || !Number.isFinite(lat) || !Number.isFinite(long)) return;
+    setRecordedLocation({
+        lat,
+        long,
+        accuracy: location.accuracy,
+        isReal: true,
+    });
+});
 
 els.locationStatus?.addEventListener('click', () => {
     if (els.locationStatus.disabled) return;

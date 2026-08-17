@@ -12,7 +12,7 @@ def source(path: str) -> str:
 def test_find_spots_initial_view_is_loaded_before_the_page_module():
     bootstrap = source("static/find_spots_bootstrap.js")
     install_import = "./find_spots_initial_view_install.js?v=initial-view-v1-20260803"
-    page_import = "./find_spots.js?v=anchored-map-v2-20260814"
+    page_import = "./find_spots.js?v=demo-native-ui-v1-20260817"
 
     assert install_import in bootstrap
     assert page_import in bootstrap

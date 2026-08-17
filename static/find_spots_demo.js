@@ -4,7 +4,6 @@ export const DEMO_RADIUS_METRES = 200;
 // restored to the normal 250 m hunt distance without touching the geometry.
 export const DEMO_DISTANCE_METRES = 100;
 export const GLOBAL_MAP_ZOOM = 0;
-export const DEMO_COLOUR = '#8f5bd7';
 export const DEMO_STORAGE_KEY = 'nimhunt-demo-spot-v1';
 export const DEMO_COMPLETED_KEY = 'nimhunt-demo-completed-v1';
 const EARTH_RADIUS_METRES = 6371000;
@@ -122,54 +121,66 @@ function makeJsonResponse(response, payload, windowObj) {
     });
 }
 
+function makeSyntheticJsonResponse(payload, windowObj) {
+    return new windowObj.Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+    });
+}
+
 function scrollMapIntoView(documentObj) {
     documentObj.querySelector('.map-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function resolvedDemoColour(runtime) {
-    if (runtime.demoColour) return runtime.demoColour;
-    const probe = runtime.document.createElement('span');
-    probe.className = 'nq-purple-bg';
-    probe.style.position = 'fixed';
-    probe.style.opacity = '0';
-    runtime.document.body.append(probe);
-    const colour = runtime.window.getComputedStyle?.(probe)?.backgroundColor;
-    probe.remove();
-    runtime.demoColour = colour && colour !== 'rgba(0, 0, 0, 0)' ? colour : DEMO_COLOUR;
-    runtime.document.documentElement.style.setProperty('--nimhunt-demo-colour', runtime.demoColour);
-    return runtime.demoColour;
+function dispatchDemoEvent(runtime, name, detail) {
+    const CustomEventCtor = runtime.window.CustomEvent;
+    if (typeof CustomEventCtor !== 'function') return false;
+    runtime.window.dispatchEvent(new CustomEventCtor(name, { detail }));
+    return true;
 }
 
-function styleDemoLayers(runtime) {
-    const spot = runtime.demoSpot;
-    const map = runtime.map;
-    if (!spot || !map?.eachLayer) return;
-    map.eachLayer((layer) => {
-        const latLng = layer?.getLatLng?.();
-        if (!latLng || !layer?.setStyle) return;
-        if (distanceMetres(latLng.lat, latLng.lng, spot.lat, spot.long) > 2) return;
-        const colour = resolvedDemoColour(runtime);
-        layer.setStyle({ color: colour, fillColor: colour });
+export function showDemoCreatedNotice(runtime) {
+    return dispatchDemoEvent(runtime, 'nimhunt:demo-notice', {
+        title: 'Demo Spot created!',
+        body: "We've placed a practice spot nearby. Head into the purple area and claim it just like a real NimHunt spot.",
+        buttonText: "Let's Go",
     });
-    runtime.document.querySelector(`[data-spot-id="${DEMO_SPOT_ID}"]`)?.classList.add('is-demo-spot');
 }
 
-function showCreatedToast(runtime) {
-    let toast = runtime.document.getElementById('demo-spot-created-toast');
-    if (!toast) {
-        toast = runtime.document.createElement('section');
-        toast.id = 'demo-spot-created-toast';
-        toast.className = 'notice-card demo-spot-toast';
-        toast.setAttribute('role', 'status');
-        runtime.document.body.append(toast);
-    }
-    const heading = runtime.document.createElement('strong');
-    heading.textContent = 'Demo Spot created!';
-    const body = runtime.document.createElement('span');
-    body.textContent = "We've placed a practice spot nearby. Head into the purple area and claim it just like a real NimHunt spot.";
-    toast.replaceChildren(heading, body);
-    toast.hidden = false;
-    runtime.window.setTimeout(() => { toast.hidden = true; }, 6500);
+export function makeDemoClaimStatus(runtime) {
+    const spot = runtime.demoSpot;
+    const location = runtime.currentLocation || runtime.userLocation;
+    const locationKnown = Boolean(location && spot);
+    const withinRadius = Boolean(locationKnown && distanceMetres(
+        location.lat,
+        location.long,
+        spot.lat,
+        spot.long,
+    ) <= DEMO_RADIUS_METRES);
+    const userOk = runtime.walletUserId !== null
+        && spot?.owner_user_id === runtime.walletUserId;
+    const allowed = Boolean(userOk && locationKnown && withinRadius);
+
+    return {
+        allowed,
+        action: allowed ? 'claim' : 'unavailable',
+        kind: allowed ? 'standard' : 'unavailable',
+        reason: allowed ? 'ok' : (locationKnown ? 'outside_radius' : 'location_unknown'),
+        user_ok: userOk,
+        own_spot: false,
+        location_known: locationKnown,
+        within_radius: withinRadius,
+        capacity_ok: true,
+        user_limit_ok: true,
+        requires_password: false,
+        requires_duration: false,
+        is_prizedraw: false,
+        reward_amount: 0,
+        participant_count: 0,
+        max_participants: 1,
+        prize_count: 1,
+        message: allowed ? '' : (locationKnown ? 'Move inside the spot radius to claim.' : 'Your location is unknown.'),
+    };
 }
 
 export function renderEmptyState(runtime) {
@@ -263,8 +274,7 @@ function createDemo(runtime) {
     } else {
         runtime.refreshRequested = true;
     }
-    showCreatedToast(runtime);
-    runtime.window.setTimeout(() => styleDemoLayers(runtime), 300);
+    showDemoCreatedNotice(runtime);
 }
 
 function showGlobalSpots(runtime) {
@@ -278,19 +288,10 @@ function showGlobalSpots(runtime) {
     }
 }
 
-function moveUserMarker(runtime, location) {
-    const map = runtime.map;
-    if (!map?.eachLayer) return;
-    map.eachLayer((layer) => {
-        if (!layer?.setLatLng || layer?.options?.color !== '#1f2348' || Number(layer?.options?.radius) !== 12) return;
-        layer.setLatLng([location.lat, location.long]);
-    });
-}
-
 function updateLocation(runtime, location) {
     const previous = runtime.currentLocation;
     runtime.currentLocation = location;
-    moveUserMarker(runtime, location);
+    dispatchDemoEvent(runtime, 'nimhunt:demo-location', location);
     if (!runtime.demoSpot) return;
     const before = previous
         ? distanceMetres(previous.lat, previous.long, runtime.demoSpot.lat, runtime.demoSpot.long) <= DEMO_RADIUS_METRES
@@ -334,14 +335,7 @@ function interceptDemoClaim(runtime, event) {
     event.stopImmediatePropagation();
     event.stopPropagation();
 
-    const location = runtime.currentLocation || runtime.userLocation;
-    const inRange = location && distanceMetres(
-        location.lat,
-        location.long,
-        runtime.demoSpot.lat,
-        runtime.demoSpot.long,
-    ) <= DEMO_RADIUS_METRES;
-    if (!inRange) return;
+    if (!makeDemoClaimStatus(runtime).allowed) return;
     completeDemo(runtime);
 }
 
@@ -373,12 +367,36 @@ function captureMap(runtime) {
     L.__nimHuntDemoMapCapture = true;
 }
 
+function demoStatusRequested(body) {
+    return Array.isArray(body?.spot_ids)
+        && body.spot_ids.some((spotId) => Number(spotId) === DEMO_SPOT_ID);
+}
+
 function installFetch(runtime) {
     const originalFetch = runtime.window.fetch.bind(runtime.window);
     runtime.window.fetch = async (input, options = {}) => {
         const url = requestUrl(input, runtime.window.location.origin);
-        const response = await originalFetch(input, options);
-        if (!url) return response;
+        if (!url) return originalFetch(input, options);
+
+        const requestBody = requestBodyJson(options);
+        const wantsDemoStatus = url.pathname === '/api/spots/claim-status' && demoStatusRequested(requestBody);
+        let forwardedOptions = options;
+
+        if (wantsDemoStatus) {
+            const realSpotIds = requestBody.spot_ids.filter((spotId) => Number(spotId) !== DEMO_SPOT_ID);
+            if (realSpotIds.length === 0) {
+                return makeSyntheticJsonResponse({
+                    ok: true,
+                    statuses: { [DEMO_SPOT_ID]: makeDemoClaimStatus(runtime) },
+                }, runtime.window);
+            }
+            forwardedOptions = {
+                ...options,
+                body: JSON.stringify({ ...requestBody, spot_ids: realSpotIds }),
+            };
+        }
+
+        const response = await originalFetch(input, forwardedOptions);
 
         if (url.pathname === '/api/home/session') {
             response.clone().json().then((data) => {
@@ -396,10 +414,21 @@ function installFetch(runtime) {
             return response;
         }
 
+        if (wantsDemoStatus && response.ok) {
+            const data = await response.clone().json().catch(() => null);
+            if (!data) return response;
+            return makeJsonResponse(response, {
+                ...data,
+                statuses: {
+                    ...(data.statuses || {}),
+                    [DEMO_SPOT_ID]: makeDemoClaimStatus(runtime),
+                },
+            }, runtime.window);
+        }
+
         if (url.pathname !== '/api/spots/search' || !response.ok) return response;
-        const body = requestBodyJson(options);
-        const queryLat = finite(url.searchParams.get('distance_lat')) ?? finite(body.lat);
-        const queryLong = finite(url.searchParams.get('distance_long')) ?? finite(body.long);
+        const queryLat = finite(url.searchParams.get('distance_lat')) ?? finite(requestBody.lat);
+        const queryLong = finite(url.searchParams.get('distance_long')) ?? finite(requestBody.long);
         if (queryLat !== null && queryLong !== null) {
             runtime.userLocation = { lat: queryLat, long: queryLong };
             if (!runtime.currentLocation) runtime.currentLocation = { ...runtime.userLocation };
@@ -448,7 +477,6 @@ export function installFindSpotsDemo({ windowObj = window, documentObj = documen
         refreshRequested: false,
         searchWhenMapReady: false,
         lastRealSpotCount: null,
-        demoColour: null,
     };
     windowObj.__nimHuntDemoRuntime = runtime;
 
@@ -459,10 +487,7 @@ export function installFindSpotsDemo({ windowObj = window, documentObj = documen
         if (event.key === 'Enter' || event.key === ' ') interceptDemoClaim(runtime, event);
     }, true);
 
-    const observer = new MutationObserver(() => {
-        renderEmptyState(runtime);
-        styleDemoLayers(runtime);
-    });
+    const observer = new MutationObserver(() => renderEmptyState(runtime));
     const empty = documentObj.getElementById('empty-spots');
     const list = documentObj.getElementById('spot-list');
     if (empty) observer.observe(empty, { childList: true, attributes: true, attributeFilter: ['hidden'] });

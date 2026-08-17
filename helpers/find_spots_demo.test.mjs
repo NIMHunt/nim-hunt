@@ -1,15 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
     DEMO_DISTANCE_METRES,
     DEMO_RADIUS_METRES,
     DEMO_SPOT_ID,
     GLOBAL_MAP_ZOOM,
     distanceMetres,
+    makeDemoClaimStatus,
     makeDemoSpot,
     mapIsFullyZoomedOut,
     pointAtDistance,
     renderEmptyState,
+    showDemoCreatedNotice,
     spotInSearchViewport,
 } from '../static/find_spots_demo.js';
 
@@ -28,6 +31,64 @@ test('demo spot uses the configured 100 metre testing distance with a 200 metre 
     assert.equal(spot.claim_duration, 0);
     assert.equal(spot.title, 'Demo Hunt!');
     assert.equal(spot.description, 'This is a practice spot. Move into its highlighted area and tap "Claim" to complete it.');
+});
+
+test('demo claim status is claimable inside the radius and unavailable outside it', () => {
+    const origin = { lat: 51.5074, long: -0.1278 };
+    const demoSpot = makeDemoSpot({ userId: 7, ...origin, bearingRadians: 0, now: 1_700_000_000_000 });
+    const runtime = {
+        walletUserId: 7,
+        demoSpot,
+        userLocation: origin,
+        currentLocation: { lat: demoSpot.lat, long: demoSpot.long },
+    };
+
+    const inside = makeDemoClaimStatus(runtime);
+    assert.equal(inside.allowed, true);
+    assert.equal(inside.action, 'claim');
+    assert.equal(inside.kind, 'standard');
+    assert.equal(inside.within_radius, true);
+    assert.equal(inside.reward_amount, 0);
+
+    runtime.currentLocation = pointAtDistance(
+        demoSpot.lat,
+        demoSpot.long,
+        DEMO_RADIUS_METRES + 25,
+        0,
+    );
+    const outside = makeDemoClaimStatus(runtime);
+    assert.equal(outside.allowed, false);
+    assert.equal(outside.action, 'unavailable');
+    assert.equal(outside.reason, 'outside_radius');
+    assert.equal(outside.within_radius, false);
+});
+
+test('Demo Spot creation requests the ordinary NimHunt notice with a Let’s Go button', () => {
+    let dispatched = null;
+    class FakeCustomEvent {
+        constructor(type, { detail } = {}) {
+            this.type = type;
+            this.detail = detail;
+        }
+    }
+    const runtime = {
+        window: {
+            CustomEvent: FakeCustomEvent,
+            dispatchEvent(event) {
+                dispatched = event;
+                return true;
+            },
+        },
+    };
+
+    assert.equal(showDemoCreatedNotice(runtime), true);
+    assert.equal(dispatched.type, 'nimhunt:demo-notice');
+    assert.equal(dispatched.detail.title, 'Demo Spot created!');
+    assert.equal(
+        dispatched.detail.body,
+        "We've placed a practice spot nearby. Head into the purple area and claim it just like a real NimHunt spot.",
+    );
+    assert.equal(dispatched.detail.buttonText, "Let's Go");
 });
 
 test('demo spot is injected only into a search viewport that contains it', () => {
@@ -158,4 +219,13 @@ test('empty-state rendering stays idempotent, restores Create Spot, and hides gl
     renderEmptyState(runtime);
     assert.equal(empty.replaceCount, 4);
     assert.match(nodeText(empty), /check out global spots\?/);
+});
+
+test('Demo Spot map colour is handled by the ordinary marker renderer, not post-render restyling', () => {
+    const findSpotsSource = readFileSync(new URL('../static/find_spots.js', import.meta.url), 'utf8');
+    const demoSource = readFileSync(new URL('../static/find_spots_demo.js', import.meta.url), 'utf8');
+
+    assert.match(findSpotsSource, /demo:\s*'#8f5bd7'/);
+    assert.match(findSpotsSource, /if \(spot\.demo\) return MAP_COLOURS\.demo;/);
+    assert.doesNotMatch(demoSource, /styleDemoLayers|resolvedDemoColour|demo-spot-created-toast/);
 });

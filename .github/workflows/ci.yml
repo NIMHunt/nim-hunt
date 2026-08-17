@@ -52,7 +52,7 @@ jobs:
 
       - name: Run Python lint and compilation checks
         run: |
-          ruff check --fix --diff .
+          ruff check .
           python -m compileall -q *.py tests
 
       - name: Run JavaScript and shell syntax checks

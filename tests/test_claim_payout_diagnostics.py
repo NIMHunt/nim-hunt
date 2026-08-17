@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+import contextlib
 import unittest
 from unittest import mock
 
@@ -17,7 +17,7 @@ class ClaimPayoutDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
     async def test_aggregates_security_hold_reasons_without_exposing_claim_details(self):
         fake_db = object()
 
-        @asynccontextmanager
+        @contextlib.asynccontextmanager
         async def fake_get_db():
             yield fake_db
 

@@ -164,10 +164,26 @@ function showCreatedToast(runtime) {
     runtime.window.setTimeout(() => { toast.hidden = true; }, 6500);
 }
 
-function renderEmptyState(runtime) {
+export function renderEmptyState(runtime) {
     const empty = runtime.document.getElementById('empty-spots');
     const list = runtime.document.getElementById('spot-list');
     if (!empty || !list || empty.hidden || !list.hidden || runtime.lastRealSpotCount !== 0) return;
+
+    const canDemo = runtime.walletUserId !== null
+        && runtime.userLocation
+        && !runtime.demoSpot
+        && !runtime.completed;
+    const renderKey = canDemo ? 'demo-and-global' : 'global-only';
+
+    // The MutationObserver below also watches this element. Do not rewrite an
+    // already-correct empty state: replaceChildren() itself is a child-list
+    // mutation and previously created an endless observer/render feedback loop.
+    if (
+        empty.dataset.nimHuntDemoRender === renderKey
+        && empty.firstElementChild?.classList?.contains('demo-empty-copy')
+    ) {
+        return;
+    }
 
     const wrapper = runtime.document.createElement('span');
     wrapper.className = 'demo-empty-copy';
@@ -175,10 +191,6 @@ function renderEmptyState(runtime) {
     first.textContent = 'There are no spots in your area.';
     wrapper.append(first);
 
-    const canDemo = runtime.walletUserId !== null
-        && runtime.userLocation
-        && !runtime.demoSpot
-        && !runtime.completed;
     if (canDemo) {
         const line = runtime.document.createElement('span');
         line.append(runtime.document.createTextNode('Would you like to '));
@@ -208,6 +220,7 @@ function renderEmptyState(runtime) {
     wrapper.append(globalLine);
 
     empty.classList.add('demo-empty-state');
+    empty.dataset.nimHuntDemoRender = renderKey;
     empty.replaceChildren(wrapper);
 }
 

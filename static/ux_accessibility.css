@@ -1,0 +1,66 @@
+.create-spot-advanced {
+    margin: 0.4rem 0 1rem;
+    border: 1px solid rgba(31, 35, 72, 0.12);
+    border-radius: 0.75rem;
+    overflow: hidden;
+}
+
+.create-spot-advanced-summary {
+    padding: 0.95rem 1rem;
+    cursor: pointer;
+    font-weight: 700;
+    list-style-position: inside;
+}
+
+.create-spot-advanced-body {
+    padding: 0 1rem 0.25rem;
+}
+
+.demo-empty-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.demo-spot-toast {
+    position: fixed;
+    left: 50%;
+    bottom: max(1rem, env(safe-area-inset-bottom));
+    z-index: 1100;
+    width: min(32rem, calc(100vw - 2rem));
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.9rem 1rem;
+    border-radius: 0.75rem;
+    box-shadow: 0 0.5rem 1.6rem rgba(31, 35, 72, 0.22);
+    color: inherit;
+}
+
+.demo-spot-toast[hidden] { display: none; }
+
+.spot-list-item.is-demo-spot {
+    box-shadow: inset 3px 0 0 var(--nimhunt-demo-colour, #8f5bd7);
+}
+
+/* A Demo Spot is session-only, so it intentionally has no public/shareable URL. */
+.spot-list-item.is-demo-spot .spot-detail-line:has(.spot-detail-link-row) {
+    display: none;
+}
+
+.demo-success-card {
+    text-align: center;
+}
+
+.demo-success-card h2 {
+    margin-top: 0;
+}
+
+.demo-success-actions {
+    display: flex;
+    justify-content: center;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+    flex-wrap: wrap;
+}

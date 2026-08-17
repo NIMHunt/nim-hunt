@@ -22,8 +22,42 @@
     gap: 0.35rem;
 }
 
-.spot-list-item.is-demo-spot {
-    box-shadow: inset 3px 0 0 #8f5bd7;
+/* Demo Spots use the same claim-card structure as the other spot kinds, but
+   carry their own purple semantic treatment while they are claimable. */
+.spot-list-item.is-claim-demo {
+    border-color: transparent;
+    background: #8f5bd7;
+    color: #ffffff;
+}
+
+.spot-list-item.is-claim-demo .spot-list-toggle,
+.spot-list-item.is-claim-demo .spot-list-detail {
+    background: transparent;
+}
+
+.spot-list-item.is-claim-demo .spot-list-title,
+.spot-list-item.is-claim-demo .spot-list-meta,
+.spot-list-item.is-claim-demo .spot-list-chevron,
+.spot-list-item.is-claim-demo .spot-detail-description,
+.spot-list-item.is-claim-demo .spot-detail-lines {
+    color: #ffffff;
+}
+
+.spot-claim-button.is-demo {
+    color: #8f5bd7 !important;
+}
+
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-demo {
+    background: #8f5bd7;
+    color: #ffffff;
+}
+
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-demo .spot-list-title,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-demo .spot-list-meta,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-demo .spot-list-chevron,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-demo .spot-detail-description,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-demo .spot-detail-lines {
+    color: #ffffff !important;
 }
 
 .demo-success-card {
@@ -32,6 +66,11 @@
 
 .demo-success-card h2 {
     margin-top: 0;
+}
+
+html[data-theme="dark"] body.nq-style .demo-success-card h2,
+html[data-theme="dark"] body.nq-style .demo-success-card p {
+    color: var(--nh-text) !important;
 }
 
 .demo-success-actions {

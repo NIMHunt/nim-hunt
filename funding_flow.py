@@ -4,6 +4,7 @@ import sys
 
 import constants as const
 import funding_monitor
+from admin_moderation import install as install_admin_moderation
 from cancellation_safety import install as install_cancellation_safety
 from claim_auth_abuse_guard import install as install_claim_auth_abuse_guard
 from claim_code_policy import install as install_claim_code_policy
@@ -75,6 +76,10 @@ def install() -> None:
     install_status()
     install_fee_worker()
     install_monitor()
+    # Moderation is the final financial gate. It must see the fully wrapped
+    # payout/reconciliation functions so a banned Spot cannot bypass any of the
+    # existing transaction safety layers.
+    install_admin_moderation()
     _INSTALLED = True
 
 

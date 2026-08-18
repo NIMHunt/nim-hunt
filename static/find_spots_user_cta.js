@@ -84,8 +84,16 @@ function normaliseGlobalLine(runtime, line, link) {
 
 function normaliseCreateLine(runtime, line, link) {
     if (!line || !link) return;
-    link.textContent = 'make a spot';
-    if (link.dataset) link.dataset.nimHuntCreateSpot = '1';
+    // MutationObserver watches child-list changes throughout #empty-spots.
+    // Reassigning textContent even to the same string rebuilds the text node,
+    // which would trigger the observer again indefinitely. Only write when the
+    // visible copy actually needs changing.
+    if (String(link.textContent || '') !== 'make a spot') {
+        link.textContent = 'make a spot';
+    }
+    if (link.dataset && link.dataset.nimHuntCreateSpot !== '1') {
+        link.dataset.nimHuntCreateSpot = '1';
+    }
     replaceLine(runtime, line, link, 'Be the first to ', ' here.', 'create-v2');
 }
 

@@ -111,6 +111,33 @@ test('user with a real claim sees global and Create Spot choices instead of Demo
     assert.equal(create.link.dataset.nimHuntCreateSpot, '1');
 });
 
+test('Create Spot copy normalisation is idempotent under repeated observer callbacks', () => {
+    const { runtime, create } = makeRuntime({ hasExistingClaims: true });
+    let text = create.link.textContent;
+    let textWrites = 0;
+    Object.defineProperty(create.link, 'textContent', {
+        configurable: true,
+        get() {
+            return text;
+        },
+        set(value) {
+            textWrites += 1;
+            text = value;
+        },
+    });
+
+    syncFindSpotsEmptyChoices(runtime);
+    assert.equal(textWrites, 1);
+    assert.equal(create.link.textContent, 'make a spot');
+
+    // A real MutationObserver callback follows the first text-node change. The
+    // second synchronisation must not change textContent again, otherwise it
+    // would schedule another mutation callback forever.
+    syncFindSpotsEmptyChoices(runtime);
+    syncFindSpotsEmptyChoices(runtime);
+    assert.equal(textWrites, 1);
+});
+
 test('identified user waits for claim history before any optional onboarding choice appears', () => {
     const { runtime, demo, global, create } = makeRuntime({
         claimHistoryKnown: false,

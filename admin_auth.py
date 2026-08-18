@@ -7,7 +7,6 @@ import os
 import secrets
 import time
 
-
 ADMIN_PASSWORD_HASH_ENV = "NIMHUNT_ADMIN_PASSWORD_HASH"
 ADMIN_SESSION_COOKIE = "nimhunt_admin_session"
 ADMIN_SESSION_SECONDS = 30 * 60

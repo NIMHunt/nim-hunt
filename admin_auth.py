@@ -1,7 +1,5 @@
 """Authentication helpers for NimHunt's isolated administrator panel."""
 
-from __future__ import annotations
-
 import base64
 import hashlib
 import hmac

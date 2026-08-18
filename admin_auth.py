@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import os
@@ -96,7 +97,7 @@ def verify_admin_password(password: str, encoded_hash: str | None = None) -> boo
             dklen=len(expected),
             maxmem=_SCRYPT_MAXMEM,
         )
-    except (ValueError, TypeError, base64.binascii.Error):
+    except (ValueError, TypeError, binascii.Error):
         return False
 
     return hmac.compare_digest(actual, expected)
@@ -139,7 +140,7 @@ def read_admin_session(token: str | None, *, now: int | None = None) -> AdminSes
             hashlib.sha256,
         ).digest()
         supplied = _b64decode(signature_raw)
-    except (ValueError, TypeError, base64.binascii.Error):
+    except (ValueError, TypeError, binascii.Error):
         return None
 
     if not hmac.compare_digest(supplied, expected):

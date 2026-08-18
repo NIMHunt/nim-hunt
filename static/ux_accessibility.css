@@ -73,6 +73,17 @@ html[data-theme="dark"] body.nq-style .demo-success-card p {
     color: var(--nh-text) !important;
 }
 
+/* The branded 404 page is rendered through the home shell. Pin its two error
+   lines to explicit dark-theme foregrounds so Nimiq/component specificity or
+   a stale neutral rule cannot make the otherwise-present error copy disappear. */
+html[data-theme="dark"] body.nq-style .home-error-code {
+    color: var(--nh-text, #fafafa) !important;
+}
+
+html[data-theme="dark"] body.nq-style .home-error-message {
+    color: var(--nh-soft-text, #d5d6e0) !important;
+}
+
 .demo-success-actions {
     display: flex;
     justify-content: center;

@@ -1,58 +1,165 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
     installFindSpotsCreateCtaGuard,
-    syncFindSpotsCreateCta,
+    syncFindSpotsEmptyChoices,
 } from '../static/find_spots_user_cta.js';
 
-function makeCreateLine() {
-    const line = { hidden: false };
+function textNode(text) {
+    return { nodeType: 3, textContent: text };
+}
+
+function nodeText(node) {
+    if (!node) return '';
+    if (node.nodeType === 3) return node.textContent || '';
+    return `${node.textContent || ''}${(node.children || []).map(nodeText).join('')}`;
+}
+
+function makeLine(linkText, href) {
+    const line = {
+        nodeType: 1,
+        hidden: false,
+        dataset: {},
+        children: [],
+        replaceChildren(...children) {
+            this.children = children;
+        },
+    };
     const link = {
-        textContent: 'make one',
-        href: '/create',
+        nodeType: 1,
+        textContent: linkText,
+        href,
+        dataset: {},
+        children: [],
         getAttribute(name) {
-            return name === 'href' ? '/create' : null;
+            return name === 'href' ? this.href : null;
         },
         closest(selector) {
             return selector === 'span' ? line : null;
         },
     };
+    line.children = [link];
     return { line, link };
 }
 
-function makeRuntime(walletUserId = null) {
-    const first = makeCreateLine();
+function makeRuntime({
+    walletUserId = 7,
+    userLocation = { lat: 51.5, long: -0.1 },
+    claimHistoryKnown = true,
+    hasExistingClaims = false,
+    completed = false,
+} = {}) {
+    const demo = makeLine('try a Demo Spot?', '#spot-map');
+    const global = makeLine('check out global spots?', '#spot-map');
+    const create = makeLine('make one', '/create');
     const empty = {
-        links: [first.link],
+        links: [demo.link, global.link, create.link],
         querySelectorAll() {
             return this.links;
         },
     };
-    const runtime = {
-        walletUserId,
-        window: { location: { origin: 'https://nimhunt.app' } },
-        document: {
-            body: { dataset: { createSpotUrl: '/create' } },
-            getElementById(id) {
-                return id === 'empty-spots' ? empty : null;
-            },
+    const documentObj = {
+        body: { dataset: { createSpotUrl: '/create' } },
+        createTextNode: textNode,
+        getElementById(id) {
+            return id === 'empty-spots' ? empty : null;
         },
     };
-    return { runtime, empty, first };
+    const runtime = {
+        walletUserId,
+        userLocation,
+        demoSpot: null,
+        completed,
+        claimHistoryKnown,
+        hasExistingClaims,
+        claimHistoryInFlight: false,
+        lastRealSpotCount: 0,
+        lastSessionPayload: null,
+        document: documentObj,
+        window: {
+            location: { origin: 'https://nimhunt.app' },
+            queueMicrotask(callback) { callback(); },
+        },
+    };
+    return { runtime, empty, demo, global, create };
 }
 
-test('Create Spot CTA is hidden for an unidentified desktop visitor and shown for a user', () => {
-    const { runtime, first } = makeRuntime(null);
-    assert.equal(syncFindSpotsCreateCta(runtime), false);
-    assert.equal(first.line.hidden, true);
+test('first-time user with no claims sees only the Demo Hunt choice', () => {
+    const { runtime, demo, global, create } = makeRuntime();
+    const result = syncFindSpotsEmptyChoices(runtime);
 
-    runtime.walletUserId = 7;
-    assert.equal(syncFindSpotsCreateCta(runtime), true);
-    assert.equal(first.line.hidden, false);
+    assert.equal(result.demoVisible, true);
+    assert.equal(result.globalVisible, false);
+    assert.equal(result.createVisible, false);
+    assert.equal(demo.line.hidden, false);
+    assert.equal(global.line.hidden, true);
+    assert.equal(create.line.hidden, true);
 });
 
-test('Create Spot CTA guard follows async identity changes and later empty-state renders', () => {
-    const { runtime, empty, first } = makeRuntime(null);
+test('user with a real claim sees global and Create Spot choices instead of Demo Hunt', () => {
+    const { runtime, demo, global, create } = makeRuntime({ hasExistingClaims: true });
+    const result = syncFindSpotsEmptyChoices(runtime);
+
+    assert.equal(result.demoVisible, false);
+    assert.equal(result.globalVisible, true);
+    assert.equal(result.createVisible, true);
+    assert.equal(demo.line.hidden, true);
+    assert.equal(nodeText(global.line), 'Would you like to check out global spots?');
+    assert.equal(nodeText(create.line), 'Be the first to make a spot here.');
+    assert.equal(create.link.textContent, 'make a spot');
+    assert.equal(create.link.dataset.nimHuntCreateSpot, '1');
+});
+
+test('identified user waits for claim history before any optional onboarding choice appears', () => {
+    const { runtime, demo, global, create } = makeRuntime({
+        claimHistoryKnown: false,
+        hasExistingClaims: null,
+    });
+    const result = syncFindSpotsEmptyChoices(runtime);
+
+    assert.equal(result.waitingForHistory, true);
+    assert.equal(demo.line.hidden, true);
+    assert.equal(global.line.hidden, true);
+    assert.equal(create.line.hidden, true);
+});
+
+test('desktop visitor keeps the global choice but cannot see Demo Hunt or Create Spot', () => {
+    const { runtime, demo, global, create } = makeRuntime({
+        walletUserId: null,
+        userLocation: null,
+        claimHistoryKnown: false,
+        hasExistingClaims: null,
+    });
+    const result = syncFindSpotsEmptyChoices(runtime);
+
+    assert.equal(result.demoVisible, false);
+    assert.equal(result.globalVisible, true);
+    assert.equal(result.createVisible, false);
+    assert.equal(demo.line.hidden, true);
+    assert.equal(global.line.hidden, false);
+    assert.equal(create.line.hidden, true);
+});
+
+test('completed Demo Hunt reveals the normal global and Create Spot choices', () => {
+    const { runtime, demo, global, create } = makeRuntime({ completed: true });
+    const result = syncFindSpotsEmptyChoices(runtime);
+
+    assert.equal(result.demoVisible, false);
+    assert.equal(result.globalVisible, true);
+    assert.equal(result.createVisible, true);
+    assert.equal(demo.line.hidden, true);
+    assert.equal(global.line.hidden, false);
+    assert.equal(create.line.hidden, false);
+});
+
+test('guard still follows asynchronous identity changes without rewriting the empty-state container', () => {
+    const { runtime, create } = makeRuntime({
+        walletUserId: null,
+        userLocation: null,
+        claimHistoryKnown: false,
+        hasExistingClaims: null,
+    });
     let mutationCallback = null;
     class FakeMutationObserver {
         constructor(callback) {
@@ -62,19 +169,17 @@ test('Create Spot CTA guard follows async identity changes and later empty-state
     }
 
     installFindSpotsCreateCtaGuard(runtime, { MutationObserverCtor: FakeMutationObserver });
-    assert.equal(first.line.hidden, true);
+    assert.equal(create.line.hidden, true);
 
     runtime.walletUserId = 9;
-    assert.equal(first.line.hidden, false);
-
-    runtime.walletUserId = null;
-    assert.equal(first.line.hidden, true);
-
-    const replacement = makeCreateLine();
-    empty.links = [replacement.link];
+    assert.equal(create.line.hidden, false);
     mutationCallback();
-    assert.equal(replacement.line.hidden, true);
+    assert.equal(create.line.hidden, false);
+});
 
-    runtime.walletUserId = 9;
-    assert.equal(replacement.line.hidden, false);
+test('claim-history eligibility check requests only one real claim and fails closed', () => {
+    const source = readFileSync(new URL('../static/find_spots_user_cta.js', import.meta.url), 'utf8');
+    assert.match(source, /\/api\/my-claims\?limit=1/);
+    assert.match(source, /runtime\.hasExistingClaims = true;\s*}\s*finally/s);
+    assert.match(source, /runtime\.lastSessionPayload = requestBodyJson\(options\)/);
 });

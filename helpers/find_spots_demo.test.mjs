@@ -230,7 +230,7 @@ test('Demo Spot map colour is handled by the ordinary marker renderer, not post-
     assert.doesNotMatch(demoSource, /styleDemoLayers|resolvedDemoColour|demo-spot-created-toast/);
 });
 
-test('Demo Spot list and completion page use the purple/dark-mode presentation and a single OK action', () => {
+test('Demo Spot list and completion page use the purple/dark-mode presentation and return to the real Find Spots route', () => {
     const css = readFileSync(new URL('../static/ux_accessibility.css', import.meta.url), 'utf8');
     const success = readFileSync(new URL('../static/demo_claim_success.html', import.meta.url), 'utf8');
 
@@ -240,7 +240,8 @@ test('Demo Spot list and completion page use the purple/dark-mode presentation a
     assert.match(css, /html\[data-theme="dark"\] body\.nq-style \.demo-success-card h2/);
     assert.match(css, /html\[data-theme="dark"\] body\.nq-style \.demo-success-card p/);
 
-    assert.match(success, /<a class="nq-button light-blue" href="\/find-spots">OK<\/a>/);
-    assert.doesNotMatch(success, />Find spots<\/a>\s*<a/);
+    assert.match(success, /<a class="back-link" href="\/spots"/);
+    assert.match(success, /<a class="nq-button light-blue" href="\/spots">OK<\/a>/);
+    assert.doesNotMatch(success, /href="\/find-spots"/);
     assert.doesNotMatch(success, />Home<\/a>/);
 });

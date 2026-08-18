@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 import getpass
+import sys
+from pathlib import Path
+
+# Make the repository root importable when this file is run directly as
+# ``python scripts/hash_admin_password.py``.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from admin_auth import ADMIN_PASSWORD_HASH_ENV, hash_admin_password
 

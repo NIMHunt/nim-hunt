@@ -32,32 +32,37 @@ function addHelpButton(row, inputId, tooltip, ariaLabel, documentObj = document)
 export function installCreateSpotProgressiveSettings(documentObj = document) {
     const form = documentObj.getElementById('create-spot-form');
     const error = documentObj.getElementById('create-spot-error');
-    if (!form || !error || documentObj.getElementById('create-spot-advanced')) return null;
+    const fullEditorTitle = documentObj.getElementById('spot-title-input');
+    if (
+        !form
+        || !error
+        || !fullEditorTitle
+        || documentObj.getElementById('create-spot-advanced')
+    ) {
+        return null;
+    }
 
+    // Keep the ordinary creation decisions visible. Radius lives inside the
+    // location row, so moving that row preserves Location + Radius together.
     const basicRows = [
         rowFor('spot-title-input', documentObj),
         documentObj.querySelector('.create-spot-location-row'),
         rowFor('spot-total-value-input', documentObj),
         rowFor('spot-starts-input', documentObj),
-        rowFor('spot-duration-input', documentObj),
+        rowFor('spot-ends-input', documentObj),
+        rowFor('spot-description-input', documentObj),
     ].filter(Boolean);
 
+    // Stay Duration is the first optional/advanced decision. The remaining
+    // advanced controls are the claim/participant/password rules.
     const advancedRows = [
-        rowFor('spot-description-input', documentObj),
+        rowFor('spot-duration-input', documentObj),
         rowFor('spot-max-user-input', documentObj),
         rowFor('spot-max-total-input', documentObj),
         rowFor('spot-prize-count-input', documentObj),
-        rowFor('spot-ends-input', documentObj),
         rowFor('spot-use-password-input', documentObj),
     ].filter(Boolean);
 
-    addHelpButton(
-        rowFor('spot-description-input', documentObj),
-        'spot-description-input',
-        'Extra information users will see when they open this spot.',
-        'Explain Description',
-        documentObj,
-    );
     addHelpButton(
         rowFor('spot-max-total-input', documentObj),
         'spot-max-total-input',
@@ -72,13 +77,12 @@ export function installCreateSpotProgressiveSettings(documentObj = document) {
         'Explain Prize Count',
         documentObj,
     );
-    addHelpButton(
-        rowFor('spot-ends-input', documentObj),
-        'spot-ends-input',
-        'How long this spot remains available after its start time.',
-        'Explain Ends After',
-        documentObj,
-    );
+
+    // The small first-step Create Spot card has none of these full-editor rows.
+    // The guard above already prevents us reaching this point there, but keep
+    // the details element defensive as well so an empty disclosure can never
+    // be inserted by a partially-rendered full form.
+    if (advancedRows.length === 0) return null;
 
     const details = documentObj.createElement('details');
     details.id = 'create-spot-advanced';

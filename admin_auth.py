@@ -9,7 +9,6 @@ import hmac
 import os
 import secrets
 import time
-from dataclasses import dataclass
 
 
 ADMIN_PASSWORD_HASH_ENV = "NIMHUNT_ADMIN_PASSWORD_HASH"
@@ -27,11 +26,15 @@ _SCRYPT_MAXMEM = 64 * 1024 * 1024
 _SESSION_SIGNING_KEY = secrets.token_bytes(32)
 
 
-@dataclass(frozen=True, slots=True)
 class AdminSession:
-    expires_at: int
-    csrf_token: str
-    nonce: str
+    """Small immutable-by-convention value object for one validated session."""
+
+    __slots__ = ("expires_at", "csrf_token", "nonce")
+
+    def __init__(self, *, expires_at: int, csrf_token: str, nonce: str):
+        self.expires_at = int(expires_at)
+        self.csrf_token = str(csrf_token)
+        self.nonce = str(nonce)
 
 
 def _b64encode(value: bytes) -> str:

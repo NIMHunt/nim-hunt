@@ -16,11 +16,11 @@ import {
     spotInSearchViewport,
 } from '../static/find_spots_demo.js';
 
-test('demo spot uses the configured 100 metre testing distance with a 200 metre radius', () => {
+test('demo spot uses a 250 metre hunt distance with a 200 metre radius', () => {
     const origin = { lat: 51.5074, long: -0.1278 };
     const centre = pointAtDistance(origin.lat, origin.long, DEMO_DISTANCE_METRES, 1.25);
     const distance = distanceMetres(origin.lat, origin.long, centre.lat, centre.long);
-    assert.equal(DEMO_DISTANCE_METRES, 100);
+    assert.equal(DEMO_DISTANCE_METRES, 250);
     assert.ok(Math.abs(distance - DEMO_DISTANCE_METRES) < 0.1);
 
     const spot = makeDemoSpot({ userId: 7, ...origin, bearingRadians: 1.25, now: 1_700_000_000_000 });

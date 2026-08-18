@@ -97,7 +97,11 @@ async def record_audit(
 
 
 async def dashboard_metrics(db) -> RowDict:
-    """Return the exact active/total values shown in the admin header."""
+    """Return the exact active/total values shown in the admin header.
+
+    "Active users" follows NimHunt's existing public Daily Users definition:
+    a user whose last activity was within the previous 24 hours.
+    """
     await ensure_admin_tables(db)
     row = await (
         await db.execute(
@@ -105,7 +109,7 @@ async def dashboard_metrics(db) -> RowDict:
             SELECT
                 (SELECT COUNT(*)
                    FROM {schema.USER_TABLE_NAME}
-                  WHERE {schema.USER_STATUS} = ?) AS active_users,
+                  WHERE {schema.USER_LAST_SEEN_AT} >= unixepoch() - (24 * 60 * 60)) AS active_users,
                 (SELECT COUNT(*)
                    FROM {schema.USER_TABLE_NAME}) AS total_users,
                 (SELECT COUNT(*)
@@ -126,7 +130,6 @@ async def dashboard_metrics(db) -> RowDict:
                    FROM {schema.REPORT_TABLE_NAME}) AS total_reports;
             """,
             (
-                const.USER_STATUS_ACTIVE,
                 const.SPOT_STATUS_PUBLISHED,
                 const.REPORT_STATUS_PENDING,
             ),

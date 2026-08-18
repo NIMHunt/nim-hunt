@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import base64
 import binascii
-from dataclasses import dataclass
 import hashlib
 import hmac
 import os
 import secrets
 import time
+from dataclasses import dataclass
 
 
 ADMIN_PASSWORD_HASH_ENV = "NIMHUNT_ADMIN_PASSWORD_HASH"

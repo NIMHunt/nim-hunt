@@ -1,8 +1,8 @@
 export const DEMO_SPOT_ID = -2147483001;
 export const DEMO_RADIUS_METRES = 200;
-// Keep this as a single constant so the temporary testing distance can be
-// restored to the normal 250 m hunt distance without touching the geometry.
-export const DEMO_DISTANCE_METRES = 100;
+// Demo Spots are placed far enough away that the user has to move before they
+// can enter the 200 m claim radius.
+export const DEMO_DISTANCE_METRES = 250;
 export const GLOBAL_MAP_ZOOM = 0;
 export const DEMO_STORAGE_KEY = 'nimhunt-demo-spot-v1';
 export const DEMO_COMPLETED_KEY = 'nimhunt-demo-completed-v1';

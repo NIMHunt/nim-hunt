@@ -2,6 +2,8 @@ import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-2
 import { makeMySpotsText } from './interface_text.js?v=single-open-details-v1-20260722';
 
 const CREATE_TRIGGER_SELECTOR = 'a[data-nim-hunt-create-spot="1"]';
+const DEFAULT_SPOT_TITLE_MIN_LENGTH = 3;
+const DEFAULT_SPOT_TITLE_MAX_LENGTH = 27;
 
 export function buildCreateDraftPayload(
     sessionPayload,
@@ -123,8 +125,14 @@ export function installFindSpotsCreateModal(runtime, { documentObj = document } 
     const appName = documentObj.body?.dataset?.appName || 'NimHunt';
     const nimiqPayUrl = documentObj.body?.dataset?.nimiqPayUrl || 'https://nimpay.app';
     const createSpotUrl = documentObj.body?.dataset?.createSpotUrl || '/create';
-    const minTitle = Number.parseInt(documentObj.body?.dataset?.spotTitleMin || '3', 10);
-    const maxTitle = Number.parseInt(documentObj.body?.dataset?.spotTitleMax || '18', 10);
+    const minTitle = Number.parseInt(
+        documentObj.body?.dataset?.spotTitleMin || String(DEFAULT_SPOT_TITLE_MIN_LENGTH),
+        10,
+    );
+    const maxTitle = Number.parseInt(
+        documentObj.body?.dataset?.spotTitleMax || String(DEFAULT_SPOT_TITLE_MAX_LENGTH),
+        10,
+    );
     const text = makeMySpotsText({ appName, nimiqPayUrl });
     const state = { creating: false, captcha: null };
 

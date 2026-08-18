@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>{{ page_title }}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ app_icon_path }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="{{ google_font_muli }}">
+    <link rel="stylesheet" href="{{ nimiq_style_cdn }}">
+    <link rel="stylesheet" href="/static/home.css?v={{ asset_version }}">
+    {% include "_theme_head.html" %}
+    <link rel="stylesheet" href="/static/admin.css?v={{ asset_version }}">
+</head>
+<body class="nq-style admin-body">
+    <main class="admin-shell">
+        <header class="admin-header">
+            <div>
+                <p class="admin-eyebrow">Private</p>
+                <h1>NimHunt Administration</h1>
+                <p class="admin-muted">Moderation, reports and lightweight service statistics.</p>
+            </div>
+            <form method="post" action="/admin/logout">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="admin-quiet" type="submit">Sign out</button>
+            </form>
+        </header>
+
+        <section class="admin-stats" aria-label="NimHunt totals">
+            <article class="admin-stat">
+                <strong>{{ metrics.active_users }}/{{ metrics.total_users }}</strong>
+                <span>Users · active / total</span>
+            </article>
+            <article class="admin-stat">
+                <strong>{{ metrics.active_spots }}/{{ metrics.total_spots }}</strong>
+                <span>Spots · active / total</span>
+            </article>
+            <article class="admin-stat">
+                <strong>{{ metrics.pending_reports }}/{{ metrics.total_reports }}</strong>
+                <span>Reports · pending / total</span>
+            </article>
+        </section>
+
+        <section class="admin-grid">
+            <article class="admin-card">
+                <div class="admin-card-heading">
+                    <h2>New users</h2>
+                    <span class="admin-muted">Last 30 days</span>
+                </div>
+                <div class="admin-growth" aria-label="Daily new user registrations over the last 30 days">
+                    {% for item in growth %}
+                        <div class="admin-growth-bar" style="--bar-height: {{ item.percent }}%" title="{{ item.day }}: {{ item.count }} new user{% if item.count != 1 %}s{% endif %}"></div>
+                    {% endfor %}
+                </div>
+                {% if growth %}
+                    <div class="admin-growth-axis"><span>{{ growth[0].day }}</span><span>{{ growth[-1].day }}</span></div>
+                {% endif %}
+            </article>
+
+            <article class="admin-card">
+                <div class="admin-card-heading">
+                    <h2>Spot creators</h2>
+                    <span class="admin-muted">All time</span>
+                </div>
+                {% if leaderboard %}
+                    <ol class="admin-leaderboard">
+                        {% for item in leaderboard %}
+                            <li>
+                                <span><strong>{{ item.display_name or ('User #' ~ item.user_id) }}</strong><br><small class="admin-muted">#{{ item.user_id }} · {{ item.user_status_label }}</small></span>
+                                <strong>{{ item.spot_count }}</strong>
+                            </li>
+                        {% endfor %}
+                    </ol>
+                {% else %}
+                    <p class="admin-empty">No Spots have been created yet.</p>
+                {% endif %}
+            </article>
+        </section>
+
+        <section class="admin-section" aria-labelledby="pending-reports-title">
+            <div class="admin-card-heading">
+                <h2 id="pending-reports-title">Pending reports</h2>
+                <span class="admin-muted">Oldest first</span>
+            </div>
+
+            {% if reports %}
+                <div class="admin-report-list">
+                    {% for report in reports %}
+                        <article class="admin-report">
+                            <div class="admin-report-top">
+                                <div>
+                                    <p class="admin-eyebrow">Report #{{ report.report_id }}</p>
+                                    <h3>{{ report.spot_title }}</h3>
+                                    <p class="admin-muted">
+                                        Spot #{{ report.spot_id }} · {{ report.spot_status_label }}
+                                        {% if report.spot_city or report.spot_country %} · {{ report.spot_city or '' }}{% if report.spot_city and report.spot_country %}, {% endif %}{{ report.spot_country or '' }}{% endif %}
+                                    </p>
+                                </div>
+                                <span class="admin-pill">{{ report.reason_label }}</span>
+                            </div>
+
+                            {% if report.details %}
+                                <p>{{ report.details }}</p>
+                            {% else %}
+                                <p class="admin-muted">No additional details were supplied.</p>
+                            {% endif %}
+
+                            <div class="admin-report-meta">
+                                <div class="admin-meta-box">
+                                    <small>Reporter</small>
+                                    <strong>{{ report.reporter_name or ('User #' ~ report.reporter_id) }}</strong><br>
+                                    <span>#{{ report.reporter_id }} · {{ report.reporter_status_label }}</span>
+                                </div>
+                                <div class="admin-meta-box">
+                                    <small>Spot owner</small>
+                                    <strong>{{ report.owner_name or ('User #' ~ report.owner_id) }}</strong><br>
+                                    <span>#{{ report.owner_id }} · {{ report.owner_status_label }}</span>
+                                </div>
+                                <div class="admin-meta-box">
+                                    <small>Reports on this Spot</small>
+                                    <strong>{{ report.spot_report_count }}</strong><br>
+                                    <a href="/spot/{{ report.spot_link }}" target="_blank" rel="noopener noreferrer">Open public Spot ↗</a>
+                                </div>
+                            </div>
+
+                            <div class="admin-report-actions" aria-label="User moderation actions">
+                                {% if report.owner_status != 2 %}
+                                    <form class="admin-inline-form" method="post" action="/admin/users/{{ report.owner_id }}/limit">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                        <button class="admin-secondary" type="submit">Limit owner</button>
+                                    </form>
+                                {% endif %}
+                                {% if report.owner_status != 3 %}
+                                    <form class="admin-inline-form" method="post" action="/admin/users/{{ report.owner_id }}/ban">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                        <button class="admin-danger" type="submit">Ban owner</button>
+                                    </form>
+                                {% else %}
+                                    <form class="admin-inline-form" method="post" action="/admin/users/{{ report.owner_id }}/activate">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                        <button class="admin-secondary" type="submit">Reactivate owner</button>
+                                    </form>
+                                {% endif %}
+                            </div>
+
+                            <div class="admin-review-note">
+                                <form id="dismiss-{{ report.report_id }}" method="post" action="/admin/reports/{{ report.report_id }}/dismiss"></form>
+                                <form id="approve-{{ report.report_id }}" method="post" action="/admin/reports/{{ report.report_id }}/approve"></form>
+                                <input form="dismiss-{{ report.report_id }}" type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <input form="approve-{{ report.report_id }}" type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <input form="dismiss-{{ report.report_id }}" type="text" name="note" maxlength="2000" placeholder="Optional moderator note">
+                                <button form="dismiss-{{ report.report_id }}" class="admin-secondary" type="submit">Dismiss</button>
+                                <button form="approve-{{ report.report_id }}" class="admin-primary" type="submit">Approve</button>
+                            </div>
+
+                            {% if report.spot_status != 4 and report.spot_status != 3 %}
+                                <details class="admin-danger-zone">
+                                    <summary>Ban Spot and sweep remaining funds</summary>
+                                    <p><strong>Severe action.</strong> The Spot becomes hidden immediately and NimHunt will create no new claimant payout intents from it. Any transaction already committed or broadcast before the ban must resolve safely first. The server then sends the confirmed remaining balance to NimHunt's fixed cancellation address.</p>
+                                    <form method="post" action="/admin/spots/{{ report.spot_id }}/ban" autocomplete="off">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                        <input type="hidden" name="report_id" value="{{ report.report_id }}">
+                                        <label class="admin-field">
+                                            <span>Reason / audit note</span>
+                                            <textarea name="note" maxlength="2000" placeholder="Why is this severe action justified?"></textarea>
+                                        </label>
+                                        <div class="admin-danger-grid">
+                                            <label class="admin-field">
+                                                <span>Type BAN {{ report.spot_id }}</span>
+                                                <input type="text" name="confirmation" required autocomplete="off">
+                                            </label>
+                                            <label class="admin-field">
+                                                <span>Admin password</span>
+                                                <input type="password" name="password" required autocomplete="current-password">
+                                            </label>
+                                        </div>
+                                        <button class="admin-danger" type="submit">Ban Spot permanently</button>
+                                    </form>
+                                </details>
+                            {% endif %}
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="admin-card"><p class="admin-empty">No reports are waiting for review.</p></div>
+            {% endif %}
+        </section>
+
+        <section class="admin-section admin-card" aria-labelledby="audit-title">
+            <div class="admin-card-heading">
+                <h2 id="audit-title">Recent admin activity</h2>
+                <span class="admin-muted">Newest first</span>
+            </div>
+            {% if audit %}
+                <ol class="admin-audit-list">
+                    {% for item in audit %}
+                        <li>
+                            <span><strong>{{ item.action }}</strong><br><small class="admin-muted">{{ item.target_type }}{% if item.target_id is not none %} #{{ item.target_id }}{% endif %} · {{ item.detail or 'No note' }}</small></span>
+                            <small class="admin-muted">{{ item.created_at }}</small>
+                        </li>
+                    {% endfor %}
+                </ol>
+            {% else %}
+                <p class="admin-empty">No admin actions have been recorded yet.</p>
+            {% endif %}
+        </section>
+    </main>
+</body>
+</html>

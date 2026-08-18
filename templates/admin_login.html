@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>{{ page_title }}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ app_icon_path }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="{{ google_font_muli }}">
+    <link rel="stylesheet" href="{{ nimiq_style_cdn }}">
+    <link rel="stylesheet" href="/static/home.css?v={{ asset_version }}">
+    {% include "_theme_head.html" %}
+    <link rel="stylesheet" href="/static/admin.css?v={{ asset_version }}">
+</head>
+<body class="nq-style admin-body">
+    <main class="admin-shell admin-shell--login">
+        <section class="admin-login-card" aria-labelledby="admin-login-title">
+            <p class="admin-eyebrow">Private</p>
+            <h1 id="admin-login-title">NimHunt Administration</h1>
+            <p class="admin-muted">This area is separate from ordinary NimHunt accounts and is not linked from the public app.</p>
+
+            {% if error %}
+                <p class="admin-error" role="alert">{{ error }}</p>
+            {% endif %}
+
+            {% if configured %}
+                <form method="post" action="/admin/login" autocomplete="off">
+                    <label class="admin-field">
+                        <span>Admin password</span>
+                        <input type="password" name="password" required autocomplete="current-password" autofocus>
+                    </label>
+                    <button class="admin-primary" type="submit">Sign in</button>
+                </form>
+            {% else %}
+                <p class="admin-warning">Admin access is disabled. Configure <code>NIMHUNT_ADMIN_PASSWORD_HASH</code> in Railway before using this page.</p>
+            {% endif %}
+        </section>
+    </main>
+</body>
+</html>

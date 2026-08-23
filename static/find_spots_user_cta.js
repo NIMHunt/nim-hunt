@@ -115,6 +115,9 @@ export function syncFindSpotsEmptyChoices(runtime) {
     const globalLine = lineForLink(globalLink);
     const createLine = lineForLink(createLink);
 
+    if (demoLink?.classList && !demoLink.classList.contains('demo-start-button')) {
+        demoLink.classList.add('demo-start-button');
+    }
     normaliseCreateLine(runtime, createLine, createLink);
 
     const canConsiderDemo = demoCandidate(runtime, demoLine);

@@ -94,7 +94,7 @@ def test_public_rpc_network_reports_transport_failure_type(monkeypatch) -> None:
 
     monkeypatch.setattr(main.trans_updater, "_json_rpc_post_sync", latest_block)
 
-    with pytest.raises(RuntimeError, match="getLatestBlock failed \(TimeoutError\)"):
+    with pytest.raises(RuntimeError, match=r"getLatestBlock failed \(TimeoutError\)"):
         asyncio.run(main.verify_public_rpc_network())
 
 

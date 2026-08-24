@@ -13,71 +13,37 @@ def _configure_public_testnet(monkeypatch) -> None:
     monkeypatch.setattr(main.const, "NIMIQ_RPC_TIMEOUT_SECONDS", 12)
 
 
-def test_public_rpc_network_uses_get_network_id_when_available(monkeypatch) -> None:
+def test_startup_regression_does_not_probe_get_network_id(monkeypatch) -> None:
     _configure_public_testnet(monkeypatch)
+    calls = []
 
-    async def verify_configured_rpc_network(**kwargs):
-        assert kwargs["expected_network_id"] == 5
-        return 5
+    async def get_network_id(**_kwargs):
+        calls.append("getNetworkId")
+        raise AssertionError("the unsupported preliminary probe must stay removed")
 
-    def unexpected_fallback(**_kwargs):
-        raise AssertionError("getLatestBlock fallback should not run")
-
-    monkeypatch.setattr(
-        main.trans_updater,
-        "verify_configured_rpc_network",
-        verify_configured_rpc_network,
-    )
-    monkeypatch.setattr(main.trans_updater, "_json_rpc_post_sync", unexpected_fallback)
-
-    asyncio.run(main.verify_public_rpc_network())
-
-
-def test_public_rpc_network_falls_back_to_latest_block(monkeypatch) -> None:
-    _configure_public_testnet(monkeypatch)
-    calls = {}
-
-    async def unsupported_get_network_id(**_kwargs):
-        raise RuntimeError(
-            "Nimiq RPC error: {'code': -32601, 'message': 'Method not found'}"
-        )
-
-    def latest_block(**kwargs):
-        calls.update(kwargs)
+    def rpc_call(**kwargs):
+        calls.append(kwargs["method"])
         return {"network": "TestAlbatross"}
 
     monkeypatch.setattr(
         main.trans_updater,
         "verify_configured_rpc_network",
-        unsupported_get_network_id,
+        get_network_id,
     )
-    monkeypatch.setattr(main.trans_updater, "_json_rpc_post_sync", latest_block)
+    monkeypatch.setattr(main.trans_updater, "_json_rpc_post_sync", rpc_call)
 
     asyncio.run(main.verify_public_rpc_network())
 
-    assert calls == {
-        "rpc_url": "https://rpc.testnet.example/",
-        "method": "getLatestBlock",
-        "params": [False],
-        "timeout_seconds": 12,
-    }
+    assert calls == ["getLatestBlock"]
 
 
-def test_public_rpc_network_fallback_rejects_wrong_network(monkeypatch) -> None:
+def test_latest_block_network_proof_still_fails_closed(monkeypatch) -> None:
     _configure_public_testnet(monkeypatch)
 
-    async def unsupported_get_network_id(**_kwargs):
-        raise RuntimeError("Nimiq RPC error: -32601 Method not found")
-
     def latest_block(**_kwargs):
-        return {"network": "MainAlbatross"}
+        return {"number": 123456}
 
-    monkeypatch.setattr(
-        main.trans_updater,
-        "verify_configured_rpc_network",
-        unsupported_get_network_id,
-    )
     monkeypatch.setattr(main.trans_updater, "_json_rpc_post_sync", latest_block)
 
-    with pytest.raises(RuntimeError, match="RPC network validation failed"):
+    with pytest.raises(RuntimeError, match="did not expose a network"):
         asyncio.run(main.verify_public_rpc_network())

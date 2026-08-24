@@ -1,6 +1,6 @@
 import asyncio
-import urllib.error
 import unittest
+import urllib.error
 from types import SimpleNamespace
 from unittest import mock
 

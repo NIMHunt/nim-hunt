@@ -394,33 +394,44 @@ class PublicDeploymentValidationTest(unittest.TestCase):
 
 
 class PublicRuntimeProbeTest(unittest.IsolatedAsyncioTestCase):
-    async def test_public_rpc_probe_accepts_matching_network_id(self):
+    async def test_public_rpc_probe_accepts_matching_latest_block_network(self):
+        calls = {}
+
+        def latest_block(**kwargs):
+            calls.update(kwargs)
+            return {"network": "TestAlbatross"}
+
         with (
             mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
-            mock.patch.object(const, "NIMIQ_NETWORK_ID", 5),
+            mock.patch.object(const, "NIMIQ_NETWORK", "TestAlbatross"),
             mock.patch.object(const, "NIMIQ_RPC_URL", "https://rpc.testnet.example"),
             mock.patch.object(const, "NIMIQ_RPC_TIMEOUT_SECONDS", 12),
             mock.patch.object(
                 main.trans_updater,
-                "verify_configured_rpc_network",
-                mock.AsyncMock(return_value=5),
-            ) as verify_rpc,
+                "_json_rpc_post_sync",
+                side_effect=latest_block,
+            ),
         ):
             await main.verify_public_rpc_network()
 
-        verify_rpc.assert_awaited_once_with(
-            expected_network_id=5,
-            rpc_url="https://rpc.testnet.example",
-            timeout_seconds=12,
+        self.assertEqual(
+            calls,
+            {
+                "rpc_url": "https://rpc.testnet.example",
+                "method": "getLatestBlock",
+                "params": [False],
+                "timeout_seconds": 12,
+            },
         )
 
     async def test_public_rpc_probe_hides_low_level_endpoint_details(self):
         with (
             mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
+            mock.patch.object(const, "NIMIQ_NETWORK", "TestAlbatross"),
             mock.patch.object(
                 main.trans_updater,
-                "verify_configured_rpc_network",
-                mock.AsyncMock(side_effect=RuntimeError("low-level response detail")),
+                "_json_rpc_post_sync",
+                side_effect=RuntimeError("low-level response detail"),
             ),
         ):
             with self.assertRaisesRegex(RuntimeError, "RPC network validation failed") as raised:

@@ -102,9 +102,9 @@ function normaliseDemoLine(runtime, line, link) {
         link.classList.add('demo-start-button');
     }
 
-    // Keep the sentence punctuation outside the button itself:
-    // "Would you like to [Demo Spot]?"
-    replaceLine(runtime, line, link, 'Would you like to ', '?', 'demo-v2');
+    // Keep the verb, article, and punctuation outside the button itself:
+    // "Would you like to try a [Demo Spot]?"
+    replaceLine(runtime, line, link, 'Would you like to try a ', '?', 'demo-v3');
 }
 
 function normaliseGlobalLine(runtime, line, link) {

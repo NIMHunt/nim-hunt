@@ -312,8 +312,19 @@ async def verify_public_rpc_network() -> None:
             f"getLatestBlock returned HTTP {exc.code}"
         ) from None
     except RuntimeError as exc:
+        detail = str(exc)
+        if detail.startswith(
+            (
+                "Nimiq RPC getLatestBlock did not expose a network",
+                "Configured Nimiq RPC serves ",
+            )
+        ):
+            raise RuntimeError(
+                f"Public deployment RPC network validation failed: {detail}"
+            ) from None
         raise RuntimeError(
-            f"Public deployment RPC network validation failed: {exc}"
+            "Public deployment RPC network validation failed: "
+            "getLatestBlock returned an RPC error"
         ) from None
     except Exception as exc:
         raise RuntimeError(

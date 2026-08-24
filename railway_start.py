@@ -1,203 +1,215 @@
-"""Railway entrypoint with safe Mainnet RPC failover.
+"""Railway entrypoint with fail-closed degraded RPC startup.
 
-Railway imports no NimHunt modules until a working RPC endpoint has been chosen.
-That matters because constants.py and trans_updater.py bind the configured RPC
-URL during import. Selecting first ensures startup checks, background polling,
-and the Node signing/broadcast helper all use the same verified endpoint.
+NimHunt must not confuse a community RPC outage with an application failure.
+For public deployments this entrypoint keeps the ordinary deployment, signer,
+database, and network-integrity checks intact, but permits Uvicorn to start when
+the configured RPC is temporarily unreachable. Chain-dependent work continues
+to fail closed and the background workers keep retrying.
+
+A deployment that actually reaches an RPC serving the wrong Nimiq network still
+fails immediately. If NimHunt had to start while the RPC was unavailable, the
+first later Python RPC use must prove the configured network with getLatestBlock
+before any normal RPC call proceeds. Server-originated sends are gated before a
+durable send intent is created for the same reason.
 """
 
 from __future__ import annotations
 
-import json
+import argparse
+import asyncio
 import os
 import sys
+import threading
 import urllib.error
-import urllib.request
-from urllib.parse import urlparse
-
-MAINNET_FALLBACK_RPC_URLS = (
-    "https://rpc-mainnet.nimiqscan.com",
-    "https://rpc.nimiqwatch.com",
-)
-
-_NETWORK_ALIASES = {
-    "mainalbatross": "MainAlbatross",
-    "mainnet": "MainAlbatross",
-    "main": "MainAlbatross",
-    "24": "MainAlbatross",
-    "testalbatross": "TestAlbatross",
-    "testnet": "TestAlbatross",
-    "test": "TestAlbatross",
-    "5": "TestAlbatross",
-    "devalbatross": "DevAlbatross",
-    "devnet": "DevAlbatross",
-    "dev": "DevAlbatross",
-    "6": "DevAlbatross",
-}
+from types import SimpleNamespace
+from typing import Any
 
 
-class RpcUnavailableError(RuntimeError):
-    """The endpoint could not provide a usable RPC response."""
+def _temporary_rpc_validation_failure(exc: BaseException) -> bool:
+    """Return True only for failures that mean the RPC could not be used.
 
+    Wrong-network and unverifiable-network responses are deliberately excluded:
+    those are integrity failures, not availability failures, and must still stop
+    a public deployment.
+    """
+    if isinstance(exc, (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError)):
+        return True
 
-class RpcNetworkMismatchError(RuntimeError):
-    """The endpoint responded but serves the wrong Nimiq network."""
+    message = str(exc)
+    if "Configured Nimiq RPC serves " in message:
+        return False
+    if "did not expose a network" in message:
+        return False
 
-
-def _canonical_network(value: object) -> str:
-    clean = str(value or "").strip().lower().replace("-", "").replace("_", "")
-    return _NETWORK_ALIASES.get(clean, str(value or "").strip())
-
-
-def _deployment_mode() -> str:
-    explicit = os.getenv("NIMHUNT_DEPLOYMENT_MODE", "").strip().lower().replace("_", "-")
-    if explicit:
-        return explicit
-    legacy = os.getenv("NIMHUNT_PRODUCTION", "").strip().lower()
-    return "production" if legacy in {"1", "true", "yes", "on"} else "development"
-
-
-def _safe_endpoint_label(url: str) -> str:
-    """Return a log-safe endpoint label without path, query, or credentials."""
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return "invalid RPC endpoint"
-    return parsed.hostname or "invalid RPC endpoint"
-
-
-def _unwrap_result(payload: object) -> object:
-    if not isinstance(payload, dict):
-        raise RpcUnavailableError("RPC returned non-object JSON")
-    if payload.get("error") is not None:
-        raise RpcUnavailableError("RPC returned a JSON-RPC error")
-    result = payload.get("result")
-    if isinstance(result, dict) and "data" in result and "metadata" in result:
-        return result.get("data")
-    return result
-
-
-def probe_rpc_network(url: str, *, expected_network: str, timeout_seconds: int) -> None:
-    """Prove one endpoint is reachable and serves the expected Nimiq network."""
-    body = json.dumps(
-        {
-            "jsonrpc": "2.0",
-            "method": "getLatestBlock",
-            "params": [False],
-            "id": 1,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=max(1, int(timeout_seconds))) as response:
-            raw = response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        raise RpcUnavailableError(f"HTTP {exc.code}") from None
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise RpcUnavailableError(type(exc).__name__) from None
-
-    try:
-        payload = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        raise RpcUnavailableError("invalid JSON") from None
-
-    block = _unwrap_result(payload)
-    if not isinstance(block, dict) or "network" not in block:
-        raise RpcUnavailableError("getLatestBlock did not expose a network")
-
-    actual_network = _canonical_network(block.get("network"))
-    expected_network = _canonical_network(expected_network)
-    if actual_network != expected_network:
-        raise RpcNetworkMismatchError(
-            f"RPC serves {actual_network or 'an unknown network'}, expected {expected_network}"
+    return any(
+        marker in message
+        for marker in (
+            "getLatestBlock returned HTTP ",
+            "getLatestBlock failed (",
+            "getLatestBlock returned an RPC error",
         )
-
-
-def _configured_fallbacks(*, network: str) -> tuple[str, ...]:
-    raw = os.getenv("NIMHUNT_NIMIQ_RPC_FALLBACK_URLS", "").strip()
-    if raw:
-        return tuple(part.strip() for part in raw.split(",") if part.strip())
-    if _canonical_network(network) == "MainAlbatross":
-        return MAINNET_FALLBACK_RPC_URLS
-    return ()
-
-
-def _candidate_urls(primary: str, *, network: str) -> tuple[str, ...]:
-    candidates: list[str] = []
-    for value in (primary, *_configured_fallbacks(network=network)):
-        clean = str(value or "").strip()
-        if clean and clean not in candidates:
-            candidates.append(clean)
-    return tuple(candidates)
-
-
-def select_rpc_url(
-    primary: str,
-    *,
-    expected_network: str,
-    timeout_seconds: int,
-    probe=probe_rpc_network,
-) -> str:
-    """Return the first reachable endpoint that proves the expected network."""
-    candidates = _candidate_urls(primary, network=expected_network)
-    if not candidates:
-        raise RuntimeError("No Nimiq RPC endpoint is configured")
-
-    failures: list[str] = []
-    for url in candidates:
-        label = _safe_endpoint_label(url)
-        try:
-            probe(url, expected_network=expected_network, timeout_seconds=timeout_seconds)
-        except RpcNetworkMismatchError:
-            # A reachable wrong-network endpoint is a configuration/security error,
-            # not an availability problem. Never hide it by silently failing over.
-            raise
-        except RpcUnavailableError as exc:
-            failures.append(f"{label}: {exc}")
-            continue
-        print(f"NimHunt Railway RPC preflight selected {label}", file=sys.stderr, flush=True)
-        return url
-
-    raise RuntimeError(
-        "No verified Nimiq RPC endpoint was available (" + "; ".join(failures) + ")"
     )
 
 
-def main() -> None:
-    mode = _deployment_mode()
-    network = os.getenv("NIMHUNT_NIMIQ_NETWORK", "TestAlbatross").strip() or "TestAlbatross"
+def _warn_degraded(reason: BaseException) -> None:
+    print(
+        "WARNING: Nimiq RPC is temporarily unavailable; starting NimHunt in "
+        "degraded chain mode. Chain-dependent operations remain fail-closed "
+        f"and background workers will retry. Reason: {reason}",
+        file=sys.stderr,
+        flush=True,
+    )
 
-    # Only public deployments need the pre-import failover selection. Local
-    # development keeps its existing behavior and lets main.py perform normal
-    # configuration validation.
-    if mode in {"production", "public-testnet"}:
-        defaults = {
-            "MainAlbatross": "https://rpc.nimiqwatch.com",
-            "TestAlbatross": "https://rpc.testnet.nimiqwatch.com/",
-        }
-        primary = os.getenv("NIMHUNT_NIMIQ_RPC_URL", defaults.get(network, "")).strip()
-        timeout_seconds = int(os.getenv("NIMHUNT_NIMIQ_RPC_TIMEOUT_SECONDS", "12"))
-        selected = select_rpc_url(
-            primary,
-            expected_network=network,
+
+def install_degraded_rpc_startup_policy(app_module: Any) -> SimpleNamespace:
+    """Make temporary RPC unavailability non-fatal without weakening chain safety."""
+    state = SimpleNamespace(degraded=False, reason=None)
+
+    if not bool(getattr(app_module.const, "PUBLIC_DEPLOYMENT", False)):
+        return state
+
+    original_verify = app_module.verify_public_rpc_network
+    original_refresh_height = app_module.trans_updater.refresh_chain_head_height
+    original_rpc_post = app_module.trans_updater._json_rpc_post_sync
+    original_recorded_send = app_module.trans_updater._submit_recorded_chain_send
+    original_start_settlement = app_module.settlement_updater.start_settlement_refresher
+    original_start_transactions = app_module.trans_updater.start_transaction_refresher
+
+    expected_network = str(getattr(app_module.const, "NIMIQ_NETWORK", "")).strip()
+    rpc_url = str(getattr(app_module.const, "NIMIQ_RPC_URL", "")).strip()
+    timeout_seconds = int(getattr(app_module.const, "NIMIQ_RPC_TIMEOUT_SECONDS", 12))
+    verification_lock = threading.Lock()
+
+    def ensure_recovered_rpc_is_verified() -> None:
+        """Prove the configured network before chain work resumes after degraded boot."""
+        if not state.degraded:
+            return
+
+        with verification_lock:
+            if not state.degraded:
+                return
+
+            result = original_rpc_post(
+                rpc_url=rpc_url,
+                method="getLatestBlock",
+                params=[False],
+                timeout_seconds=timeout_seconds,
+            )
+            block, _metadata = app_module.trans_updater._unwrap_rpc_result(result)
+            if not isinstance(block, dict) or "network" not in block:
+                raise RuntimeError(
+                    "Recovered Nimiq RPC getLatestBlock did not expose a network"
+                )
+
+            actual_network = app_module._canonical_rpc_network_name(block.get("network"))
+            if actual_network != expected_network:
+                raise RuntimeError(
+                    f"Recovered Nimiq RPC serves {actual_network or 'an unknown network'}, "
+                    f"expected {expected_network}"
+                )
+
+            state.degraded = False
+            state.reason = None
+            print(
+                "Nimiq RPC recovered and was verified; normal chain processing resumed.",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    async def tolerant_verify_public_rpc_network() -> None:
+        try:
+            await original_verify()
+        except RuntimeError as exc:
+            if not _temporary_rpc_validation_failure(exc):
+                raise
+            state.degraded = True
+            state.reason = str(exc)
+            _warn_degraded(exc)
+
+    async def tolerant_refresh_chain_head_height(*args, **kwargs):
+        if state.degraded:
+            return None
+        try:
+            return await original_refresh_height(*args, **kwargs)
+        except Exception as exc:
+            if not _temporary_rpc_validation_failure(exc):
+                raise
+            state.degraded = True
+            state.reason = str(exc)
+            _warn_degraded(exc)
+            return None
+
+    def guarded_rpc_post_sync(*, rpc_url: str, method: str, params: list[Any], timeout_seconds: int):
+        if state.degraded:
+            ensure_recovered_rpc_is_verified()
+        return original_rpc_post(
+            rpc_url=rpc_url,
+            method=method,
+            params=params,
             timeout_seconds=timeout_seconds,
         )
-        # Set this before importing main.py. Every Python RPC call and the Node
-        # transaction helper then inherits the same endpoint for this process.
-        os.environ["NIMHUNT_NIMIQ_RPC_URL"] = selected
 
-    argv = [
-        "uvicorn",
-        "main:app",
-        *sys.argv[1:],
-    ]
-    os.execvp(argv[0], argv)
+    async def guarded_recorded_chain_send(*args, **kwargs):
+        # _submit_recorded_chain_send creates the durable uniqueness guard before
+        # broadcasting. Verify recovery first so an outage cannot create a local
+        # send intent merely because the chain provider is unavailable.
+        if state.degraded:
+            await asyncio.to_thread(ensure_recovered_rpc_is_verified)
+        return await original_recorded_send(*args, **kwargs)
+
+    async def tolerant_start_settlement_refresher(*args, **kwargs):
+        if state.degraded:
+            kwargs["fail_on_initial_error"] = False
+        return await original_start_settlement(*args, **kwargs)
+
+    async def tolerant_start_transaction_refresher(*args, **kwargs):
+        if state.degraded:
+            kwargs["fail_on_initial_error"] = False
+        return await original_start_transactions(*args, **kwargs)
+
+    app_module.verify_public_rpc_network = tolerant_verify_public_rpc_network
+    app_module.trans_updater.refresh_chain_head_height = tolerant_refresh_chain_head_height
+    app_module.trans_updater._json_rpc_post_sync = guarded_rpc_post_sync
+    app_module.trans_updater._submit_recorded_chain_send = guarded_recorded_chain_send
+    app_module.settlement_updater.start_settlement_refresher = tolerant_start_settlement_refresher
+    app_module.trans_updater.start_transaction_refresher = tolerant_start_transaction_refresher
+
+    return state
+
+
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Start NimHunt on Railway")
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
+    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--proxy-headers", action="store_true")
+    parser.add_argument("--forwarded-allow-ips", default="*")
+    return parser.parse_args(argv)
+
+
+def main(*, app_module: Any | None = None, uvicorn_module: Any | None = None) -> None:
+    args = _parse_args(sys.argv[1:])
+    if args.workers != 1:
+        raise RuntimeError("NimHunt Railway startup requires exactly one Uvicorn worker")
+
+    if app_module is None:
+        import main as app_module  # Imported here so tests can inject a fake app module.
+    if uvicorn_module is None:
+        import uvicorn as uvicorn_module
+
+    install_degraded_rpc_startup_policy(app_module)
+
+    # Run the already-imported app in this process so the guarded RPC policy
+    # remains installed. Passing a module string would allow a worker process to
+    # import an unpatched copy of main.py.
+    uvicorn_module.run(
+        app_module.app,
+        host=args.host,
+        port=args.port,
+        workers=1,
+        proxy_headers=bool(args.proxy_headers),
+        forwarded_allow_ips=args.forwarded_allow_ips,
+    )
 
 
 if __name__ == "__main__":

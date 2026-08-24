@@ -31,12 +31,23 @@ function makeLine(linkText, href) {
         textContent: linkText,
         href,
         dataset: {},
+        className: 'welcome-link',
         children: [],
         getAttribute(name) {
             return name === 'href' ? this.href : null;
         },
         closest(selector) {
             return selector === 'span' ? line : null;
+        },
+    };
+    link.classList = {
+        add(...names) {
+            const existing = new Set(link.className.split(/\s+/).filter(Boolean));
+            for (const name of names) existing.add(name);
+            link.className = [...existing].join(' ');
+        },
+        contains(name) {
+            return link.className.split(/\s+/).includes(name);
         },
     };
     line.children = [link];
@@ -85,7 +96,7 @@ function makeRuntime({
     return { runtime, empty, demo, global, create };
 }
 
-test('first-time user with no claims sees only the Demo Hunt choice', () => {
+test('first-time user with no claims sees only the purple Demo Hunt action', () => {
     const { runtime, demo, global, create } = makeRuntime();
     const result = syncFindSpotsEmptyChoices(runtime);
 
@@ -95,6 +106,9 @@ test('first-time user with no claims sees only the Demo Hunt choice', () => {
     assert.equal(demo.line.hidden, false);
     assert.equal(global.line.hidden, true);
     assert.equal(create.line.hidden, true);
+    assert.equal(demo.link.classList.contains('demo-start-button'), true);
+    assert.equal(global.link.classList.contains('demo-start-button'), false);
+    assert.equal(create.link.classList.contains('demo-start-button'), false);
 });
 
 test('user with a real claim sees global and Create Spot choices instead of Demo Hunt', () => {
@@ -206,7 +220,11 @@ test('guard still follows asynchronous identity changes without rewriting the em
 
 test('claim-history eligibility check requests only one real claim and fails closed', () => {
     const source = readFileSync(new URL('../static/find_spots_user_cta.js', import.meta.url), 'utf8');
+    const css = readFileSync(new URL('../static/ux_accessibility.css', import.meta.url), 'utf8');
     assert.match(source, /\/api\/my-claims\?limit=1/);
     assert.match(source, /runtime\.hasExistingClaims = true;\s*}\s*finally/s);
     assert.match(source, /runtime\.lastSessionPayload = requestBodyJson\(options\)/);
+    assert.match(source, /demoLink\.classList\.add\('demo-start-button'\)/);
+    assert.match(css, /\.demo-start-button\s*\{[^}]*background:\s*#8f5bd7;[^}]*color:\s*#ffffff\s*!important;/s);
+    assert.match(css, /html\[data-theme="dark"\] body\.nq-style \.demo-start-button/);
 });

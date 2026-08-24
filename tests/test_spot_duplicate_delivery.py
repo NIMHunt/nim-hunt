@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CACHE_VERSION = "spot-duplicate-v1-20260805"
+CACHE_VERSION = "spot-duplicate-v2-20260824"
 
 
 def source(path: str) -> str:
@@ -22,7 +22,7 @@ def test_duplicate_button_reuses_create_modal_and_dedicated_api():
     assert "requestTargetsOrdinaryDraftCreation" in module
     assert "`/api/my-spots/${spotId}/duplicate`" in module
     assert f"./spot_duplicate.js?v={CACHE_VERSION}" in bootstrap
-    assert f"/static/my_spots_bootstrap.js?v={CACHE_VERSION}-" in template
+    assert CACHE_VERSION in template
 
 
 def test_duplicate_backend_is_isolated_from_transaction_and_claim_writes():

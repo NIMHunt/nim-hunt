@@ -1,18 +1,11 @@
 {
   "sections": [
     {
-      "heading": "ASAP",
-      "items": [
-        "Full release on NIMIQ blockchain"
-      ]
-    },
-    {
       "heading": "August",
       "items": [
         "Localisation",
         "More Desktop Functionality",
         "More Marketing",
-        "Dark Mode",
         "Admin Panel"
       ]
     }

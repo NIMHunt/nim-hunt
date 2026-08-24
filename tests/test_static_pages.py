@@ -106,16 +106,11 @@ def test_roadmap_data_is_simple_customisable_and_current() -> None:
     assert roadmap == {
         "sections": [
             {
-                "heading": "ASAP",
-                "items": ["Full release on NIMIQ blockchain"],
-            },
-            {
                 "heading": "August",
                 "items": [
                     "Localisation",
                     "More Desktop Functionality",
                     "More Marketing",
-                    "Dark Mode",
                     "Admin Panel",
                 ],
             },

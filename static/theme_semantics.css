@@ -1,0 +1,124 @@
+/* Theme-invariant semantic/action colours.
+ *
+ * theme.css remaps neutral surfaces for dark mode. This file is loaded after it
+ * so coloured actions and claim states keep the same visual identity they have
+ * in light mode. Dark mode may mute a disabled action, but it must not replace
+ * green/gold/blue/red meaning with a generic glass surface.
+ */
+
+/* Claimable Spot cards keep their Standard / conditional / Prizedraw colours. */
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-standard {
+    background: var(--nh-success);
+    color: #ffffff;
+}
+
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-conditional {
+    background: #0582ca;
+    color: #ffffff;
+}
+
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-prizedraw {
+    background: #ffc435;
+    color: #1f2348;
+}
+
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-standard .spot-list-title,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-standard .spot-list-meta,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-standard .spot-list-chevron,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-standard .spot-detail-description,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-standard .spot-detail-lines,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-standard .spot-report-button,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-standard .spot-link-anchor,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-standard .spot-copy-button,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-conditional .spot-list-title,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-conditional .spot-list-meta,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-conditional .spot-list-chevron,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-conditional .spot-detail-description,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-conditional .spot-detail-lines,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-conditional .spot-report-button,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-conditional .spot-link-anchor,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-conditional .spot-copy-button {
+    color: #ffffff !important;
+}
+
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-prizedraw .spot-list-title,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-prizedraw .spot-list-meta,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-prizedraw .spot-list-chevron,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-prizedraw .spot-detail-description,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-prizedraw .spot-detail-lines,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-prizedraw .spot-report-button,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-prizedraw .spot-link-anchor,
+html[data-theme="dark"] body.nq-style .spot-list-item.is-claim-prizedraw .spot-copy-button {
+    color: #1f2348 !important;
+}
+
+/* The inner CLAIM pill is also semantic UI. Keep the normal white pill and its
+   coloured label instead of replacing it with the dark neutral glass style. */
+html[data-theme="dark"] body.nq-style .spot-claim-button.nq-button-pill:not(.is-unavailable):not(.how-to-claim-button),
+html[data-theme="dark"] body.nq-style .spot-claim-button.nq-button-pill:not(.is-unavailable):not(.how-to-claim-button):hover,
+html[data-theme="dark"] body.nq-style .spot-claim-button.nq-button-pill:not(.is-unavailable):not(.how-to-claim-button):focus-visible {
+    background: #ffffff !important;
+}
+
+html[data-theme="dark"] body.nq-style .spot-claim-button.nq-button-pill:not(.is-unavailable):not(.how-to-claim-button) {
+    box-shadow: 0 10px 24px rgba(31, 35, 72, 0.20) !important;
+}
+
+html[data-theme="dark"] body.nq-style .spot-claim-button.nq-button-pill:not(.is-unavailable):not(.how-to-claim-button):hover,
+html[data-theme="dark"] body.nq-style .spot-claim-button.nq-button-pill:not(.is-unavailable):not(.how-to-claim-button):focus-visible {
+    box-shadow: 0 14px 28px rgba(31, 35, 72, 0.24) !important;
+}
+
+/* Disabled coloured controls stay recognisably coloured. Muting saturation and
+   adding a subtle rim communicates "locked" without making the control vanish. */
+html[data-theme="dark"] body.nq-style .nq-button.green:is(:disabled, .disabled, .is-disabled-by-validation, .is-locked, [aria-disabled="true"]),
+html[data-theme="dark"] body.nq-style .nq-button.gold:is(:disabled, .disabled, .is-disabled-by-validation, .is-locked, [aria-disabled="true"]),
+html[data-theme="dark"] body.nq-style .nq-button.light-blue:not(.nh-grey-cancel-button):not(.create-spot-cancel):is(:disabled, .disabled, .is-disabled-by-validation, .is-locked, [aria-disabled="true"]),
+html[data-theme="dark"] body.nq-style .nq-button.red:is(:disabled, .disabled, .is-disabled-by-validation, .is-locked, [aria-disabled="true"]) {
+    filter: saturate(0.58) brightness(0.92) !important;
+    opacity: 0.78 !important;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24) !important;
+}
+
+html[data-theme="dark"] body.nq-style .nq-button.green:is(:disabled, .disabled, .is-disabled-by-validation, .is-locked, [aria-disabled="true"]) {
+    background: var(--nh-success) !important;
+    color: #ffffff !important;
+}
+
+html[data-theme="dark"] body.nq-style .nq-button.gold:is(:disabled, .disabled, .is-disabled-by-validation, .is-locked, [aria-disabled="true"]) {
+    background: #ffc435 !important;
+    color: #1f2348 !important;
+}
+
+html[data-theme="dark"] body.nq-style .nq-button.light-blue:not(.nh-grey-cancel-button):not(.create-spot-cancel):is(:disabled, .disabled, .is-disabled-by-validation, .is-locked, [aria-disabled="true"]) {
+    background: #0582ca !important;
+    color: #ffffff !important;
+}
+
+html[data-theme="dark"] body.nq-style .nq-button.red:is(:disabled, .disabled, .is-disabled-by-validation, .is-locked, [aria-disabled="true"]) {
+    background: var(--nh-danger) !important;
+    color: #ffffff !important;
+}
+
+/* Find Spots filters are coloured controls too. Their inactive state remains
+   visibly inactive, but keeps the same green/gold/blue family as light mode. */
+html[data-theme="dark"] body.nq-style .filter-toggle.is-off {
+    filter: grayscale(0.55) !important;
+    opacity: 0.72 !important;
+    box-shadow: none !important;
+}
+
+html[data-theme="dark"] body.nq-style .filter-toggle.is-off:not(.is-prizedraw):not(.is-test-location) {
+    background: var(--nh-success) !important;
+    color: #ffffff !important;
+}
+
+html[data-theme="dark"] body.nq-style .filter-toggle.is-off.is-prizedraw {
+    background: #ffc435 !important;
+    color: #1f2348 !important;
+}
+
+html[data-theme="dark"] body.nq-style .filter-toggle.is-off.is-test-location {
+    background: #0582ca !important;
+    color: #ffffff !important;
+}

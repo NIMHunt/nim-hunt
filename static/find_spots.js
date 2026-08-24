@@ -14,7 +14,7 @@ import {
     metresToText,
     spotScheduleTooltip,
     unixToText,
-} from './spot_ui.js?v=special-user-badge-v1-20260727';
+} from './spot_ui.js?v=chevron-cache-compat-v2-20260813';
 import { createCaptchaController } from './simple_captcha.js?v=claim-polish-v2-20260704';
 import { formatNimFromLuna } from './nim_format.js';
 import {
@@ -65,6 +65,7 @@ const state = {
     lastLocationRequestAt: 0,
     locationStatusTimerId: null,
     locationRequestStatusDelayTimerId: null,
+    mapRefreshTimerId: null,
 };
 
 const APP_NAME = document.body.dataset.appName || 'NimHunt';
@@ -76,6 +77,7 @@ const MAX_SPOT_RADIUS_METRES = Number.parseFloat(document.body.dataset.maxSpotRa
 const MAP_LIST_SCROLL_DURATION_MS = 420;
 const LOCATION_RESUME_RETRY_COOLDOWN_MS = 10000;
 const LOCATION_REQUEST_STATUS_DELAY_MS = 150;
+const MAP_REFRESH_DEBOUNCE_MS = 120;
 const CREATE_SPOT_URL = document.body.dataset.createSpotUrl || '/create';
 const CLAIM_CAPTCHA_MIN = Number.parseInt(document.body.dataset.claimCaptchaMin || '1', 10);
 const CLAIM_CAPTCHA_MAX = Number.parseInt(document.body.dataset.claimCaptchaMax || '9', 10);
@@ -83,6 +85,7 @@ const CLAIM_CAPTCHA_MAX = Number.parseInt(document.body.dataset.claimCaptchaMax 
 const MAP_COLOURS = {
     standard: '#21bca5',
     prizedraw: '#ffc435',
+    demo: '#8f5bd7',
     muted: '#8c90a8',
     highlight: '#0582ca',
 };
@@ -1432,7 +1435,7 @@ function buildSpotDetail(spot) {
         appendBulletLine(lines, `Must remain on Spot for ${duration}`);
     }
 
-    appendBulletLine(lines, buildSpotLinkControl(spot));
+    if (!spot.demo) appendBulletLine(lines, buildSpotLinkControl(spot));
     appendBulletLine(
         lines,
         'Created by ',
@@ -1444,7 +1447,7 @@ function buildSpotDetail(spot) {
     detail.append(lines);
     const cancelControl = buildOwnerCancelControl(spot);
     if (cancelControl) detail.append(cancelControl);
-    detail.append(buildReportControl(spot));
+    if (!spot.demo) detail.append(buildReportControl(spot));
 
     return detail;
 }
@@ -1541,6 +1544,7 @@ function renderList(spots) {
         const item = document.createElement('li');
         item.className = 'spot-list-item';
         item.dataset.spotId = String(spotId);
+        if (spot.demo) item.classList.add('is-demo-spot');
 
         const summary = document.createElement('div');
         summary.className = 'spot-list-toggle';
@@ -1557,7 +1561,6 @@ function renderList(spots) {
 
         const chevron = document.createElement('span');
         chevron.className = 'spot-list-chevron';
-        chevron.textContent = '⌄';
         chevron.setAttribute('aria-hidden', 'true');
 
         const actions = document.createElement('span');
@@ -1619,6 +1622,7 @@ function renderList(spots) {
 }
 
 function markerColour(spot) {
+    if (spot.demo) return MAP_COLOURS.demo;
     return spot.is_prizedraw ? MAP_COLOURS.prizedraw : MAP_COLOURS.standard;
 }
 
@@ -1642,12 +1646,8 @@ function renderMapSpots(spots) {
     const filters = getFilterParams();
     const radiusCircles = [];
     const dots = [];
-
-    state.spotLayer.clearLayers();
-    state.mapLayersBySpotId.clear();
-    for (const entry of state.listEntriesBySpotId.values()) {
-        entry.item.classList.remove('is-map-highlighted');
-    }
+    const nextSpotLayer = L.layerGroup();
+    const nextMapLayersBySpotId = new Map();
 
     for (const spot of spots) {
         const matchesFilters = spotMatchesFilters(spot, filters);
@@ -1658,79 +1658,95 @@ function renderMapSpots(spots) {
         let radiusCircle = null;
 
         if (matchesFilters) {
-            radiusCircle = L.circle(latLng, {
-                radius: spot.radius,
-                color: colour,
-                opacity: 0.95,
-                fillColor: colour,
-                fillOpacity: 0.22,
-                weight: 2.5,
-                interactive: true,
-                bubblingMouseEvents: false,
-                className: 'spot-radius-circle',
-            });
+  radiusCircle = L.circle(latLng, {
+      radius: spot.radius,
+      color: colour,
+      opacity: 0.95,
+      fillColor: colour,
+      fillOpacity: 0.22,
+      weight: 2.5,
+      interactive: true,
+      bubblingMouseEvents: false,
+      className: 'spot-radius-circle',
+  });
 
-            const tooltip = L.tooltip({
-                className: 'map-spot-title-tooltip',
-                direction: 'top',
-                offset: [0, -16],
-                opacity: 1,
-                interactive: false,
-            })
-                .setLatLng(latLng)
-                .setContent(createMapSpotTooltipContent(spot));
+  const tooltip = L.tooltip({
+      className: 'map-spot-title-tooltip',
+      direction: 'top',
+      offset: [0, -16],
+      opacity: 1,
+      interactive: false,
+  })
+      .setLatLng(latLng)
+      .setContent(createMapSpotTooltipContent(spot));
 
-            showTooltip = () => {
-                if (!spotCentreWithinBounds(spot, state.map.getBounds())) return;
-                if (!state.spotLayer.hasLayer(tooltip)) state.spotLayer.addLayer(tooltip);
-            };
-            hideTooltip = () => {
-                if (state.spotLayer.hasLayer(tooltip)) state.spotLayer.removeLayer(tooltip);
-            };
-            radiusCircle.on('mouseover', showTooltip);
-            radiusCircle.on('mouseout', hideTooltip);
-            radiusCircles.push(radiusCircle);
+  showTooltip = () => {
+      if (!spotCentreWithinBounds(spot, state.map.getBounds())) return;
+      if (!nextSpotLayer.hasLayer(tooltip)) nextSpotLayer.addLayer(tooltip);
+  };
+  hideTooltip = () => {
+      if (nextSpotLayer.hasLayer(tooltip)) nextSpotLayer.removeLayer(tooltip);
+  };
+  radiusCircle.on('mouseover', showTooltip);
+  radiusCircle.on('mouseout', hideTooltip);
+  radiusCircles.push(radiusCircle);
         }
 
         const dot = L.circleMarker(latLng, {
-            radius: MAP_MARKER_RADIUS,
-            color: '#ffffff',
-            fillColor: colour,
-            fillOpacity: matchesFilters ? 1 : 0.68,
-            weight: 2,
-            interactive: matchesFilters,
-            bubblingMouseEvents: false,
-            className: `spot-centre-marker ${matchesFilters ? 'is-interactive' : 'is-muted'}`,
+  radius: MAP_MARKER_RADIUS,
+  color: '#ffffff',
+  fillColor: colour,
+  fillOpacity: matchesFilters ? 1 : 0.68,
+  weight: 2,
+  interactive: matchesFilters,
+  bubblingMouseEvents: false,
+  className: `spot-centre-marker ${matchesFilters ? 'is-interactive' : 'is-muted'}`,
         });
 
-        state.mapLayersBySpotId.set(Number(spot.id), {
-            radiusCircle,
-            dot,
-            colour,
-            matchesFilters,
+        nextMapLayersBySpotId.set(Number(spot.id), {
+  radiusCircle,
+  dot,
+  colour,
+  matchesFilters,
         });
 
         if (matchesFilters) {
-            dot.on('click', () => focusSpotInList(spot.id));
-            dot.on('mouseover', () => {
-                showTooltip?.();
-                setSpotListMapHighlighted(spot.id, true);
-            });
-            dot.on('mouseout', () => {
-                hideTooltip?.();
-                setSpotListMapHighlighted(spot.id, false);
-            });
+  dot.on('click', () => focusSpotInList(spot.id));
+  dot.on('mouseover', () => {
+      showTooltip?.();
+      setSpotListMapHighlighted(spot.id, true);
+  });
+  dot.on('mouseout', () => {
+      hideTooltip?.();
+      setSpotListMapHighlighted(spot.id, false);
+  });
         }
         dots.push(dot);
     }
 
-    // Draw all radii first and all dots second. That keeps the translucent
-    // radius overlays visible without letting them wash over the spot dots.
+    // Build the replacement layer completely before touching the working
+    // map. If creating any marker fails, the previous Spots stay visible.
     for (const radiusCircle of radiusCircles) {
-        radiusCircle.addTo(state.spotLayer);
+        radiusCircle.addTo(nextSpotLayer);
     }
     for (const dot of dots) {
-        dot.addTo(state.spotLayer);
+        dot.addTo(nextSpotLayer);
+    }
+
+    try {
+        nextSpotLayer.addTo(state.map);
+    } catch (err) {
+        nextSpotLayer.remove();
+        throw err;
+    }
+
+    const previousSpotLayer = state.spotLayer;
+    state.spotLayer = nextSpotLayer;
+    state.mapLayersBySpotId = nextMapLayersBySpotId;
+    previousSpotLayer?.remove();
+
+    for (const entry of state.listEntriesBySpotId.values()) {
+        entry.item.classList.remove('is-map-highlighted');
     }
 }
 
@@ -1797,6 +1813,7 @@ async function runLiveRefresh() {
 
 async function refreshVisibleSpots() {
     if (!state.map) return;
+    clearScheduledMapRefresh();
 
     if (state.fetchController) {
         state.fetchController.abort();
@@ -1890,11 +1907,26 @@ function setMapInteractionEnabled(enabled) {
     state.map.dragging?.[method]?.();
     state.map.keyboard?.[method]?.();
     state.map.boxZoom?.[method]?.();
+    state.map.doubleClickZoom?.[method]?.();
 }
 
-async function handleMapMoved() {
+function clearScheduledMapRefresh() {
+    if (!state.mapRefreshTimerId) return;
+    window.clearTimeout(state.mapRefreshTimerId);
+    state.mapRefreshTimerId = null;
+}
+
+function scheduleMapRefresh() {
+    clearScheduledMapRefresh();
+    state.mapRefreshTimerId = window.setTimeout(() => {
+        state.mapRefreshTimerId = null;
+        void refreshVisibleSpots();
+    }, MAP_REFRESH_DEBOUNCE_MS);
+}
+
+function handleMapMoved() {
     if (state.testLocationMode) syncTestLocationFromMapCentre();
-    await refreshVisibleSpots();
+    scheduleMapRefresh();
 }
 
 async function toggleTestLocationMode() {
@@ -1933,6 +1965,7 @@ function setupMap() {
         dragging: !state.hasUserLocation,
         keyboard: !state.hasUserLocation,
         boxZoom: !state.hasUserLocation,
+        doubleClickZoom: !state.hasUserLocation,
     }).setView(start, state.hasUserLocation ? 14 : 11);
 
     L.control.zoom({
@@ -1947,7 +1980,7 @@ function setupMap() {
     state.spotLayer = L.layerGroup().addTo(state.map);
 
     updateUserMarker();
-    state.map.on('moveend zoomend', handleMapMoved);
+    state.map.on('moveend', handleMapMoved);
 }
 
 async function initFindSpots() {
@@ -1965,6 +1998,25 @@ async function initFindSpots() {
     await refreshVisibleSpots();
     scheduleLiveRefresh();
 }
+
+window.addEventListener('nimhunt:demo-notice', (event) => {
+    const notice = event?.detail;
+    if (!notice?.title || !notice?.body) return;
+    showNotice(notice);
+});
+
+window.addEventListener('nimhunt:demo-location', (event) => {
+    const location = event?.detail || {};
+    const lat = Number(location.lat);
+    const long = Number(location.long);
+    if (state.testLocationMode || !Number.isFinite(lat) || !Number.isFinite(long)) return;
+    setRecordedLocation({
+        lat,
+        long,
+        accuracy: location.accuracy,
+        isReal: true,
+    });
+});
 
 els.locationStatus?.addEventListener('click', () => {
     if (els.locationStatus.disabled) return;
@@ -2073,7 +2125,10 @@ window.addEventListener('pageshow', () => {
     if (state.map) void runLiveRefresh();
     maybeRetryLocationOnResume();
 });
-window.addEventListener('beforeunload', stopLiveRefresh);
+window.addEventListener('beforeunload', () => {
+    stopLiveRefresh();
+    clearScheduledMapRefresh();
+});
 
 initFindSpots().catch((err) => {
     console.error(err);

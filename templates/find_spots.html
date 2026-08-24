@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="{{ leaflet_css_url }}">
     <link rel="stylesheet" href="/static/home.css?v={{ asset_version | default('claim-ui-polish-v1-20260704') }}-mobile-location-v2-20260728">
     <link rel="stylesheet" href="/static/x_share.css?v=x-share-v4-20260726">
+    {% include "_theme_head.html" %}
 </head>
 <body
     class="nq-style"
@@ -35,8 +36,6 @@
             <button id="notice-ok" class="nq-button light-blue" data-i18n="common.ok">OK</button>
         </section>
     </div>
-
-
 
     <div id="report-backdrop" class="notice-backdrop" hidden>
         <section class="notice-card nh-confirm-card report-spot-card" role="dialog" aria-modal="true" aria-labelledby="report-title">
@@ -154,7 +153,7 @@
     <script type="module" src="/static/localise_page.js?v={{ asset_version | default('localisation-v1-20260717') }}"></script>
     <script src="{{ leaflet_js_url }}"></script>
     <script src="/static/map_zoom_guard.js?v=success-code-map-zoom-v1-20260721"></script>
-    <script type="module" src="/static/find_spots_bootstrap.js?v=initial-view-v1-20260803"></script>
+    <script type="module" src="/static/find_spots_bootstrap.js?v=anchored-map-v2-20260814-{{ asset_version | default('find-spots-v1-20260701') }}"></script>
     <script type="module" src="/static/claim_code_policy_ui.js?v=success-code-map-zoom-v1-20260721"></script>
     <script type="module" src="/static/x_share.js?v=x-share-v4-20260726"></script>
 </body>

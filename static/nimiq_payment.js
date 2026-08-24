@@ -9,58 +9,71 @@ function providerErrorMessage(value) {
     return String(error.message || error.reason || error.code || 'Nimiq Pay rejected the request.');
 }
 
-function throwProviderError(value) {
+function throwProviderError(value, context = 'Nimiq Pay request failed') {
     const message = providerErrorMessage(value);
-    if (message) throw new Error(message);
+    if (message) throw new Error(`${context}: ${message}`);
     return value;
 }
 
 export function normaliseNimiqTransactionHash(value) {
     if (typeof value !== 'string') {
-        throw new Error('Nimiq Pay did not return a transaction hash.');
+        throw new Error(
+            'Nimiq Pay payment result did not include a transaction hash. '
+            + 'The wallet may have completed the payment, so check Nimiq Pay before trying again.'
+        );
     }
     const hash = value.trim();
     if (!NIMIQ_TRANSACTION_HASH_RE.test(hash)) {
-        throw new Error('Nimiq Pay returned an invalid transaction hash. The deposit was not recorded.');
+        throw new Error(
+            'Nimiq Pay payment result included an invalid transaction hash. '
+            + 'The wallet may have completed the payment, so check Nimiq Pay before trying again.'
+        );
     }
     return hash.toLowerCase();
 }
 
+function blockHeightOrNull(value) {
+    if (providerErrorMessage(value)) return null;
+    const height = Number(value);
+    return Number.isSafeInteger(height) && height >= 0 ? height : null;
+}
+
 function requireBlockHeight(value, label) {
-    const result = throwProviderError(value);
-    const height = Number(result);
-    if (!Number.isSafeInteger(height) || height < 0) {
-        throw new Error(`${label} did not return a valid block height.`);
+    const result = throwProviderError(value, `${label} blockchain-height check failed`);
+    const height = blockHeightOrNull(result);
+    if (height === null) {
+        throw new Error(
+            `${label} blockchain-height check failed: no valid block height was returned. `
+            + 'No transaction was requested.'
+        );
     }
     return height;
 }
 
 function requireAccounts(value) {
-    const result = throwProviderError(value);
+    const result = throwProviderError(value, 'Nimiq Pay funding-account request failed');
     if (!Array.isArray(result) || result.length === 0) {
-        throw new Error('Nimiq Pay did not share a funding account.');
+        throw new Error('Nimiq Pay did not share a funding account. No transaction was requested.');
     }
     const accounts = result.map((account) => typeof account === 'string' ? account.trim() : '');
     if (accounts.some((account) => !account)) {
-        throw new Error('Nimiq Pay returned an invalid funding account.');
+        throw new Error('Nimiq Pay returned an invalid funding account. No transaction was requested.');
     }
     return accounts;
 }
 
 export async function requestNimiqPayment(provider, intent) {
     if (!provider
-        || typeof provider.isConsensusEstablished !== 'function'
         || typeof provider.getBlockNumber !== 'function'
         || typeof provider.listAccounts !== 'function'
         || typeof provider.sendBasicTransactionWithData !== 'function') {
-        throw new Error('The Nimiq Pay provider is unavailable or incomplete.');
+        throw new Error('Nimiq Pay provider setup failed before payment. No transaction was requested.');
     }
 
-    const consensus = throwProviderError(await provider.isConsensusEstablished());
-    if (consensus !== true) {
-        throw new Error('Nimiq Pay has not established blockchain consensus yet. Please try again shortly.');
-    }
-
+    // Nimiq Pay owns transaction readiness and broadcasting. Its exposed
+    // consensus status can remain false even while the embedded client is
+    // following the current chain, so use the wallet/server height comparison
+    // as NimHunt's read-only network sanity check instead of preflight polling.
     const walletHeight = requireBlockHeight(await provider.getBlockNumber(), 'Nimiq Pay');
     const serverHeightValue = intent?.chain_height;
     if (serverHeightValue !== null && serverHeightValue !== undefined) {
@@ -70,8 +83,8 @@ export async function requestNimiqPayment(provider, intent) {
             : DEFAULT_MAX_HEAD_DIFFERENCE;
         if (Math.abs(walletHeight - serverHeight) > maxDifference) {
             throw new Error(
-                'Nimiq Pay and NimHunt appear to be connected to different or badly out-of-sync networks. '
-                + 'No transaction was requested.'
+                'Network check failed: Nimiq Pay and NimHunt appear to be connected to different '
+                + 'or badly out-of-sync networks. No transaction was requested.'
             );
         }
     }
@@ -79,14 +92,14 @@ export async function requestNimiqPayment(provider, intent) {
     const accounts = requireAccounts(await provider.listAccounts());
     const amount = Number(intent?.amount);
     if (!Number.isSafeInteger(amount) || amount <= 0) {
-        throw new Error('NimHunt supplied an invalid deposit amount.');
+        throw new Error('NimHunt supplied an invalid deposit amount. No transaction was requested.');
     }
 
     const result = throwProviderError(await provider.sendBasicTransactionWithData({
         recipient: String(intent?.recipient || '').trim(),
         value: amount,
         data: String(intent?.transaction_description || ''),
-    }));
+    }), 'Nimiq Pay payment request was rejected');
 
     // The documented provider contract returns the hash directly as a string.
     // Never recurse through arbitrary result/data fields: signatures, request IDs

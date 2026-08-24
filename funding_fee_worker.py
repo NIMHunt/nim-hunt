@@ -26,12 +26,12 @@ async def get_spot_ids_ready_for_creation_fee(
     *,
     limit: int = db_access.DEFAULT_LIMIT,
 ) -> list[int]:
-    """Include published Spots so a later failed fee can be retried."""
+    """Include published/completed Spots so a later missing fee can be retried."""
     rows = await db.execute_fetchall(
         f"""
         SELECT s.{schema.SPOT_ID} AS spot_id
         FROM {schema.SPOT_TABLE_NAME} s
-        WHERE s.{schema.SPOT_STATUS} IN (?, ?)
+        WHERE s.{schema.SPOT_STATUS} IN (?, ?, ?)
           AND s.{schema.SPOT_CANCELLATION_STARTED_AT} IS NULL
           AND s.{schema.SPOT_CREATION_FEE} > 0
           AND (
@@ -54,6 +54,7 @@ async def get_spot_ids_ready_for_creation_fee(
         (
             const.SPOT_STATUS_DRAFT,
             const.SPOT_STATUS_PUBLISHED,
+            const.SPOT_STATUS_COMPLETED,
             const.TRANS_TYPE_FILL_SPOT,
             const.TRANS_STATUS_CONFIRMED,
             const.TRANS_TYPE_CREATION_FEE,
@@ -74,7 +75,7 @@ async def create_spot_creation_fee_transaction(
     to_address: str,
     tx_hash: str,
 ) -> int:
-    """Use the original draft check, with a narrow published retry path."""
+    """Use the original draft check, with narrow published/completed retry paths."""
     spot = await db_access.get_spot(db, spot_id=int(spot_id))
     if spot is None:
         raise ValueError(f"spot id={spot_id} does not exist")
@@ -90,8 +91,8 @@ async def create_spot_creation_fee_transaction(
             to_address=to_address,
             tx_hash=tx_hash,
         )
-    if status != const.SPOT_STATUS_PUBLISHED:
-        raise ValueError("creation fees can only be created for draft or published spots")
+    if status not in {const.SPOT_STATUS_PUBLISHED, const.SPOT_STATUS_COMPLETED}:
+        raise ValueError("creation fees can only be created for draft, published or completed spots")
     if spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None:
         raise ValueError("creation fee cannot be created after cancellation has started")
 
@@ -180,8 +181,12 @@ async def submit_spot_creation_fee_transaction(db, *, spot_id: int) -> RowDict:
 
     status_value = spot.get(schema.SPOT_STATUS)
     status = int(status_value if status_value is not None else -1)
-    if status not in {const.SPOT_STATUS_DRAFT, const.SPOT_STATUS_PUBLISHED}:
-        raise ValueError("creation fees can only be submitted for draft or published spots")
+    if status not in {
+        const.SPOT_STATUS_DRAFT,
+        const.SPOT_STATUS_PUBLISHED,
+        const.SPOT_STATUS_COMPLETED,
+    }:
+        raise ValueError("creation fees can only be submitted for draft, published or completed spots")
     if spot.get(schema.SPOT_CANCELLATION_STARTED_AT) is not None:
         return {
             "ok": True,

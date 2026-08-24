@@ -22,43 +22,32 @@
     gap: 0.35rem;
 }
 
-.demo-start-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin-left: 0.15rem;
-    padding: 0.28rem 0.65rem;
-    border-radius: 999px;
+/* Nimiq's nq-button-s owns the button shape, typography, and interaction.
+   This modifier only gives Demo Hunt its established purple semantic colour
+   and keeps the small button sitting naturally inside the sentence. */
+.demo-start-button.nq-button-s {
+    margin: 0 0.18rem;
     background: #8f5bd7;
     color: #ffffff !important;
-    box-shadow: 0 3px 10px rgba(31, 35, 72, 0.18);
-    font-weight: 800;
-    line-height: 1.2;
-    text-decoration: none !important;
     vertical-align: middle;
-    transition: filter 120ms ease, box-shadow 120ms ease, transform 120ms ease;
-}
-
-.demo-start-button:hover,
-.demo-start-button:focus-visible {
-    filter: brightness(0.95);
-    box-shadow: 0 5px 14px rgba(31, 35, 72, 0.24);
+    white-space: nowrap;
     text-decoration: none !important;
 }
 
-.demo-start-button:focus-visible {
+.demo-start-button.nq-button-s:hover,
+.demo-start-button.nq-button-s:focus-visible {
+    color: #ffffff !important;
+    text-decoration: none !important;
+}
+
+.demo-start-button.nq-button-s:focus-visible {
     outline: 3px solid rgba(143, 91, 215, 0.35);
     outline-offset: 2px;
 }
 
-.demo-start-button:active {
-    transform: translateY(1px);
-}
-
-html[data-theme="dark"] body.nq-style .demo-start-button {
+html[data-theme="dark"] body.nq-style .demo-start-button.nq-button-s {
     background: #8f5bd7;
     color: #ffffff !important;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
 }
 
 /* Demo Spots use the same claim-card structure as the other spot kinds, but

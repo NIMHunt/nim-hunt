@@ -96,7 +96,7 @@ function makeRuntime({
     return { runtime, empty, demo, global, create };
 }
 
-test('first-time user with no claims sees only the purple Demo Hunt action', () => {
+test('first-time user with no claims sees only the compact Nimiq Demo Spot action', () => {
     const { runtime, demo, global, create } = makeRuntime();
     const result = syncFindSpotsEmptyChoices(runtime);
 
@@ -106,9 +106,39 @@ test('first-time user with no claims sees only the purple Demo Hunt action', () 
     assert.equal(demo.line.hidden, false);
     assert.equal(global.line.hidden, true);
     assert.equal(create.line.hidden, true);
+    assert.equal(nodeText(demo.line), 'Would you like to Demo Spot?');
+    assert.equal(demo.link.textContent, 'Demo Spot');
+    assert.equal(demo.link.dataset.nimHuntDemoSpot, '1');
+    assert.equal(demo.link.classList.contains('nq-button-s'), true);
     assert.equal(demo.link.classList.contains('demo-start-button'), true);
     assert.equal(global.link.classList.contains('demo-start-button'), false);
     assert.equal(create.link.classList.contains('demo-start-button'), false);
+});
+
+test('Demo Spot copy normalisation is idempotent under repeated observer callbacks', () => {
+    const { runtime, demo } = makeRuntime();
+    let text = demo.link.textContent;
+    let textWrites = 0;
+    Object.defineProperty(demo.link, 'textContent', {
+        configurable: true,
+        get() {
+            return text;
+        },
+        set(value) {
+            textWrites += 1;
+            text = value;
+        },
+    });
+
+    syncFindSpotsEmptyChoices(runtime);
+    assert.equal(textWrites, 1);
+    assert.equal(demo.link.textContent, 'Demo Spot');
+    assert.equal(demo.line.dataset.nimHuntEmptyCopy, 'demo-v2');
+
+    syncFindSpotsEmptyChoices(runtime);
+    syncFindSpotsEmptyChoices(runtime);
+    assert.equal(textWrites, 1);
+    assert.equal(nodeText(demo.line), 'Would you like to Demo Spot?');
 });
 
 test('user with a real claim sees global and Create Spot choices instead of Demo Hunt', () => {
@@ -224,7 +254,8 @@ test('claim-history eligibility check requests only one real claim and fails clo
     assert.match(source, /\/api\/my-claims\?limit=1/);
     assert.match(source, /runtime\.hasExistingClaims = true;\s*}\s*finally/s);
     assert.match(source, /runtime\.lastSessionPayload = requestBodyJson\(options\)/);
-    assert.match(source, /demoLink\.classList\.add\('demo-start-button'\)/);
-    assert.match(css, /\.demo-start-button\s*\{[^}]*background:\s*#8f5bd7;[^}]*color:\s*#ffffff\s*!important;/s);
-    assert.match(css, /html\[data-theme="dark"\] body\.nq-style \.demo-start-button/);
+    assert.match(source, /link\.classList\.add\('nq-button-s'\)/);
+    assert.match(source, /link\.classList\.add\('demo-start-button'\)/);
+    assert.match(css, /\.demo-start-button\.nq-button-s\s*\{[^}]*background:\s*#8f5bd7;[^}]*color:\s*#ffffff\s*!important;/s);
+    assert.match(css, /html\[data-theme="dark"\] body\.nq-style \.demo-start-button\.nq-button-s/);
 });

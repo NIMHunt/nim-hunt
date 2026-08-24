@@ -106,7 +106,7 @@ test('first-time user with no claims sees only the compact Nimiq Demo Spot actio
     assert.equal(demo.line.hidden, false);
     assert.equal(global.line.hidden, true);
     assert.equal(create.line.hidden, true);
-    assert.equal(nodeText(demo.line), 'Would you like to Demo Spot?');
+    assert.equal(nodeText(demo.line), 'Would you like to try a Demo Spot?');
     assert.equal(demo.link.textContent, 'Demo Spot');
     assert.equal(demo.link.dataset.nimHuntDemoSpot, '1');
     assert.equal(demo.link.classList.contains('nq-button-s'), true);
@@ -133,12 +133,12 @@ test('Demo Spot copy normalisation is idempotent under repeated observer callbac
     syncFindSpotsEmptyChoices(runtime);
     assert.equal(textWrites, 1);
     assert.equal(demo.link.textContent, 'Demo Spot');
-    assert.equal(demo.line.dataset.nimHuntEmptyCopy, 'demo-v2');
+    assert.equal(demo.line.dataset.nimHuntEmptyCopy, 'demo-v3');
 
     syncFindSpotsEmptyChoices(runtime);
     syncFindSpotsEmptyChoices(runtime);
     assert.equal(textWrites, 1);
-    assert.equal(nodeText(demo.line), 'Would you like to Demo Spot?');
+    assert.equal(nodeText(demo.line), 'Would you like to try a Demo Spot?');
 });
 
 test('user with a real claim sees global and Create Spot choices instead of Demo Hunt', () => {

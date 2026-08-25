@@ -23,3 +23,4 @@ async function refreshCachedPaymentModule(url) {
 await refreshCachedPaymentModule(NIMIQ_PAYMENT_MODULE_URL);
 await refreshCachedPaymentModule(MY_SPOTS_MODULE_URL);
 await import(MY_SPOTS_MODULE_URL);
+await import('./spot_duplicate.js?v=spot-duplicate-v2-20260824');

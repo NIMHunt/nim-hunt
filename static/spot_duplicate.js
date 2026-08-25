@@ -127,7 +127,7 @@ export function installSpotDuplication({ windowObj = window, documentObj = docum
         const button = documentObj.createElement('button');
         button.type = 'button';
         button.className = (
-            `nq-button light-blue spot-owner-action-button ${DUPLICATE_BUTTON_CLASS}`
+            `nq-button orange spot-owner-action-button ${DUPLICATE_BUTTON_CLASS}`
         );
         button.textContent = 'Duplicate';
         button.setAttribute(

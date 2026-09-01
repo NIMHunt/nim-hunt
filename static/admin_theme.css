@@ -1,0 +1,63 @@
+/* Placement for NimHunt's shared light/dark toggle on administrator pages. */
+.admin-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+}
+
+.admin-header-actions form {
+    margin: 0;
+}
+
+.admin-login-theme-row {
+    display: flex;
+    justify-content: flex-end;
+    margin: -4px -4px 8px 0;
+}
+
+.admin-theme-toggle {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+}
+
+/* Admin controls sit near the top of the page, so open the shared tooltip
+   downward rather than toward the browser chrome. */
+.admin-theme-toggle::after {
+    top: calc(100% + 0.7rem);
+    bottom: auto;
+}
+
+.admin-theme-toggle::before {
+    top: calc(100% + 0.35rem);
+    bottom: auto;
+    border-top-color: transparent;
+    border-bottom-color: rgba(31, 35, 72, 0.97);
+}
+
+html[data-theme="dark"] .admin-theme-toggle::before {
+    border-top-color: transparent;
+    border-bottom-color: #fafafa;
+}
+
+/* The admin stylesheet already supplies dark neutral surfaces. Keep destructive
+   warnings readable against those darker surfaces without changing their
+   semantic red/orange meaning. */
+html[data-theme="dark"] .admin-error,
+html[data-theme="dark"] .admin-danger-zone summary {
+    color: #ff8da0;
+}
+
+html[data-theme="dark"] .admin-danger-zone {
+    border-color: rgba(255, 141, 160, 0.32);
+    background: rgba(210, 42, 68, 0.10);
+}
+
+@media (max-width: 760px) {
+    .admin-header-actions {
+        align-self: flex-end;
+        margin-top: -8px;
+    }
+}

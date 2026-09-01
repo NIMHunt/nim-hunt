@@ -94,12 +94,7 @@
         return applyTheme(normalizedTheme, { persist, documentObj });
     }
 
-    function createToggle(documentObj = document) {
-        if (documentObj.getElementById(TOGGLE_ID)) return documentObj.getElementById(TOGGLE_ID);
-
-        const links = documentObj.querySelectorAll('.home-information-links > a');
-        if (links.length < 4) return null;
-
+    function buildToggle(documentObj) {
         const toggle = documentObj.createElement('button');
         toggle.id = TOGGLE_ID;
         toggle.className = 'theme-toggle';
@@ -109,10 +104,12 @@
         symbol.className = 'theme-toggle-symbol';
         symbol.setAttribute('aria-hidden', 'true');
         toggle.appendChild(symbol);
+        return toggle;
+    }
 
-        // The information footer is About · How To · FAQ · Roadmap. Insert
-        // the theme control exactly in the middle, after the second link.
-        links[1].after(toggle);
+    function bindToggle(toggle, documentObj) {
+        if (toggle.dataset.themeToggleBound === 'true') return toggle;
+        toggle.dataset.themeToggleBound = 'true';
 
         toggle.addEventListener('click', () => {
             const currentTheme = documentObj.documentElement.dataset.theme === DARK_THEME
@@ -126,6 +123,50 @@
 
         updateToggle(documentObj, documentObj.documentElement.dataset.theme || LIGHT_THEME);
         return toggle;
+    }
+
+    function createToggle(documentObj = document) {
+        const existingToggle = documentObj.getElementById(TOGGLE_ID);
+        if (existingToggle) return bindToggle(existingToggle, documentObj);
+
+        const adminHeader = documentObj.querySelector('.admin-header');
+        if (adminHeader) {
+            const toggle = buildToggle(documentObj);
+            toggle.classList.add('admin-theme-toggle');
+
+            const signOutForm = adminHeader.querySelector('form[action="/admin/logout"]');
+            if (signOutForm) {
+                const actions = documentObj.createElement('div');
+                actions.className = 'admin-header-actions';
+                signOutForm.before(actions);
+                actions.append(toggle, signOutForm);
+            } else {
+                adminHeader.appendChild(toggle);
+            }
+            return bindToggle(toggle, documentObj);
+        }
+
+        const loginCard = documentObj.querySelector('.admin-login-card');
+        if (loginCard) {
+            const toggle = buildToggle(documentObj);
+            toggle.classList.add('admin-theme-toggle');
+
+            const row = documentObj.createElement('div');
+            row.className = 'admin-login-theme-row';
+            row.appendChild(toggle);
+            loginCard.prepend(row);
+            return bindToggle(toggle, documentObj);
+        }
+
+        const links = documentObj.querySelectorAll('.home-information-links > a');
+        if (links.length < 4) return null;
+
+        const toggle = buildToggle(documentObj);
+
+        // The information footer is About · How To · FAQ · Roadmap. Insert
+        // the theme control exactly in the middle, after the second link.
+        links[1].after(toggle);
+        return bindToggle(toggle, documentObj);
     }
 
     function installThemeUi(documentObj = document) {

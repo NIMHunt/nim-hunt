@@ -106,12 +106,11 @@ def test_roadmap_data_is_simple_customisable_and_current() -> None:
     assert roadmap == {
         "sections": [
             {
-                "heading": "August",
+                "heading": "September",
                 "items": [
                     "Localisation",
                     "More Desktop Functionality",
                     "More Marketing",
-                    "Admin Panel",
                 ],
             },
         ]

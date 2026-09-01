@@ -4,6 +4,7 @@ import sys
 
 import constants as const
 import funding_monitor
+from admin_moderation import install as install_admin_moderation
 from cancellation_safety import install as install_cancellation_safety
 from claim_auth_abuse_guard import install as install_claim_auth_abuse_guard
 from claim_code_policy import install as install_claim_code_policy
@@ -45,10 +46,17 @@ def _install_feature_routes() -> None:
 
     # Import lazily so main.py can keep its current security-sensitive startup
     # composition untouched. public_html is already loaded by the normal app
-    # startup path, and spot_duplicate deliberately reuses its creator helpers.
+    # startup path, while the feature routers reuse its existing application
+    # surface rather than creating a second FastAPI app instance.
+    from admin_panel import router as admin_router
     from public_html import router as public_router
     from spot_duplicate import router as spot_duplicate_router
 
+    if not any(
+        str(getattr(route, "path", "")).startswith("/admin")
+        for route in public_router.routes
+    ):
+        public_router.include_router(admin_router)
     public_router.include_router(spot_duplicate_router)
     _FEATURE_ROUTES_INSTALLED = True
 
@@ -97,6 +105,10 @@ def install() -> None:
     install_status()
     install_fee_worker()
     install_monitor()
+    # Moderation is the final financial gate. It must see the fully wrapped
+    # payout/reconciliation functions so a banned Spot cannot bypass any of the
+    # existing transaction safety layers.
+    install_admin_moderation()
     _INSTALLED = True
 
 

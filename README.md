@@ -4,7 +4,7 @@
 [![Live site](https://img.shields.io/badge/live-nimhunt.app-21bca5)](https://nimhunt.app)
 [![License: MIT](https://img.shields.io/badge/license-MIT-5c5ce0)](LICENSE)
 
-**[Open NimHunt](https://nimhunt.app)** · **[Open Nimiq Pay](https://nimpay.app)** · [Architecture](#architecture) · [Testing](#testing-and-quality-checks) · [Deployment](#public-deployment)
+**[Open NimHunt](https://nimhunt.app)** · **[Open Nimiq Pay](https://nimpay.app)** · [Admin](ADMIN.md) · [Architecture](#architecture) · [Testing](#testing-and-quality-checks) · [Deployment](#public-deployment)
 
 [![NimHunt map preview](static/images/nimhunt-default-social-card.png)](https://nimhunt.app)
 
@@ -29,6 +29,9 @@ infrastructure.
 - **Durable financial workflows** — outgoing intents are recorded before
   broadcast, ambiguous sends are not blindly retried, and winner sets are stored
   before payouts begin.
+- **Private operator administration** — an unlinked password-protected panel
+  provides reports, lightweight analytics, user moderation and deliberately
+  constrained severe Spot banning.
 - **Production separation** — development, public TestAlbatross and MainAlbatross
   modes have explicit safety boundaries and network-identity checks.
 - **Automated quality gates** — Python and Node tests, linting, syntax checks,
@@ -46,6 +49,7 @@ infrastructure.
 - **Platform fees** — charge configurable creation fees and a separate cancellation fee; cancelling a funded Spot does not refund fees already owed.
 - **Creator tools** — inspect drafts, deposits, publishing state, claim codes and history.
 - **Claim history** — users can review pending, successful and failed claims.
+- **Admin moderation** — review reports, inspect activity, limit or ban users and, when necessary, ban a Spot through a guarded server-side sweep workflow.
 - **On-chain descriptions** — NimHunt-generated transactions include short Spot labels.
 - **Optional X announcements** — automatically announce newly-active Spots through a configured account.
 - **Deployment/network separation** — desktop shortcuts remain available locally,
@@ -77,6 +81,9 @@ NimHunt intentionally uses a small stack:
 - **Static JavaScript and CSS** provide maps, forms and Nimiq Pay interactions.
 - **Leaflet/OpenStreetMap** display Spot locations.
 - **SQLite/aiosqlite** store users, Spots, claims, reports and transaction state.
+- **A private admin layer** in `admin_panel.py`, `admin_auth.py`, `admin_store.py`
+  and `admin_moderation.py` provides operator authentication, moderation, audit
+  state and the final financial guard for banned Spots.
 - **`helpers/nimiq_helper.mjs`** uses the official pinned `@nimiq/core` package
   to derive addresses and sign outgoing transactions, then broadcasts their
   serialized form through the configured Nimiq JSON-RPC endpoint.
@@ -89,6 +96,8 @@ The important chain-facing modules are:
 - `trans_updater.py` — records payment intent, broadcasts outgoing payments and
   verifies transaction finality through Nimiq RPC.
 - `settlement_updater.py` — decides application-level Prizedraw outcomes.
+- `admin_moderation.py` — blocks new payouts for banned Spots and coordinates the
+  durable server-side remainder sweep through the existing transaction machinery.
 - `helpers/nimiq_helper.mjs` — holds the bundled Nimiq key derivation and signing code.
 
 Only `wallet.py` and `trans_updater.py` should initiate or verify chain-facing work.
@@ -230,6 +239,56 @@ NimHunt includes short public transaction data:
 Descriptions are limited to 30 UTF-8 bytes and safely truncated. Because this
 information is written to the blockchain, only the already-public Spot title is
 included—never claim codes, device identifiers or private account information.
+
+## Administrator panel
+
+NimHunt includes an unlinked private administrator area at `/admin`. It is
+separate from Nimiq Pay device identity and from every Nimiq seed or signing
+secret. There is no public navigation link to the route.
+
+The dashboard provides:
+
+- active and total user, Spot and report counts;
+- a 30-day new-user graph and all-time Spot-creation leaderboard;
+- pending report review with moderator notes;
+- ACTIVE, LIMITED and BANNED user moderation; and
+- a persistent moderation audit log.
+
+`LIMITED` users can still claim but cannot create new Spots. `BANNED` users can
+neither create Spots nor make new claims.
+
+Administrator login is enabled by setting a scrypt password hash in:
+
+```text
+NIMHUNT_ADMIN_PASSWORD_HASH
+```
+
+Generate the value locally with:
+
+```bash
+python scripts/hash_admin_password.py
+```
+
+The script requires a password of at least 16 characters. Store the plaintext
+password in a password manager and place only the generated `scrypt$...` value in
+the deployment secret manager. If the variable is absent or malformed, admin
+login fails closed. Admin sessions expire after 30 minutes, use protected cookies
+and CSRF tokens, and are invalidated by a restart or redeployment.
+
+Severe **Spot Ban** is deliberately different from creator cancellation. It
+immediately makes the Spot unavailable, blocks new payout creation, waits for any
+already-pending transaction to reach a final state, calculates the confirmed
+unspent remainder server-side and sweeps that full remainder only to the fixed
+operator address in `NIMHUNT_SPOT_FEE_ADDRESS`. The browser cannot choose the
+amount or recipient. The action additionally requires password reauthentication
+and the exact confirmation text `BAN <spot-id>`.
+
+The panel creates `ADMIN_AUDIT_LOG` and `ADMIN_SPOT_BAN` additively when needed;
+no separate database migration or schema-version change is required. Pending ban
+sweeps are revisited by the normal transaction reconciler after restarts.
+
+See **[`ADMIN.md`](ADMIN.md)** for the full operator setup, moderation semantics,
+Spot-ban safety behaviour and production checklist.
 
 ## Automatic X posting
 
@@ -568,7 +627,9 @@ The development default is a real TestAlbatross address belonging to a public
 test wallet, so it is not operator-controlled. Both public modes explicitly
 reject that address and require a different checksum-valid address controlled by
 the operator. The destination is also snapshotted onto each new Spot for its
-creation fee.
+creation fee. The administrator panel's severe Spot-ban workflow also uses the
+current configured `NIMHUNT_SPOT_FEE_ADDRESS` as its fixed server-side sweep
+destination, so verify this value before performing a production Spot ban.
 
 ## Environment variable reference
 
@@ -579,10 +640,11 @@ creation fee.
 | `NIMHUNT_DEPLOYMENT_MODE` | `development` | preferred: `development`, `public-testnet`, or `production` |
 | `NIMHUNT_PRODUCTION` | unset | legacy compatibility flag; `1` maps to `production` only |
 | `NIMHUNT_DB_PATH` | `records.db` | SQLite file; public modes require a separate absolute persistent path |
+| `NIMHUNT_ADMIN_PASSWORD_HASH` | none | scrypt administrator-password hash; absent or malformed disables admin login |
 | `NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM` | `200` | one-time creation fee for Standard Spots, in NIM |
 | `NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM` | `200` | one-time creation fee for Prizedraws, in NIM |
 | `NIMHUNT_SPOT_CANCELLATION_FEE_NIM` | `500` | cancellation fee amount in NIM; snapshotted when cancellation starts |
-| `NIMHUNT_SPOT_FEE_ADDRESS` | public TestAlbatross development address | shared creation/cancellation fee recipient; public modes require an operator address |
+| `NIMHUNT_SPOT_FEE_ADDRESS` | public TestAlbatross development address | shared creation/cancellation fee recipient and severe Spot-ban sweep destination; public modes require an operator address |
 
 ### Nimiq network and RPC
 
@@ -679,6 +741,11 @@ export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
 export NIMHUNT_SPOT_FEE_ADDRESS='NQ... operator testnet fee address ...'
 ```
 
+To enable administrator login on the public test deployment, also generate a hash
+with `python scripts/hash_admin_password.py` and set
+`NIMHUNT_ADMIN_PASSWORD_HASH` through the deployment secret manager. Omitting it
+leaves admin login disabled.
+
 This mode is public software using test NIM: it has production-style safety and
 background-service strictness, but it deliberately remains on TestAlbatross. On
 every public startup NimHunt also calls the configured RPC's `getNetworkId` method
@@ -706,6 +773,11 @@ export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
 export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
 export NIMHUNT_SPOT_FEE_ADDRESS='NQ... operator mainnet fee address ...'
 ```
+
+To enable the production administrator panel, set a generated
+`NIMHUNT_ADMIN_PASSWORD_HASH` in the production secret manager. Keep the plaintext
+password in a password manager and never reuse the Nimiq mnemonic as an admin
+credential.
 
 Start outside Railway with one worker:
 
@@ -736,6 +808,10 @@ in an additive `app_metadata` table. Once bound, it refuses another network or m
   adds immutable Spot columns and uses schema version `3`. There is deliberately no
   `ALTER` migration: existing development databases must be recreated, and public
   deployments must start with a fresh volume/database for this release.
+
+The administrator panel's `ADMIN_AUDIT_LOG` and `ADMIN_SPOT_BAN` tables are
+separate additive operator tables created on demand and do not change that core
+schema version.
 
 ### Testnet-to-mainnet cutover
 
@@ -779,6 +855,7 @@ Use these service variables. Values marked `SECRET` must be supplied by the oper
 ```text
 NIMHUNT_DEPLOYMENT_MODE=public-testnet
 NIMHUNT_DB_PATH=/data/records.db
+NIMHUNT_ADMIN_PASSWORD_HASH=SECRET_SCRYPT_ADMIN_HASH
 NIMHUNT_NIMIQ_NETWORK=TestAlbatross
 NIMHUNT_NIMIQ_NETWORK_ID=5
 NIMHUNT_NIMIQ_RPC_URL=https://rpc.testnet.nimiqwatch.com/
@@ -793,8 +870,10 @@ NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
 NIMHUNT_SPOT_FEE_ADDRESS=OPERATOR_TESTNET_NQ_ADDRESS
 ```
 
-Do not set `NIMHUNT_PRODUCTION` or `NIMHUNT_DEV_MASTER_SEED`.
-`NIMHUNT_NIMIQ_EXTERNAL_SIGNER` is unnecessary when using the bundled helper.
+`NIMHUNT_ADMIN_PASSWORD_HASH` is required only if administrator login is wanted;
+omit it to keep the panel authentication disabled. Do not set `NIMHUNT_PRODUCTION`
+or `NIMHUNT_DEV_MASTER_SEED`. `NIMHUNT_NIMIQ_EXTERNAL_SIGNER` is unnecessary when
+using the bundled helper.
 
 #### Railway variables: MainAlbatross production
 
@@ -804,6 +883,7 @@ and a separately generated mainnet signer:
 ```text
 NIMHUNT_DEPLOYMENT_MODE=production
 NIMHUNT_DB_PATH=/data/records.db
+NIMHUNT_ADMIN_PASSWORD_HASH=SECRET_SCRYPT_ADMIN_HASH
 NIMHUNT_NIMIQ_NETWORK=MainAlbatross
 NIMHUNT_NIMIQ_NETWORK_ID=24
 NIMHUNT_NIMIQ_RPC_URL=https://rpc.nimiqwatch.com
@@ -817,6 +897,10 @@ NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
 NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
 NIMHUNT_SPOT_FEE_ADDRESS=OPERATOR_MAINNET_NQ_ADDRESS
 ```
+
+Generate the admin hash with `python scripts/hash_admin_password.py`; do not place
+the plaintext admin password in Railway. If administrator login is intentionally
+disabled, omit `NIMHUNT_ADMIN_PASSWORD_HASH`.
 
 Generate a public Railway domain and keep the service continuously running. Do not
 enable serverless sleeping: settlement and transaction reconciliation must continue
@@ -843,11 +927,12 @@ Before public launch:
 3. Back up the mnemonic separately and verify recovery.
 4. Configure the correct deployment mode, network, ID, RPC and Hub.
 5. Configure a real fee address, both creation fees and the cancellation fee.
-6. Use a fresh schema-version-3 network-specific persistent database.
-7. Serve over HTTPS with one application replica and worker.
-8. Confirm strict startup and `/healthz`.
-9. Complete a deliberately small-value end-to-end cycle.
-10. Restart without replacing the database and verify state remains correct.
+6. If admin access is wanted, generate and store `NIMHUNT_ADMIN_PASSWORD_HASH` and keep the plaintext password separately in a password manager.
+7. Use a fresh schema-version-3 network-specific persistent database.
+8. Serve over HTTPS with one application replica and worker.
+9. Confirm strict startup and `/healthz`, then confirm `/admin` behaves as intended for the configured admin state.
+10. Complete a deliberately small-value end-to-end cycle without using a funded Spot ban as a routine smoke test.
+11. Restart without replacing the database and verify state remains correct; expect existing admin sessions to be invalidated.
 
 NimHunt has substantial automated coverage but no independent security audit.
 Use modest values appropriate to the competition.
@@ -940,6 +1025,11 @@ npm audit --omit=dev --prefix helpers
 |---|---|
 | `main.py` | FastAPI app, deployment validation, health endpoint and service lifecycle |
 | `public_html.py` | page routes and JSON API endpoints |
+| `admin_panel.py` | private administrator routes and dashboard actions |
+| `admin_auth.py` | administrator password verification, sessions, CSRF and login rate limiting |
+| `admin_store.py` | admin audit, moderation and Spot-ban persistence |
+| `admin_moderation.py` | runtime moderation enforcement and severe Spot-ban financial guard |
+| `ADMIN.md` | administrator setup, moderation and Spot-ban operations |
 | `constants.py` | product and deployment configuration |
 | `database.py` | schema creation and database connections |
 | `db_access.py` | validated database reads and writes |
@@ -959,12 +1049,14 @@ npm audit --omit=dev --prefix helpers
 ## Operational limitations
 
 - User identity is device-based; there is no password recovery account system.
+- Administrator access is one operator credential rather than a multi-staff account system, and all admin sessions are deliberately invalidated when the service restarts.
 - A wrong-wallet Spot top-up requires manual recovery.
 - SQLite and the in-process background loops assume one modest deployment rather
   than a horizontally scaled fleet of workers.
 - Public RPC and map-tile services have no NimHunt-specific availability guarantee.
 - Location evidence reduces casual misuse but cannot make phone GPS impossible to spoof.
 - On-chain transfers are irreversible; use TestAlbatross and small values first.
+- Severe Spot banning can move the confirmed unspent Spot balance to the configured operator fee address and should not be used as a routine test action.
 - An ambiguous creation-fee send remains pending instead of being retried automatically;
   this may require manual reconciliation, but prevents charging the same Spot twice.
 
@@ -983,5 +1075,5 @@ The repository ignores local, generated and private files including:
 - caches and logs
 - installed `node_modules/`
 
-Never commit mnemonics, passphrases, encrypted seed secrets or production database
-copies.
+Never commit mnemonics, passphrases, administrator passwords or password hashes,
+encrypted seed secrets, session cookies, or production database copies.

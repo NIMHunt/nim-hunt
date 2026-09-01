@@ -22,6 +22,34 @@
     gap: 0.35rem;
 }
 
+/* Nimiq's nq-button-s owns the button shape, typography, and interaction.
+   This modifier only gives Demo Hunt its established purple semantic colour
+   and keeps the small button sitting naturally inside the sentence. */
+.demo-start-button.nq-button-s {
+    margin: 0 0.18rem;
+    background: #8f5bd7;
+    color: #ffffff !important;
+    vertical-align: middle;
+    white-space: nowrap;
+    text-decoration: none !important;
+}
+
+.demo-start-button.nq-button-s:hover,
+.demo-start-button.nq-button-s:focus-visible {
+    color: #ffffff !important;
+    text-decoration: none !important;
+}
+
+.demo-start-button.nq-button-s:focus-visible {
+    outline: 3px solid rgba(143, 91, 215, 0.35);
+    outline-offset: 2px;
+}
+
+html[data-theme="dark"] body.nq-style .demo-start-button.nq-button-s {
+    background: #8f5bd7;
+    color: #ffffff !important;
+}
+
 /* Demo Spots use the same claim-card structure as the other spot kinds, but
    carry their own purple semantic treatment while they are claimable. */
 .spot-list-item.is-claim-demo {

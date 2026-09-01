@@ -14,34 +14,12 @@ def _configure_public_testnet(monkeypatch) -> None:
     monkeypatch.setattr(main.const, "NIMIQ_RPC_TIMEOUT_SECONDS", 12)
 
 
-def test_public_rpc_network_uses_get_network_id_when_available(monkeypatch) -> None:
-    _configure_public_testnet(monkeypatch)
-
-    async def verify_configured_rpc_network(**kwargs):
-        assert kwargs["expected_network_id"] == 5
-        return 5
-
-    def unexpected_fallback(**_kwargs):
-        raise AssertionError("getLatestBlock fallback should not run")
-
-    monkeypatch.setattr(
-        main.trans_updater,
-        "verify_configured_rpc_network",
-        verify_configured_rpc_network,
-    )
-    monkeypatch.setattr(main.trans_updater, "_json_rpc_post_sync", unexpected_fallback)
-
-    asyncio.run(main.verify_public_rpc_network())
-
-
-def test_public_rpc_network_falls_back_to_latest_block(monkeypatch) -> None:
+def test_public_rpc_network_verifies_directly_from_latest_block(monkeypatch) -> None:
     _configure_public_testnet(monkeypatch)
     calls = {}
 
-    async def unsupported_get_network_id(**_kwargs):
-        raise RuntimeError(
-            "Nimiq RPC error: {'code': -32601, 'message': 'Method not found'}"
-        )
+    async def unexpected_get_network_id(**_kwargs):
+        raise AssertionError("startup should not probe getNetworkId")
 
     def latest_block(**kwargs):
         calls.update(kwargs)
@@ -50,7 +28,7 @@ def test_public_rpc_network_falls_back_to_latest_block(monkeypatch) -> None:
     monkeypatch.setattr(
         main.trans_updater,
         "verify_configured_rpc_network",
-        unsupported_get_network_id,
+        unexpected_get_network_id,
     )
     monkeypatch.setattr(main.trans_updater, "_json_rpc_post_sync", latest_block)
 
@@ -64,51 +42,68 @@ def test_public_rpc_network_falls_back_to_latest_block(monkeypatch) -> None:
     }
 
 
-def test_public_rpc_network_falls_back_on_http_400(monkeypatch) -> None:
+def test_public_rpc_network_accepts_canonical_network_alias(monkeypatch) -> None:
     _configure_public_testnet(monkeypatch)
-    calls = {}
 
-    async def unsupported_get_network_id(**_kwargs):
-        raise urllib.error.HTTPError(
-            "https://rpc.testnet.example/",
-            400,
-            "Bad Request",
-            {},
-            None,
-        )
+    def latest_block(**_kwargs):
+        return {"network": "testnet"}
 
-    def latest_block(**kwargs):
-        calls.update(kwargs)
-        return {"network": "TestAlbatross"}
-
-    monkeypatch.setattr(
-        main.trans_updater,
-        "verify_configured_rpc_network",
-        unsupported_get_network_id,
-    )
     monkeypatch.setattr(main.trans_updater, "_json_rpc_post_sync", latest_block)
 
     asyncio.run(main.verify_public_rpc_network())
 
-    assert calls["method"] == "getLatestBlock"
-    assert calls["params"] == [False]
 
-
-def test_public_rpc_network_fallback_rejects_wrong_network(monkeypatch) -> None:
+def test_public_rpc_network_rejects_wrong_network(monkeypatch) -> None:
     _configure_public_testnet(monkeypatch)
-
-    async def unsupported_get_network_id(**_kwargs):
-        raise RuntimeError("Nimiq RPC error: -32601 Method not found")
 
     def latest_block(**_kwargs):
         return {"network": "MainAlbatross"}
 
-    monkeypatch.setattr(
-        main.trans_updater,
-        "verify_configured_rpc_network",
-        unsupported_get_network_id,
-    )
     monkeypatch.setattr(main.trans_updater, "_json_rpc_post_sync", latest_block)
 
-    with pytest.raises(RuntimeError, match="RPC network validation failed"):
+    with pytest.raises(
+        RuntimeError,
+        match="Configured Nimiq RPC serves MainAlbatross, expected TestAlbatross",
+    ):
         asyncio.run(main.verify_public_rpc_network())
+
+
+def test_public_rpc_network_reports_http_status(monkeypatch) -> None:
+    _configure_public_testnet(monkeypatch)
+
+    def latest_block(**_kwargs):
+        raise urllib.error.HTTPError(
+            "https://rpc.testnet.example/",
+            503,
+            "Service Unavailable",
+            {},
+            None,
+        )
+
+    monkeypatch.setattr(main.trans_updater, "_json_rpc_post_sync", latest_block)
+
+    with pytest.raises(RuntimeError, match="getLatestBlock returned HTTP 503"):
+        asyncio.run(main.verify_public_rpc_network())
+
+
+def test_public_rpc_network_reports_transport_failure_type(monkeypatch) -> None:
+    _configure_public_testnet(monkeypatch)
+
+    def latest_block(**_kwargs):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(main.trans_updater, "_json_rpc_post_sync", latest_block)
+
+    with pytest.raises(RuntimeError, match=r"getLatestBlock failed \(TimeoutError\)"):
+        asyncio.run(main.verify_public_rpc_network())
+
+
+def test_private_development_skips_rpc_network_verification(monkeypatch) -> None:
+    monkeypatch.setattr(main.const, "PUBLIC_DEPLOYMENT", False)
+
+    def unexpected_latest_block(**_kwargs):
+        raise AssertionError("private development should not verify public RPC network")
+
+    monkeypatch.setattr(main.trans_updater, "_json_rpc_post_sync", unexpected_latest_block)
+
+    asyncio.run(main.verify_public_rpc_network())

@@ -39,6 +39,12 @@ function linkByText(runtime, text) {
     ) || null;
 }
 
+function demoSpotLink(runtime) {
+    return emptyLinks(runtime).find(
+        (link) => link?.dataset?.nimHuntDemoSpot === '1',
+    ) || linkByText(runtime, 'try a Demo Spot?') || linkByText(runtime, 'Demo Spot');
+}
+
 function createSpotPath(runtime) {
     const origin = runtime?.window?.location?.origin || 'http://localhost';
     const configured = runtime?.document?.body?.dataset?.createSpotUrl || '/create';
@@ -77,6 +83,30 @@ function replaceLine(runtime, line, link, beforeText, afterText, copyKey) {
     return true;
 }
 
+function normaliseDemoLine(runtime, line, link) {
+    if (!line || !link) return;
+
+    // Mark the link before changing its visible copy. Once its text becomes
+    // "Demo Spot", observer-driven synchronisation can still find it without
+    // depending on the old wording.
+    if (link.dataset && link.dataset.nimHuntDemoSpot !== '1') {
+        link.dataset.nimHuntDemoSpot = '1';
+    }
+    if (String(link.textContent || '') !== 'Demo Spot') {
+        link.textContent = 'Demo Spot';
+    }
+    if (link.classList && !link.classList.contains('nq-button-s')) {
+        link.classList.add('nq-button-s');
+    }
+    if (link.classList && !link.classList.contains('demo-start-button')) {
+        link.classList.add('demo-start-button');
+    }
+
+    // Keep the verb, article, and punctuation outside the button itself:
+    // "Would you like to try a [Demo Spot]?"
+    replaceLine(runtime, line, link, 'Would you like to try a ', '?', 'demo-v3');
+}
+
 function normaliseGlobalLine(runtime, line, link) {
     if (!line || !link) return;
     replaceLine(runtime, line, link, 'Would you like to ', '', 'global-v1');
@@ -108,13 +138,14 @@ function demoCandidate(runtime, demoLine) {
 }
 
 export function syncFindSpotsEmptyChoices(runtime) {
-    const demoLink = linkByText(runtime, 'try a Demo Spot?');
+    const demoLink = demoSpotLink(runtime);
     const globalLink = linkByText(runtime, 'check out global spots?');
     const createLink = createSpotLink(runtime);
     const demoLine = lineForLink(demoLink);
     const globalLine = lineForLink(globalLink);
     const createLine = lineForLink(createLink);
 
+    normaliseDemoLine(runtime, demoLine, demoLink);
     normaliseCreateLine(runtime, createLine, createLink);
 
     const canConsiderDemo = demoCandidate(runtime, demoLine);

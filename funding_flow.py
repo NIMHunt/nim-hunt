@@ -1,11 +1,10 @@
-"""Install NimHunt's runtime safety hooks and private admin routes."""
+"""Install NimHunt's transaction, funding, claim-safety and feature runtime hooks."""
 
 import sys
 
 import constants as const
 import funding_monitor
 from admin_moderation import install as install_admin_moderation
-from admin_panel import router as admin_router
 from cancellation_safety import install as install_cancellation_safety
 from claim_auth_abuse_guard import install as install_claim_auth_abuse_guard
 from claim_code_policy import install as install_claim_code_policy
@@ -26,16 +25,10 @@ from claim_wallet_hourly_limit import install as install_claim_wallet_hourly_lim
 from funding_fee_worker import install as install_fee_worker
 from funding_monitor import install as install_monitor
 from funding_status import install as install_status
-from public_html import router as public_router
 from refund_address_safety import install as install_refund_address_safety
 
-# main.py already includes public_router. Attach the private admin router here
-# before the FastAPI app copies that route collection, avoiding a second public
-# navigation surface or a separate app instance.
-if not any(str(getattr(route, "path", "")).startswith("/admin") for route in public_router.routes):
-    public_router.include_router(admin_router)
-
 _INSTALLED = False
+_FEATURE_ROUTES_INSTALLED = False
 
 
 async def funding_flow_diagnostics():
@@ -43,6 +36,29 @@ async def funding_flow_diagnostics():
     diagnostics = await funding_monitor.funding_flow_diagnostics()
     diagnostics["claim_payout_diagnostics"] = await claim_payout_diagnostics()
     return diagnostics
+
+
+def _install_feature_routes() -> None:
+    """Attach optional feature routers to the existing public router once."""
+    global _FEATURE_ROUTES_INSTALLED
+    if _FEATURE_ROUTES_INSTALLED:
+        return
+
+    # Import lazily so main.py can keep its current security-sensitive startup
+    # composition untouched. public_html is already loaded by the normal app
+    # startup path, while the feature routers reuse its existing application
+    # surface rather than creating a second FastAPI app instance.
+    from admin_panel import router as admin_router
+    from public_html import router as public_router
+    from spot_duplicate import router as spot_duplicate_router
+
+    if not any(
+        str(getattr(route, "path", "")).startswith("/admin")
+        for route in public_router.routes
+    ):
+        public_router.include_router(admin_router)
+    public_router.include_router(spot_duplicate_router)
+    _FEATURE_ROUTES_INSTALLED = True
 
 
 def install() -> None:
@@ -56,6 +72,11 @@ def install() -> None:
     # payout identity. Keep TEST_USER_ID as a spoof.py fixture owner, but never
     # make it the implicit current user of the running application.
     const.DEFAULT_TO_TEST_USER = False
+
+    # Feature routes are part of the application surface rather than the worker
+    # monkey-patch chain, so install them even under pytest. This keeps route
+    # tests representative while preserving the existing worker-test isolation.
+    _install_feature_routes()
 
     if _INSTALLED or "pytest" in sys.modules:
         return

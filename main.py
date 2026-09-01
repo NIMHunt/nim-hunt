@@ -269,7 +269,7 @@ async def _verify_rpc_network_from_latest_block(
     rpc_url: str,
     timeout_seconds: int,
 ) -> None:
-    """Verify network via getLatestBlock when getNetworkId is unavailable."""
+    """Verify network from the standard getLatestBlock network field."""
     result = await asyncio.to_thread(
         trans_updater._json_rpc_post_sync,
         rpc_url=rpc_url,
@@ -294,45 +294,42 @@ async def verify_public_rpc_network() -> None:
         return
 
     expected_network = str(getattr(const, "NIMIQ_NETWORK", "")).strip()
-    expected_network_id = int(getattr(const, "NIMIQ_NETWORK_ID", 0))
     rpc_url = str(getattr(const, "NIMIQ_RPC_URL", "")).strip()
     timeout_seconds = int(getattr(const, "NIMIQ_RPC_TIMEOUT_SECONDS", 12))
 
-    try:
-        await trans_updater.verify_configured_rpc_network(
-            expected_network_id=expected_network_id,
-            rpc_url=rpc_url,
-            timeout_seconds=timeout_seconds,
-        )
-        return
-    except urllib.error.HTTPError as exc:
-        # Nimiqwatch returns unsupported JSON-RPC methods as HTTP 400 instead
-        # of a successful HTTP response containing a JSON-RPC error object.
-        # A 400 therefore gets the same safe latest-block fallback; any other
-        # HTTP error remains fatal.
-        if exc.code != 400:
-            raise RuntimeError(
-                "Public deployment RPC network validation failed; check the selected "
-                "Nimiq network and RPC endpoint"
-            ) from None
-    except RuntimeError as exc:
-        message = str(exc).lower()
-        if "method not found" not in message and "-32601" not in message:
-            raise RuntimeError(
-                "Public deployment RPC network validation failed; check the selected "
-                "Nimiq network and RPC endpoint"
-            ) from None
-
+    # getLatestBlock is a standard Nimiq RPC method and includes the network in
+    # its response. Use that single supported request as the startup proof instead
+    # of first probing getNetworkId, which public RPC providers may not expose.
     try:
         await _verify_rpc_network_from_latest_block(
             expected_network=expected_network,
             rpc_url=rpc_url,
             timeout_seconds=timeout_seconds,
         )
-    except Exception:
+    except urllib.error.HTTPError as exc:
         raise RuntimeError(
-            "Public deployment RPC network validation failed; check the selected "
-            "Nimiq network and RPC endpoint"
+            "Public deployment RPC network validation failed: "
+            f"getLatestBlock returned HTTP {exc.code}"
+        ) from None
+    except RuntimeError as exc:
+        detail = str(exc)
+        if detail.startswith(
+            (
+                "Nimiq RPC getLatestBlock did not expose a network",
+                "Configured Nimiq RPC serves ",
+            )
+        ):
+            raise RuntimeError(
+                f"Public deployment RPC network validation failed: {detail}"
+            ) from None
+        raise RuntimeError(
+            "Public deployment RPC network validation failed: "
+            "getLatestBlock returned an RPC error"
+        ) from None
+    except Exception as exc:
+        raise RuntimeError(
+            "Public deployment RPC network validation failed: "
+            f"getLatestBlock failed ({type(exc).__name__})"
         ) from None
 
 

@@ -1,5 +1,6 @@
 import { init, requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
 import { requestResilientLocation } from './location_utils.js?v=mobile-location-v1-20260728';
+import { collectFreshClaimLocation } from './claim_location.js?v=claim-authorization-v2';
 import { getReportReasonOptions, makeFindSpotsText, makeSpotDetailText } from './interface_text.js?v=mobile-location-v1-20260728';
 import {
     appendBulletLine,
@@ -1176,12 +1177,42 @@ function hideClaimModal() {
 }
 
 async function postClaimForSpot(spot, { claimCode = null, captchaPayload = {} } = {}) {
+    let location = {
+        lat: state.userLat, long: state.userLong, accuracy: state.userAccuracy,
+    };
+    let claimAuthorization = null;
+    // Public claims obtain three uncached readings at the money-moving
+    // boundary. Desktop development fixtures have no wallet and retain their
+    // existing test path.
+    if (state.walletAvailable && state.deviceIdHash) {
+        location = await collectFreshClaimLocation();
+        const challenge = await fetchJsonWithBody('/api/security/claim-challenge', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                device_id_hash: state.deviceIdHash, spot_id: Number(spot.id), action: 'claim',
+                lat: location.lat, long: location.long, accuracy: location.accuracy,
+            }),
+        });
+        const nimiq = await init();
+        const signed = await nimiq.sign(challenge.message);
+        if (!signed?.publicKey || !signed?.signature) throw new Error('Nimiq Pay did not return a valid claim approval.');
+        claimAuthorization = {
+            challenge_id: challenge.challenge_id,
+            public_key: signed.publicKey,
+            signature: signed.signature,
+        };
+    }
     return fetchJsonWithBody(`/api/spot/${spot.id}/claim`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             ...claimAuthPayload(),
+            location_available: true,
+            lat: location.lat,
+            long: location.long,
+            accuracy: location.accuracy,
             claim_code: claimCode,
+            claim_authorization: claimAuthorization,
             ...captchaPayload,
         }),
     });

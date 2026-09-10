@@ -180,6 +180,7 @@ class ClaimSpotRequest(HomeSessionRequest):
     captcha_a: int | None = Field(default=None, ge=1, le=20)
     captcha_b: int | None = Field(default=None, ge=1, le=20)
     captcha_answer: int | None = Field(default=None, ge=0, le=40)
+    claim_authorization: dict[str, str] | None = None
 
 
 # ---------------------------------------------------------------------------

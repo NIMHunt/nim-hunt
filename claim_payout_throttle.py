@@ -46,6 +46,12 @@ WINDOW_SECONDS = _env_int("NIMHUNT_CLAIM_PAYOUT_THROTTLE_WINDOW_SECONDS", 10 * 6
 MAX_PAYOUT_COUNT = _env_int("NIMHUNT_CLAIM_PAYOUT_THROTTLE_MAX_COUNT", 8)
 MAX_PAYOUT_NIM = _env_int("NIMHUNT_CLAIM_PAYOUT_THROTTLE_MAX_NIM", 10_000)
 MAX_PAYOUT_LUNA = MAX_PAYOUT_NIM * int(getattr(const, "LUNA_PER_NIM", 100_000))
+DAILY_WINDOW_SECONDS = _env_int("NIMHUNT_CLAIM_PAYOUT_DAILY_WINDOW_SECONDS", 24 * 60 * 60)
+DAILY_MAX_PAYOUT_COUNT = _env_int("NIMHUNT_CLAIM_PAYOUT_DAILY_MAX_COUNT", 100)
+DAILY_MAX_PAYOUT_NIM = _env_int("NIMHUNT_CLAIM_PAYOUT_DAILY_MAX_NIM", 50_000)
+DAILY_MAX_PAYOUT_LUNA = DAILY_MAX_PAYOUT_NIM * int(getattr(const, "LUNA_PER_NIM", 100_000))
+MAX_AUTOMATIC_PAYOUT_NIM = _env_int("NIMHUNT_CLAIM_MAX_AUTOMATIC_PAYOUT_NIM", 10_000)
+MAX_AUTOMATIC_PAYOUT_LUNA = MAX_AUTOMATIC_PAYOUT_NIM * int(getattr(const, "LUNA_PER_NIM", 100_000))
 
 RESERVATION_KEY = f"{claim_security.METADATA_PREFIX}payout_throttle_reservations"
 
@@ -89,7 +95,7 @@ async def payout_window_state(db, *, now: int | None = None) -> RowDict:
     }
 
 
-def throttle_decision(*, state: RowDict, amount: int) -> RowDict:
+def throttle_decision(*, state: RowDict, amount: int, daily_state: RowDict | None = None) -> RowDict:
     """Return whether one more payout may be submitted automatically."""
     amount = max(0, int(amount))
     payout_count = max(0, int(state.get("payout_count") or 0))
@@ -102,6 +108,33 @@ def throttle_decision(*, state: RowDict, amount: int) -> RowDict:
         else now + WINDOW_SECONDS
     )
 
+    if amount > MAX_AUTOMATIC_PAYOUT_LUNA:
+        return {
+            "allow": False,
+            "reason": "individual_automatic_payout_limit",
+            # This requires an operator decision or configuration change rather
+            # than a tight retry loop. The CLAIM remains valid and pending.
+            "manual_review": True,
+            "window_payout_count": payout_count,
+            "window_payout_amount": payout_amount,
+        }
+
+    if daily_state is not None:
+        daily_count = max(0, int(daily_state.get("payout_count") or 0))
+        daily_amount = max(0, int(daily_state.get("payout_amount") or 0))
+        daily_oldest = daily_state.get("oldest_created_at")
+        daily_retry = (
+            int(daily_oldest) + DAILY_WINDOW_SECONDS + 1
+            if daily_oldest is not None
+            else int(daily_state.get("now") or now) + DAILY_WINDOW_SECONDS
+        )
+        if daily_count >= DAILY_MAX_PAYOUT_COUNT:
+            return {"allow": False, "reason": "daily_payout_count_limit", "retry_at": daily_retry,
+                    "daily_payout_count": daily_count, "daily_payout_amount": daily_amount}
+        if daily_amount + amount > DAILY_MAX_PAYOUT_LUNA:
+            return {"allow": False, "reason": "daily_payout_amount_limit", "retry_at": daily_retry,
+                    "daily_payout_count": daily_count, "daily_payout_amount": daily_amount}
+
     if payout_count >= MAX_PAYOUT_COUNT:
         return {
             "allow": False,
@@ -111,10 +144,7 @@ def throttle_decision(*, state: RowDict, amount: int) -> RowDict:
             "window_payout_amount": payout_amount,
         }
 
-    # Never deadlock a single legitimate large prize merely because it exceeds
-    # the rolling aggregate cap on its own. Once one payout exists in the
-    # window, however, the aggregate amount cap applies normally.
-    if payout_count > 0 and payout_amount + amount > MAX_PAYOUT_LUNA:
+    if payout_amount + amount > MAX_PAYOUT_LUNA:
         return {
             "allow": False,
             "reason": "global_payout_amount_limit",
@@ -135,7 +165,7 @@ def _clean_reservations(raw: Any, *, now: int) -> list[RowDict]:
     """Return well-formed, still-active payout reservations."""
     if not isinstance(raw, list):
         return []
-    cutoff = int(now) - WINDOW_SECONDS
+    cutoff = int(now) - max(WINDOW_SECONDS, DAILY_WINDOW_SECONDS)
     clean: list[RowDict] = []
     for item in raw:
         if not isinstance(item, dict):
@@ -159,7 +189,7 @@ def _clean_reservations(raw: Any, *, now: int) -> list[RowDict]:
 
 
 async def _recent_payout_rows(db, *, now: int) -> list[RowDict]:
-    cutoff = int(now) - WINDOW_SECONDS
+    cutoff = int(now) - max(WINDOW_SECONDS, DAILY_WINDOW_SECONDS)
     rows = await db.execute_fetchall(
         f"""
         SELECT
@@ -266,11 +296,18 @@ async def reserve_payout_slot(
         raw = await claim_security._metadata_get(db, RESERVATION_KEY)
         reservations = _clean_reservations(raw, now=now)
         payout_rows = await _recent_payout_rows(db, now=now)
+        short_cutoff = int(now) - WINDOW_SECONDS
+        short_rows = [row for row in payout_rows if int(row.get("created_at") or 0) > short_cutoff]
+        short_reservations = [item for item in reservations if int(item["reserved_at"]) > short_cutoff]
         state, transaction_claim_ids = _combined_window_state(
             now=now,
-            payout_rows=payout_rows,
-            reservations=reservations,
+            payout_rows=short_rows,
+            reservations=short_reservations,
         )
+        daily_state, daily_transaction_claim_ids = _combined_window_state(
+            now=now, payout_rows=payout_rows, reservations=reservations
+        )
+        transaction_claim_ids.update(daily_transaction_claim_ids)
 
         if claim_id in transaction_claim_ids:
             decision: RowDict = {
@@ -298,7 +335,18 @@ async def reserve_payout_slot(
                     "reservation_reused": True,
                 }
             else:
-                decision = throttle_decision(state=state, amount=amount)
+                decision = throttle_decision(state=state, daily_state=daily_state, amount=amount)
+                if decision.get("manual_review"):
+                    record = await claim_security.get_claim_security_record(
+                        db, claim_id=claim_id
+                    )
+                    if isinstance(record, dict):
+                        record["manual_review"] = True
+                        record["manual_review_reason"] = str(decision["reason"])
+                        record["manual_review_marked_at"] = int(now)
+                        await claim_security._metadata_set(
+                            db, claim_security._claim_record_key(claim_id), record
+                        )
                 if bool(decision.get("allow")):
                     reservations.append(
                         {
@@ -388,6 +436,10 @@ __all__ = [
     "MAX_PAYOUT_COUNT",
     "MAX_PAYOUT_LUNA",
     "MAX_PAYOUT_NIM",
+    "DAILY_WINDOW_SECONDS",
+    "DAILY_MAX_PAYOUT_COUNT",
+    "DAILY_MAX_PAYOUT_LUNA",
+    "MAX_AUTOMATIC_PAYOUT_LUNA",
     "RESERVATION_KEY",
     "WINDOW_SECONDS",
     "install",

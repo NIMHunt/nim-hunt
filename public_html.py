@@ -35,6 +35,7 @@ import database as schema
 import db_access
 import settlement_updater
 import trans_updater
+import user_registration_security
 from database import get_db
 from transaction_descriptions import build_transaction_description
 
@@ -46,6 +47,13 @@ _CREATION_FEE_PROCESSING_MESSAGE = (
     f"Your deposit has been confirmed. Please wait a moment while "
     f"{const.APP_NAME} processes it."
 )
+
+
+def _registration_source_network_hash(request: Request) -> str:
+    """Reuse the claim-security proxy policy without storing a raw address."""
+    import claim_security
+
+    return claim_security._ip_hash(claim_security._request_ip(request))
 
 
 def _creation_fee_processing_response(meta: dict[str, Any]) -> JSONResponse:
@@ -1165,7 +1173,20 @@ async def _identify_private_page_user(
     if raw_device_id_hash is None:  # Defensive: _valid_device_id_hash() was checked above.
         raise RuntimeError("validated device identifier is unexpectedly missing")
     device_id_hash = raw_device_id_hash.strip().lower()
-    user_id, created = await db_access.get_or_create_user(db, device_id_hash=device_id_hash)
+    try:
+        user_id, created = await user_registration_security.get_or_create_public_user(
+            db, device_id_hash=device_id_hash
+        )
+    except user_registration_security.RegistrationRateLimited as exc:
+        return None, {
+            "ok": False,
+            "code": "registration_rate_limited",
+            "message": str(exc),
+            "retry_at": exc.retry_at,
+            "user": None,
+            "test_user": False,
+            "language": language,
+        }, status.HTTP_429_TOO_MANY_REQUESTS
     await db_access.touch_user_last_seen(db, user_id=user_id)
     user = await db_access.get_user_by_id(db, user_id=user_id)
 
@@ -3190,7 +3211,7 @@ async def home_metrics() -> JSONResponse:
 
 
 @router.post("/api/home/session")
-async def home_session(payload: HomeSessionRequest) -> JSONResponse:
+async def home_session(payload: HomeSessionRequest, request: Request) -> JSONResponse:
     """Create or retrieve the USER for this webview session.
 
     The JavaScript side asks Nimiq Pay for the device identifier. This route
@@ -3273,10 +3294,20 @@ async def home_session(payload: HomeSessionRequest) -> JSONResponse:
 
     async with get_db() as db:
         async with db_access.transaction(db):
-            user_id, created = await db_access.get_or_create_user(
-                db,
-                device_id_hash=device_id_hash,
-            )
+            try:
+                user_id, created = await user_registration_security.get_or_create_public_user(
+                    db,
+                    device_id_hash=device_id_hash,
+                    source_network_hash=_registration_source_network_hash(request),
+                )
+            except user_registration_security.RegistrationRateLimited as exc:
+                return JSONResponse(
+                    {"ok": False, "code": "registration_rate_limited", "message": str(exc),
+                     "retry_at": exc.retry_at, "user": None, "created": False,
+                     "test_user": False, "language": language,
+                     "location_available": bool(payload.location_available)},
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
             await db_access.touch_user_last_seen(db, user_id=user_id)
             user = await db_access.get_user_by_id(db, user_id=user_id)
 

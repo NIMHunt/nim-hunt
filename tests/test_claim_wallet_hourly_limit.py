@@ -99,6 +99,42 @@ class ClaimWalletHourlyLimitTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision["reason"], "wallet_rate_limit")
         self.assertGreater(decision["retry_at"], now)
 
+    async def test_shared_unverified_payout_address_is_only_a_risk_signal(self):
+        payout = const.DEV_PLATFORM_FEE_ADDRESS
+        async with schema.get_db() as db:
+            owner_id = await self._user(db, "shared-owner")
+            spot_id = await self._spot(db, owner_id=owner_id)
+            with mock.patch.object(claim_security, "WALLET_HOURLY_CLAIM_LIMIT", 3):
+                for index in range(3):
+                    user_id = await self._user(db, f"shared-{index}")
+                    await db_access.create_claim(db, spot_id=spot_id, user_id=user_id,
+                        lat=51.5, long=-0.1, accuracy=1.0, payout_address=payout)
+                now = await db_access.get_unixepoch(db)
+                decision = await wallet_limit._durable_payout_address_rate_decision(
+                    db, payout_address=payout, now=now
+                )
+        self.assertTrue(decision["blocked"])
+        self.assertEqual(decision["reason"], "payout_address_rate_limit")
+
+        delegate = mock.AsyncMock(return_value={"id": 99})
+        with (
+            mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
+            mock.patch.object(wallet_limit.claim_security, "_metadata_get",
+                              new=mock.AsyncMock(return_value={"wallet_address": payout})),
+            mock.patch.object(wallet_limit, "_durable_wallet_rate_decision",
+                              new=mock.AsyncMock(return_value={"blocked": False})),
+            mock.patch.object(wallet_limit, "_durable_payout_address_rate_decision",
+                              new=mock.AsyncMock(return_value=decision)),
+            mock.patch.object(wallet_limit.db_access, "get_unixepoch",
+                              new=mock.AsyncMock(return_value=now)),
+            mock.patch.object(wallet_limit, "_CLAIM_ATTEMPT_DELEGATE", delegate),
+        ):
+            result = await wallet_limit._create_claim_attempt_with_durable_wallet_limit(
+                object(), spot_id=spot_id, user_id=999, lat=51.5, long=-0.1,
+                payout_address=payout,
+            )
+        self.assertEqual(result, {"id": 99})
+
     async def test_transactional_recheck_blocks_last_slot_race(self):
         delegate = mock.AsyncMock(return_value={"id": 99})
         binding = {"wallet_address": const.DEV_PLATFORM_FEE_ADDRESS}

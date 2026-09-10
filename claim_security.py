@@ -48,6 +48,7 @@ import constants as const
 import database as schema
 import db_access
 import trans_updater
+import user_registration_security
 import wallet
 from database import get_db
 
@@ -521,7 +522,15 @@ async def security_verify(payload: SecurityVerifyRequest, request: Request) -> J
                     status_code=status.HTTP_409_CONFLICT,
                 )
 
-            user_id, _created = await db_access.get_or_create_user(db, device_id_hash=device_id)
+            try:
+                user_id, _created = await user_registration_security.get_or_create_public_user(
+                    db, device_id_hash=device_id, source_network_hash=ip_fingerprint
+                )
+            except user_registration_security.RegistrationRateLimited as exc:
+                return JSONResponse(
+                    {"ok": False, "code": "registration_rate_limited", "message": str(exc), "retry_at": exc.retry_at},
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
             binding_key = _user_binding_key(user_id)
             existing_binding = await _metadata_get(db, binding_key)
             if isinstance(existing_binding, dict):

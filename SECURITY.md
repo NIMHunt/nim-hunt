@@ -41,6 +41,17 @@ secret. Generate its stored `scrypt$...` value with
 `scripts/hash_admin_password.py` and keep the plaintext password in a password
 manager. See `ADMIN.md` for administrator-panel deployment and moderation safety.
 
+Nimiq Pay device hashes are browser-supplied bearer identifiers, not proof of a
+human visitor. Public deployments therefore limit creation of fresh device
+accounts from one source network to 5 per hour and 12 per day by default;
+existing accounts remain usable. Operators can tune these ceilings with
+`NIMHUNT_USER_REGISTRATION_HOURLY_LIMIT_PER_IP` and
+`NIMHUNT_USER_REGISTRATION_DAILY_LIMIT_PER_IP`. Railway's validated
+`X-Real-IP` value is used at the public edge, so the application origin must not
+be exposed in a way that lets clients bypass or forge Railway's proxy headers.
+These controls protect account storage and visitor metrics. They do not replace
+the signed-wallet session required at money-moving claim boundaries.
+
 NimHunt has substantial automated regression coverage but has not received an
 independent security audit. The repository documents its intended modest-use
 scope and operational limitations in `README.md`.

@@ -35,6 +35,7 @@ import database as schema
 import db_access
 import settlement_updater
 import trans_updater
+import user_registration_security
 from database import get_db
 from transaction_descriptions import build_transaction_description
 
@@ -1117,6 +1118,7 @@ def _serialise_owner_spot(
 async def _identify_private_page_user(
     db,
     payload: HomeSessionRequest,
+    request: Request = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any], int]:
     """Identify the current USER for private/self pages such as My Spots.
 
@@ -1165,7 +1167,22 @@ async def _identify_private_page_user(
     if raw_device_id_hash is None:  # Defensive: _valid_device_id_hash() was checked above.
         raise RuntimeError("validated device identifier is unexpectedly missing")
     device_id_hash = raw_device_id_hash.strip().lower()
-    user_id, created = await db_access.get_or_create_user(db, device_id_hash=device_id_hash)
+    try:
+        user_id, created = await user_registration_security.get_or_create_user(
+            db,
+            request=request,
+            device_id_hash=device_id_hash,
+        )
+    except user_registration_security.RegistrationRateLimited as exc:
+        return None, {
+            "ok": False,
+            "code": "registration_rate_limited",
+            "message": "Too many new device accounts were created from this network. Please try again later.",
+            "user": None,
+            "test_user": False,
+            "language": language,
+            "retry_at": exc.retry_at,
+        }, status.HTTP_429_TOO_MANY_REQUESTS
     await db_access.touch_user_last_seen(db, user_id=user_id)
     user = await db_access.get_user_by_id(db, user_id=user_id)
 
@@ -1658,10 +1675,10 @@ def _serialise_owner_claim_code(row: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.post("/api/spot/{spot_id}/claim-codes")
-async def spot_claim_codes_api(spot_id: int, payload: HomeSessionRequest) -> JSONResponse:
+async def spot_claim_codes_api(spot_id: int, payload: HomeSessionRequest, request: Request = None) -> JSONResponse:
     """Return generated claim codes to the SPOT creator only."""
     async with get_db() as db:
-        user, meta, status_code = await _identify_private_page_user(db, payload)
+        user, meta, status_code = await _identify_private_page_user(db, payload, request=request)
         if user is None:
             return JSONResponse(meta, status_code=status_code)
 
@@ -1742,14 +1759,14 @@ def _claim_kind_for_spot(spot: dict[str, Any], *, allowed: bool) -> str:
 
 
 @router.post("/api/spots/claim-status")
-async def spots_claim_status_api(payload: ClaimStatusRequest) -> JSONResponse:
+async def spots_claim_status_api(payload: ClaimStatusRequest, request: Request = None) -> JSONResponse:
     """Return current-user claim state for visible Find Spots entries."""
     ids = [int(v) for v in payload.spot_ids[:500] if int(v) > 0]
     if not ids:
         return JSONResponse({"ok": True, "statuses": {}})
 
     async with get_db() as db:
-        user, meta, http_status = await _identify_private_page_user(db, payload)
+        user, meta, http_status = await _identify_private_page_user(db, payload, request=request)
         if user is None:
             return JSONResponse({**meta, "statuses": {}}, status_code=http_status)
 
@@ -1843,7 +1860,7 @@ def _queue_claim_settlement(
 
 
 @router.post("/api/spot/{spot_id}/claim")
-async def claim_spot_api(spot_id: int, payload: ClaimSpotRequest, background_tasks: BackgroundTasks) -> JSONResponse:
+async def claim_spot_api(spot_id: int, payload: ClaimSpotRequest, background_tasks: BackgroundTasks, request: Request = None) -> JSONResponse:
     """Start a CLAIM or Prizedraw entry for the current user."""
     async with get_db() as db:
         # Claim eligibility and capacity must be evaluated against the same
@@ -1851,7 +1868,7 @@ async def claim_spot_api(spot_id: int, payload: ClaimSpotRequest, background_tas
         # lock here prevents simultaneous final-capacity claims from both
         # reading an outdated snapshot and turning into a SQLite lock error.
         async with db_access.transaction(db, immediate=True):
-            user, meta, http_status = await _identify_private_page_user(db, payload)
+            user, meta, http_status = await _identify_private_page_user(db, payload, request=request)
             if user is None:
                 return JSONResponse(meta, status_code=http_status)
 
@@ -1933,11 +1950,11 @@ async def claim_spot_api(spot_id: int, payload: ClaimSpotRequest, background_tas
 
 
 @router.post("/api/claim/{claim_id}/detail")
-async def claim_detail_api(claim_id: int, payload: HomeSessionRequest, background_tasks: BackgroundTasks) -> JSONResponse:
+async def claim_detail_api(claim_id: int, payload: HomeSessionRequest, background_tasks: BackgroundTasks, request: Request = None) -> JSONResponse:
     """Return one CLAIM to its recipient or the SPOT creator."""
     async with get_db() as db:
         async with db_access.transaction(db):
-            user, meta, http_status = await _identify_private_page_user(db, payload)
+            user, meta, http_status = await _identify_private_page_user(db, payload, request=request)
             if user is None:
                 return JSONResponse(meta, status_code=http_status)
 
@@ -1975,7 +1992,7 @@ async def claim_detail_api(claim_id: int, payload: HomeSessionRequest, backgroun
 
 
 @router.post("/api/claim/{claim_id}/location")
-async def claim_location_heartbeat_api(claim_id: int, payload: HomeSessionRequest, background_tasks: BackgroundTasks) -> JSONResponse:
+async def claim_location_heartbeat_api(claim_id: int, payload: HomeSessionRequest, background_tasks: BackgroundTasks, request: Request = None) -> JSONResponse:
     """Record one fresh location ping for a pending duration-based claim."""
     if payload.lat is None or payload.long is None:
         return JSONResponse(
@@ -1985,7 +2002,7 @@ async def claim_location_heartbeat_api(claim_id: int, payload: HomeSessionReques
 
     async with get_db() as db:
         async with db_access.transaction(db):
-            user, meta, http_status = await _identify_private_page_user(db, payload)
+            user, meta, http_status = await _identify_private_page_user(db, payload, request=request)
             if user is None:
                 return JSONResponse(meta, status_code=http_status)
 
@@ -2034,10 +2051,10 @@ async def claim_location_heartbeat_api(claim_id: int, payload: HomeSessionReques
 
 
 @router.post("/api/spot/{spot_id}/report-status")
-async def report_spot_status_api(spot_id: int, payload: HomeSessionRequest) -> JSONResponse:
+async def report_spot_status_api(spot_id: int, payload: HomeSessionRequest, request: Request = None) -> JSONResponse:
     """Return whether the current user may report this SPOT."""
     async with get_db() as db:
-        user, meta, status_code = await _identify_private_page_user(db, payload)
+        user, meta, status_code = await _identify_private_page_user(db, payload, request=request)
         if user is None:
             return JSONResponse(meta, status_code=status_code)
 
@@ -2079,7 +2096,7 @@ async def report_spot_status_api(spot_id: int, payload: HomeSessionRequest) -> J
 
 
 @router.post("/api/spot/{spot_id}/report")
-async def report_spot_api(spot_id: int, payload: ReportSpotRequest) -> JSONResponse:
+async def report_spot_api(spot_id: int, payload: ReportSpotRequest, request: Request = None) -> JSONResponse:
     """Create one pending REPORT for a public SPOT."""
     if int(payload.captcha_answer) != int(payload.captcha_a) + int(payload.captcha_b):
         return JSONResponse(
@@ -2092,7 +2109,7 @@ async def report_spot_api(spot_id: int, payload: ReportSpotRequest) -> JSONRespo
         )
 
     async with get_db() as db:
-        user, meta, status_code = await _identify_private_page_user(db, payload)
+        user, meta, status_code = await _identify_private_page_user(db, payload, request=request)
         if user is None:
             return JSONResponse(meta, status_code=status_code)
 
@@ -2284,8 +2301,8 @@ def _map_config_payload() -> dict[str, Any]:
 # API routes used by Create Spot
 # ---------------------------------------------------------------------------
 
-async def _creator_api_user_or_response(db, payload: HomeSessionRequest) -> tuple[dict[str, Any] | None, dict[str, Any], int]:
-    user, meta, http_status = await _identify_private_page_user(db, payload)
+async def _creator_api_user_or_response(db, payload: HomeSessionRequest, request: Request) -> tuple[dict[str, Any] | None, dict[str, Any], int]:
+    user, meta, http_status = await _identify_private_page_user(db, payload, request=request)
     if user is None:
         return None, meta, http_status
 
@@ -2398,14 +2415,14 @@ async def reverse_location_label(
 
 
 @router.post("/api/create-spot/{spot_id}/detail")
-async def create_spot_form_detail_api(spot_id: int, payload: HomeSessionRequest) -> JSONResponse:
+async def create_spot_form_detail_api(spot_id: int, payload: HomeSessionRequest, request: Request = None) -> JSONResponse:
     """Return one creator-owned SPOT for the full Create Spot form.
 
     If the current device is not the creator, the frontend redirects home.
     """
     async with get_db() as db:
         async with db_access.transaction(db):
-            user, meta, http_status = await _creator_api_user_or_response(db, payload)
+            user, meta, http_status = await _creator_api_user_or_response(db, payload, request=request)
 
         if user is None:
             return JSONResponse(meta, status_code=http_status)
@@ -2450,7 +2467,7 @@ async def create_spot_form_detail_api(spot_id: int, payload: HomeSessionRequest)
 
 
 @router.post("/api/create-spot/draft")
-async def create_draft_spot_api(payload: CreateDraftSpotRequest) -> JSONResponse:
+async def create_draft_spot_api(payload: CreateDraftSpotRequest, request: Request = None) -> JSONResponse:
     """Create the first-step DRAFT SPOT from title + current creator."""
     if int(payload.captcha_answer) != int(payload.captcha_a) + int(payload.captcha_b):
         return JSONResponse(
@@ -2464,7 +2481,7 @@ async def create_draft_spot_api(payload: CreateDraftSpotRequest) -> JSONResponse
 
     async with get_db() as db:
         async with db_access.transaction(db):
-            user, meta, http_status = await _creator_api_user_or_response(db, payload)
+            user, meta, http_status = await _creator_api_user_or_response(db, payload, request=request)
             if user is None:
                 return JSONResponse(meta, status_code=http_status)
 
@@ -2515,7 +2532,7 @@ async def create_draft_spot_api(payload: CreateDraftSpotRequest) -> JSONResponse
 
 
 @router.patch("/api/create-spot/{spot_id}")
-async def update_draft_spot_api(spot_id: int, payload: UpdateDraftSpotRequest) -> JSONResponse:
+async def update_draft_spot_api(spot_id: int, payload: UpdateDraftSpotRequest, request: Request = None) -> JSONResponse:
     """Update the full Create Spot form, but only while the SPOT is DRAFT."""
     field_names = _payload_field_names(payload)
     update_field_names = {
@@ -2543,7 +2560,7 @@ async def update_draft_spot_api(spot_id: int, payload: UpdateDraftSpotRequest) -
     async with get_db() as db:
         try:
             async with db_access.transaction(db):
-                user, meta, http_status = await _creator_api_user_or_response(db, payload)
+                user, meta, http_status = await _creator_api_user_or_response(db, payload, request=request)
                 if user is None:
                     return JSONResponse(meta, status_code=http_status)
 
@@ -2608,7 +2625,7 @@ async def update_draft_spot_api(spot_id: int, payload: UpdateDraftSpotRequest) -
 
 
 @router.delete("/api/create-spot/{spot_id}")
-async def delete_draft_spot_api(spot_id: int, payload: HomeSessionRequest) -> JSONResponse:
+async def delete_draft_spot_api(spot_id: int, payload: HomeSessionRequest, request: Request = None) -> JSONResponse:
     """Delete a creator-owned DRAFT SPOT and return to My Spots.
 
     Only drafts may be deleted. Published/completed/cancelled/banned spots keep
@@ -2616,7 +2633,7 @@ async def delete_draft_spot_api(spot_id: int, payload: HomeSessionRequest) -> JS
     """
     async with get_db() as db:
         async with db_access.transaction(db):
-            user, meta, http_status = await _creator_api_user_or_response(db, payload)
+            user, meta, http_status = await _creator_api_user_or_response(db, payload, request=request)
             if user is None:
                 return JSONResponse(meta, status_code=http_status)
 
@@ -2666,13 +2683,14 @@ async def delete_draft_spot_api(spot_id: int, payload: HomeSessionRequest) -> JS
 @router.post("/api/my-claims")
 async def my_claims_api(
     payload: HomeSessionRequest,
+    request: Request = None,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> JSONResponse:
     """Return claims made by the current USER, newest first."""
     async with get_db() as db:
         async with db_access.transaction(db):
-            user, meta, http_status = await _identify_private_page_user(db, payload)
+            user, meta, http_status = await _identify_private_page_user(db, payload, request=request)
             if user is None:
                 return JSONResponse(meta, status_code=http_status)
 
@@ -2735,13 +2753,14 @@ async def my_claims_api(
 @router.post("/api/my-spots")
 async def my_spots_api(
     payload: HomeSessionRequest,
+    request: Request = None,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> JSONResponse:
     """Return all SPOTs created by the current USER, past and present."""
     async with get_db() as db:
         async with db_access.transaction(db):
-            user, meta, http_status = await _identify_private_page_user(db, payload)
+            user, meta, http_status = await _identify_private_page_user(db, payload, request=request)
 
         if user is None:
             return JSONResponse(meta, status_code=http_status)
@@ -2828,11 +2847,11 @@ async def my_spots_api(
 
 
 @router.post("/api/my-spots/{spot_id}/deposit-intent")
-async def my_spots_deposit_intent_api(spot_id: int, payload: HomeSessionRequest) -> JSONResponse:
+async def my_spots_deposit_intent_api(spot_id: int, payload: HomeSessionRequest, request: Request = None) -> JSONResponse:
     """Return the current draft deposit request for one creator-owned SPOT."""
     async with get_db() as db:
         async with db_access.transaction(db):
-            user, meta, http_status = await _identify_private_page_user(db, payload)
+            user, meta, http_status = await _identify_private_page_user(db, payload, request=request)
 
         if user is None:
             return JSONResponse(meta, status_code=http_status)
@@ -2919,11 +2938,11 @@ async def my_spots_deposit_intent_api(spot_id: int, payload: HomeSessionRequest)
 
 
 @router.post("/api/my-spots/{spot_id}/deposit-submitted")
-async def my_spots_deposit_submitted_api(spot_id: int, payload: DepositSubmittedRequest) -> JSONResponse:
+async def my_spots_deposit_submitted_api(spot_id: int, payload: DepositSubmittedRequest, request: Request = None) -> JSONResponse:
     """Record a pending SPOT deposit after Nimiq Pay returns a transaction hash."""
     async with get_db() as db:
         async with db_access.transaction(db):
-            user, meta, http_status = await _identify_private_page_user(db, payload)
+            user, meta, http_status = await _identify_private_page_user(db, payload, request=request)
             if user is None:
                 return JSONResponse(meta, status_code=http_status)
 
@@ -3001,7 +3020,7 @@ async def my_spots_deposit_submitted_api(spot_id: int, payload: DepositSubmitted
 
 
 @router.post("/api/my-spots/{spot_id}/publish")
-async def my_spots_publish_api(spot_id: int, payload: HomeSessionRequest) -> JSONResponse:
+async def my_spots_publish_api(spot_id: int, payload: HomeSessionRequest, request: Request = None) -> JSONResponse:
     """Publish one complete, fully funded draft SPOT.
 
     Public text is checked only at this final boundary. Draft editing remains
@@ -3020,7 +3039,7 @@ async def my_spots_publish_api(spot_id: int, payload: HomeSessionRequest) -> JSO
         # write reservation prevents either workflow from committing based on a
         # stale eligibility decision.
         async with db_access.transaction(db, immediate=True):
-            user, meta, http_status = await _identify_private_page_user(db, payload)
+            user, meta, http_status = await _identify_private_page_user(db, payload, request=request)
             if user is None:
                 return JSONResponse(meta, status_code=http_status)
 
@@ -3125,11 +3144,11 @@ async def my_spots_publish_api(spot_id: int, payload: HomeSessionRequest) -> JSO
 
 
 @router.post("/api/my-spots/{spot_id}/cancel")
-async def my_spots_cancel_api(spot_id: int, payload: HomeSessionRequest) -> JSONResponse:
+async def my_spots_cancel_api(spot_id: int, payload: HomeSessionRequest, request: Request = None) -> JSONResponse:
     """Cancel one funded draft or published standard Spot safely."""
     async with get_db() as db:
         async with db_access.transaction(db):
-            user, meta, http_status = await _identify_private_page_user(db, payload)
+            user, meta, http_status = await _identify_private_page_user(db, payload, request=request)
             if user is None:
                 return JSONResponse(meta, status_code=http_status)
 
@@ -3190,7 +3209,7 @@ async def home_metrics() -> JSONResponse:
 
 
 @router.post("/api/home/session")
-async def home_session(payload: HomeSessionRequest) -> JSONResponse:
+async def home_session(payload: HomeSessionRequest, request: Request = None) -> JSONResponse:
     """Create or retrieve the USER for this webview session.
 
     The JavaScript side asks Nimiq Pay for the device identifier. This route
@@ -3271,17 +3290,34 @@ async def home_session(payload: HomeSessionRequest) -> JSONResponse:
         )
     device_id_hash = raw_device_id_hash.strip().lower()
 
-    async with get_db() as db:
-        async with db_access.transaction(db):
-            user_id, created = await db_access.get_or_create_user(
-                db,
-                device_id_hash=device_id_hash,
-            )
-            await db_access.touch_user_last_seen(db, user_id=user_id)
-            user = await db_access.get_user_by_id(db, user_id=user_id)
+    try:
+        async with get_db() as db:
+            async with db_access.transaction(db):
+                user_id, created = await user_registration_security.get_or_create_user(
+                    db,
+                    request=request,
+                    device_id_hash=device_id_hash,
+                )
+                await db_access.touch_user_last_seen(db, user_id=user_id)
+                user = await db_access.get_user_by_id(db, user_id=user_id)
 
-        if user is not None:
-            await _notify_user_cache(db, user_id=int(user_id))
+            if user is not None:
+                await _notify_user_cache(db, user_id=int(user_id))
+    except user_registration_security.RegistrationRateLimited as exc:
+        return JSONResponse(
+            {
+                "ok": False,
+                "code": "registration_rate_limited",
+                "message": "Too many new device accounts were created from this network. Please try again later.",
+                "user": None,
+                "created": False,
+                "test_user": False,
+                "language": language,
+                "location_available": bool(payload.location_available),
+                "retry_at": exc.retry_at,
+            },
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
 
     if user is None:
         raise HTTPException(

@@ -54,12 +54,12 @@ is only a registration-abuse signal: shared Wi-Fi, carrier NATs and VPN exits do
 not establish that several claims belong to one person.
 
 Nimiq signatures prove control of a key, not a unique human. Claim limits bind
-durably to that verified wallet. The Nimiq Pay payout address may legitimately
-differ from the signing address and is not ownership-proven, so a shared payout
-address is used for correlation but cannot by itself reject a claim. A burst of
-first-claim wallet/device pairs against one to four Spots is manual-reviewed
-only when those claims also converge on a payout address; an ordinary crowd of
-new users at one Spot is not held merely for novelty, location, or shared IP.
+durably to that verified wallet. For new claims, NimHunt pays the canonical
+Nimiq address derived from the public key that authenticated the claimant; the
+same address is stored as the claim's immutable payout snapshot. Legacy claims
+whose signer and stored payout differ are held for manual review rather than
+rewritten or paid automatically. Fresh-wallet Sybil attacks remain possible,
+so coordinated-burst and financial-containment controls remain necessary.
 
 Automatic claim payouts have atomic short-window count/amount limits, rolling
 24-hour count/amount limits, and an absolute per-payout ceiling. Aggregate

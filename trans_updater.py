@@ -2675,11 +2675,10 @@ async def submit_claim_reward_transaction(
     if spot is None:
         raise ValueError(f"spot for claim id={claim_id} does not exist")
 
-    clean_to_address = str(
-        to_address
-        or claim.get(getattr(schema, "CLAIM_PAYOUT_ADDRESS", "payout_address"))
-        or ""
+    claim_payout_address = str(
+        claim.get(getattr(schema, "CLAIM_PAYOUT_ADDRESS", "payout_address")) or ""
     ).strip()
+    clean_to_address = claim_payout_address
 
     if not clean_to_address and getattr(const, "ALLOW_DEV_WALLET_SENDS", False):
         template = getattr(
@@ -2696,7 +2695,17 @@ async def submit_claim_reward_transaction(
     if not clean_to_address:
         raise ValueError("claim has no payout_address; ask the user to enter through Nimiq Pay again")
 
-    clean_to_address = await resolve_nimiq_pay_payout_address(clean_to_address)
+    clean_to_address = wallet.normalise_nimiq_address(
+        clean_to_address,
+        field_name="claim payout_address",
+    )
+    if to_address is not None:
+        requested_to_address = wallet.normalise_nimiq_address(
+            to_address,
+            field_name="claim payout override",
+        )
+        if requested_to_address != clean_to_address:
+            raise ValueError("claim payout override must equal the immutable claim payout_address")
 
     transaction_kind = (
         "Prizedraw"

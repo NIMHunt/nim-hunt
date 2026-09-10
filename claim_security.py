@@ -12,8 +12,10 @@ boundary around money-moving claims:
 * Claim HTTP requests must present the signed session in public deployments.
 * Successful claims receive a durable security record before any later payout
   is allowed to leave a Spot deposit address.
-* Recent claim events are correlated across verified wallet, device, payout
-  address and (only as a secondary signal) source IP.
+* New claims pay the canonical address derived from the authenticating public
+  key; browser-provided payout identities have no financial authority.
+* Recent claim events are correlated across verified wallet, device and (only
+  as a secondary signal) source IP.
 * A short payout hold gives the server time to see a coordinated sweep. A very
   suspicious burst is marked for manual review instead of auto-paying later.
 
@@ -908,6 +910,31 @@ async def _payout_security_decision(db, *, claim_id: int) -> RowDict:
             "manual_review": True,
         }
 
+    claim_payout = _canonical_optional_address(claim.get(schema.CLAIM_PAYOUT_ADDRESS))
+    verified_wallet = _canonical_optional_address(record.get("verified_wallet"))
+    recorded_payout = _canonical_optional_address(record.get("payout_address"))
+    # Pre-Phase-A claims may legitimately differ. Never rewrite or redirect
+    # those entitlements: hold an observed mismatch durably for manual review.
+    if verified_wallet is not None and (
+        claim_payout != verified_wallet
+        or (recorded_payout is not None and recorded_payout != claim_payout)
+    ):
+        record["manual_review"] = True
+        record["manual_review_reason"] = "legacy_claim_payout_identity_mismatch"
+        record["manual_review_marked_at"] = int(now)
+        record["manual_review_details"] = {
+            "claim_payout_address": claim_payout,
+            "verified_wallet": verified_wallet,
+            "security_record_payout_address": recorded_payout,
+        }
+        await _metadata_set(db, _claim_record_key(int(claim_id)), record)
+        await db.commit()
+        return {
+            "allow": False,
+            "reason": "legacy_claim_payout_identity_mismatch",
+            "manual_review": True,
+        }
+
     claimed_at = int(claim.get(schema.CLAIM_CLAIMED_AT) or now)
     release_at = claimed_at + PAYOUT_HOLD_SECONDS
     if now < release_at:
@@ -1022,7 +1049,7 @@ async def _preclaim_decision(
         "spot_id": int(spot_id),
         "device_id_hash": str(session["device_id_hash"]),
         "verified_wallet": str(session["wallet_address"]),
-        "payout_address": _canonical_optional_address(request_body.get("payout_address")),
+        "payout_address": _canonical_optional_address(session.get("wallet_address")),
         "ip_hash": str(ip_fingerprint),
         "claimed_at": int(now),
         "spot_lat": float(spot[schema.SPOT_LAT]),

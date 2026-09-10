@@ -92,7 +92,7 @@ class TransactionDescriptionSubmissionTest(unittest.IsolatedAsyncioTestCase):
         claim = {
             schema.CLAIM_SPOT_ID: 7,
             schema.CLAIM_RECIPIENT: 2,
-            schema.CLAIM_PAYOUT_ADDRESS: "recipient",
+            schema.CLAIM_PAYOUT_ADDRESS: "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF",
         }
         spot = {schema.SPOT_ID: 7, schema.SPOT_TITLE: "Town Drop"}
         submit = mock.AsyncMock(return_value={"ok": True, "trans_id": 1})
@@ -115,7 +115,7 @@ class TransactionDescriptionSubmissionTest(unittest.IsolatedAsyncioTestCase):
         claim = {
             schema.CLAIM_SPOT_ID: 7,
             schema.CLAIM_RECIPIENT: 2,
-            schema.CLAIM_PAYOUT_ADDRESS: "recipient",
+            schema.CLAIM_PAYOUT_ADDRESS: "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF",
         }
         spot = {schema.SPOT_ID: 7, schema.SPOT_TITLE: "Town Drop"}
         submit = mock.AsyncMock(return_value={"ok": True, "trans_id": 1})

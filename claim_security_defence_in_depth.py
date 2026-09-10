@@ -7,8 +7,8 @@ cannot cover:
 * Source IP remains useful for rate limits and correlation, but is never enough
   on its own to reject a claim; carrier NAT, households and VPN exits can be
   shared by unrelated people.
-* The signed Nimiq wallet remains the durable anti-abuse identity, while the
-  user-facing account returned by Nimiq Pay remains the validated payout target.
+* The signed Nimiq wallet is both the durable anti-abuse identity and the
+  immutable payout target for every new public claim.
 * A Spot's per-user claim limit is also enforced across every device account
   bound to the same verified Nimiq wallet, including duration-claim completion.
 * When the Spot owner has a verified wallet binding, that same wallet cannot
@@ -139,10 +139,10 @@ def broad_new_identity_burst_claim_ids(events: list[RowDict], *, now: int) -> li
         payout = str(event.get("payout_address") or "").strip().upper()
         if payout:
             payout_counts[payout] = payout_counts.get(payout, 0) + 1
-    # A crowd at one popular Spot is expected. Concentration only becomes a
-    # coordinated signal when the independent signers also converge on one
-    # receiving address. That address is evidence about these claims, not proof
-    # that its owner submitted them.
+    # A crowd at one popular Spot is expected. Shared payout concentration is
+    # retained as a legacy-event signal; Phase-A claims use their distinct
+    # verified signers as payout identities. Geographic sweep detection remains
+    # the relevant fresh-wallet containment for new claims.
     shared_payout = max(payout_counts.values(), default=0) >= minimum
     concentrated_sweep = (
         0 < len(spots) <= max(1, BROAD_BURST_MAX_TARGET_SPOTS) and shared_payout
@@ -317,7 +317,7 @@ async def _create_claim_attempt_bound_to_verified_wallet(
     claim_code: str | None = None,
     payout_address: str | None = None,
 ) -> RowDict:
-    """Bind public claim limits to the signer while preserving the Nimiq Pay payout account."""
+    """Bind public claim limits and its immutable payout to the verified signer."""
     if bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
         binding = await claim_security._metadata_get(
             db,
@@ -346,13 +346,9 @@ async def _create_claim_attempt_bound_to_verified_wallet(
         ):
             raise ValueError("You have already reached your claim limit for this spot.")
 
-        # The signature proves the anti-abuse identity; it does not make the
-        # signer-derived address the documented Nimiq Pay receiving account.
-        # Keep listAccounts()[0] as the payout target, but validate it server-side
-        # before it is persisted to the CLAIM and later used by settlement.
-        payout_address = claim_security._canonical_optional_address(payout_address)
-        if payout_address is None:
-            raise ValueError("A valid Nimiq Pay payout address is required before claiming.")
+        # Browser-provided payout_address is deliberately ignored. The verified
+        # public key is the sole financial authority for a new public claim.
+        payout_address = verified_wallet
 
     delegate = _CLAIM_ATTEMPT_DELEGATE
     if delegate is None:  # pragma: no cover - runtime requires install().

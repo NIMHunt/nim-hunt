@@ -209,6 +209,71 @@ def _clean_reservations(raw: Any, *, now: int) -> list[RowDict]:
     return clean
 
 
+async def _prune_reservations(db, reservations: list[RowDict], *, now: int) -> list[RowDict]:
+    """Keep only reservations still needed for rolling or lifetime safety.
+
+    A non-failed TRANSACTION supersedes every reservation for that claim. Only
+    an unmaterialised Open Standard claim needs permanent lifetime retention;
+    excluded flows keep their reservation solely while a global window is live.
+    This runs under the caller's SQLite writer transaction, so cleanup and a
+    concurrent final-slot reservation cannot interleave.
+    """
+    if not reservations:
+        return []
+    claim_ids = sorted({int(item["claim_id"]) for item in reservations})
+    rows = []
+    # Stay below SQLite's common 999-variable limit and inspect only claims
+    # represented in the compact ledger, never the entire CLAIM table.
+    for offset in range(0, len(claim_ids), 900):
+        batch = claim_ids[offset : offset + 900]
+        placeholders = ", ".join("?" for _ in batch)
+        rows.extend(await db.execute_fetchall(
+            f"""
+            SELECT
+                c.{schema.CLAIM_ID} AS claim_id,
+                s.{schema.SPOT_USE_PASSWORD} AS use_password,
+                CASE WHEN pd.{schema.PRIZEDRAW_SPOT_ID} IS NULL THEN 0 ELSE 1 END
+                    AS is_prizedraw,
+                CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM {schema.TRANS_TABLE_NAME} t
+                    WHERE t.{schema.TRANS_CLAIM_ID} = c.{schema.CLAIM_ID}
+                      AND t.{schema.TRANS_TYPE} = ?
+                      AND t.{schema.TRANS_STATUS} != ?
+                ) THEN 1 ELSE 0 END AS materialised
+            FROM {schema.CLAIM_TABLE_NAME} c
+            JOIN {schema.SPOT_TABLE_NAME} s
+              ON s.{schema.SPOT_ID} = c.{schema.CLAIM_SPOT_ID}
+            LEFT JOIN {schema.PRIZEDRAW_TABLE_NAME} pd
+              ON pd.{schema.PRIZEDRAW_SPOT_ID} = s.{schema.SPOT_ID}
+            WHERE c.{schema.CLAIM_ID} IN ({placeholders});
+            """,
+            (const.TRANS_TYPE_CLAIM, const.TRANS_STATUS_FAILED, *batch),
+        ))
+    classification = {int(row["claim_id"]): dict(row) for row in rows}
+    short_cutoff = int(now) - WINDOW_SECONDS
+    daily_cutoff = int(now) - DAILY_WINDOW_SECONDS
+    kept: list[RowDict] = []
+    for reservation in reservations:
+        info = classification.get(int(reservation["claim_id"]))
+        if info is not None and bool(info["materialised"]):
+            continue
+        is_open_standard = bool(
+            info is not None
+            and not bool(info["use_password"])
+            and not bool(info["is_prizedraw"])
+        )
+        if is_open_standard:
+            kept.append(reservation)
+            continue
+        if (
+            int(reservation["short_reserved_at"]) > short_cutoff
+            or int(reservation["daily_reserved_at"]) > daily_cutoff
+        ):
+            kept.append(reservation)
+    return kept
+
+
 async def _recent_payout_rows(db, *, now: int) -> list[RowDict]:
     cutoff = int(now) - max(WINDOW_SECONDS, DAILY_WINDOW_SECONDS, SPOT_WINDOW_SECONDS)
     rows = await db.execute_fetchall(
@@ -394,6 +459,7 @@ async def reserve_payout_slot(
                 reservation["spot_id"] = int(
                     reserved_claim.get(schema.CLAIM_SPOT_ID) or 0
                 )
+        reservations = await _prune_reservations(db, reservations, now=now)
         payout_rows = await _recent_payout_rows(db, now=now)
         short_cutoff = int(now) - WINDOW_SECONDS
         short_rows = [row for row in payout_rows if int(row.get("created_at") or 0) > short_cutoff]
@@ -542,20 +608,6 @@ async def reserve_payout_slot(
                 # allow a payout do we apply the independent Open-Spot budget.
                 if bool(decision.get("allow")) and is_open_standard:
                     lifetime_rows = await _lifetime_spot_payout_rows(db, spot_id=spot_id)
-                    lifetime_transaction_ids = {
-                        int(row.get("claim_id") or 0) for row in lifetime_rows
-                    }
-                    # Materialised intents are authoritative; discard their
-                    # now-redundant reservations. Unmaterialised reservations
-                    # remain for the Spot lifetime so a crash after reservation
-                    # cannot silently restore automatic allowance.
-                    reservations = [
-                        item for item in reservations
-                        if not (
-                            int(item.get("spot_id") or 0) == spot_id
-                            and int(item["claim_id"]) in lifetime_transaction_ids
-                        )
-                    ]
                     lifetime_reservations = [
                         item for item in reservations
                         if int(item.get("spot_id") or 0) == spot_id

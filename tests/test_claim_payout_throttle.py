@@ -504,6 +504,14 @@ class ClaimPayoutReservationTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(retry["allow"])
         self.assertEqual(retry["reason"], "claim_payout_already_materialised")
         async with schema.get_db() as db:
+            reservations = await claim_payout_throttle.claim_security._metadata_get(
+                db, claim_payout_throttle.RESERVATION_KEY
+            )
+        self.assertFalse(any(item["claim_id"] == claim_id for item in reservations))
+        lifetime_block = await self._reserve(claim_id=claim_ids[1])
+        self.assertFalse(lifetime_block["allow"])
+        self.assertEqual(lifetime_block["reason"], "open_spot_lifetime_count_limit")
+        async with schema.get_db() as db:
             with self.assertRaisesRegex(RuntimeError, "already has a non-failed payout"):
                 await db_access.create_claim_transaction(
                     db,
@@ -514,6 +522,94 @@ class ClaimPayoutReservationTest(unittest.IsolatedAsyncioTestCase):
                     to_address=const.DEV_PLATFORM_FEE_ADDRESS,
                     tx_hash="duplicate-materialised-reservation-test",
                 )
+
+    async def test_unmaterialised_open_reservation_survives_well_beyond_72_hours(self):
+        _spot_id, claim_ids = await self._open_spot_claims(2)
+        base = 1_700_000_000
+        with mock.patch.object(
+            claim_payout_throttle.db_access,
+            "get_unixepoch",
+            mock.AsyncMock(return_value=base),
+        ):
+            self.assertTrue((await self._reserve(claim_id=claim_ids[0]))["allow"])
+        with mock.patch.object(
+            claim_payout_throttle.db_access,
+            "get_unixepoch",
+            mock.AsyncMock(return_value=base + 10 * 24 * 60 * 60),
+        ):
+            blocked = await self._reserve(claim_id=claim_ids[1])
+        self.assertFalse(blocked["allow"])
+        self.assertEqual(blocked["reason"], "open_spot_lifetime_count_limit")
+
+    async def test_old_code_protected_reservations_are_pruned(self):
+        _spot_id, claim_ids = await self._open_spot_claims(2, use_password=True)
+        base = 1_700_000_000
+        with mock.patch.object(
+            claim_payout_throttle.db_access, "get_unixepoch", mock.AsyncMock(return_value=base)
+        ):
+            await self._reserve(claim_id=claim_ids[0])
+        with mock.patch.object(
+            claim_payout_throttle.db_access,
+            "get_unixepoch",
+            mock.AsyncMock(return_value=base + 10 * 24 * 60 * 60),
+        ):
+            await self._reserve(claim_id=claim_ids[1])
+        async with schema.get_db() as db:
+            reservations = await claim_payout_throttle.claim_security._metadata_get(
+                db, claim_payout_throttle.RESERVATION_KEY
+            )
+        self.assertEqual([item["claim_id"] for item in reservations], [claim_ids[1]])
+
+    async def test_many_materialised_payouts_do_not_grow_reservation_metadata(self):
+        _spot_id, claim_ids = await self._open_spot_claims(20)
+        with (
+            mock.patch.object(claim_payout_throttle, "SPOT_MAX_PAYOUT_COUNT", 100),
+            mock.patch.object(claim_payout_throttle, "SPOT_MAX_PAYOUT_LUNA", 10**15),
+            mock.patch.object(claim_payout_throttle, "SPOT_LIFETIME_AUTOMATIC_PERCENT", 100),
+            mock.patch.object(claim_payout_throttle, "MAX_PAYOUT_COUNT", 100),
+            mock.patch.object(claim_payout_throttle, "DAILY_MAX_PAYOUT_COUNT", 100),
+        ):
+            for index, claim_id in enumerate(claim_ids):
+                self.assertTrue((await self._reserve(claim_id=claim_id))["allow"])
+                async with schema.get_db() as db:
+                    claim = await db_access.get_claim(db, claim_id=claim_id)
+                    await db_access.create_claim_transaction(
+                        db,
+                        user_id=int(claim[schema.CLAIM_RECIPIENT]),
+                        claim_id=claim_id,
+                        amount=100,
+                        from_address=const.DEV_PLATFORM_FEE_ADDRESS,
+                        to_address=const.DEV_PLATFORM_FEE_ADDRESS,
+                        tx_hash=f"materialised-history-{index}",
+                    )
+                    await db.commit()
+            await self._reserve(claim_id=claim_ids[-1])
+        async with schema.get_db() as db:
+            reservations = await claim_payout_throttle.claim_security._metadata_get(
+                db, claim_payout_throttle.RESERVATION_KEY
+            )
+        self.assertEqual(reservations, [])
+
+    async def test_concurrent_cleanup_preserves_last_lifetime_allowance(self):
+        _spot_id, claim_ids = await self._open_spot_claims(4)
+        await self._reserve(claim_id=claim_ids[0])
+        async with schema.get_db() as db:
+            claim = await db_access.get_claim(db, claim_id=claim_ids[0])
+            await db_access.create_claim_transaction(
+                db,
+                user_id=int(claim[schema.CLAIM_RECIPIENT]),
+                claim_id=claim_ids[0],
+                amount=100,
+                from_address=const.DEV_PLATFORM_FEE_ADDRESS,
+                to_address=const.DEV_PLATFORM_FEE_ADDRESS,
+                tx_hash="cleanup-final-allowance",
+            )
+            await db.commit()
+        results = await asyncio.gather(
+            self._reserve(claim_id=claim_ids[1]),
+            self._reserve(claim_id=claim_ids[2]),
+        )
+        self.assertEqual(sum(bool(result["allow"]) for result in results), 1)
 
 
 if __name__ == "__main__":

@@ -336,6 +336,17 @@ async def reserve_payout_slot(
                 }
             else:
                 decision = throttle_decision(state=state, daily_state=daily_state, amount=amount)
+                if decision.get("manual_review"):
+                    record = await claim_security.get_claim_security_record(
+                        db, claim_id=claim_id
+                    )
+                    if isinstance(record, dict):
+                        record["manual_review"] = True
+                        record["manual_review_reason"] = str(decision["reason"])
+                        record["manual_review_marked_at"] = int(now)
+                        await claim_security._metadata_set(
+                            db, claim_security._claim_record_key(claim_id), record
+                        )
                 if bool(decision.get("allow")):
                     reservations.append(
                         {

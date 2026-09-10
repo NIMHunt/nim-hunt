@@ -195,11 +195,6 @@ async def _create_claim_attempt_with_durable_wallet_limit(
             )
             if decision.get("blocked"):
                 raise ValueError("Verified wallet hourly claim limit reached.")
-            payout_decision = await _durable_payout_address_rate_decision(
-                db, payout_address=str(payout_address or ""), now=now
-            )
-            if payout_decision.get("blocked"):
-                raise ValueError("Payout address hourly claim limit reached.")
 
     return await delegate(
         db,

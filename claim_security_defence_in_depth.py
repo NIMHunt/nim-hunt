@@ -70,9 +70,9 @@ def _preclaim_risk_without_ip_only_block(events: list[RowDict], target: RowDict)
 def broad_new_identity_burst_claim_ids(events: list[RowDict], *, now: int) -> list[int]:
     """Detect a likely Sybil sweep without relying on exact-centre GPS.
 
-    The rule requires several independent new wallets, devices and Spots plus a
-    large geographic spread. A single traveller, household, VPN, or inaccurate
-    GPS reading therefore cannot trigger it.
+    The rule requires independent first-claim wallets/devices plus either a
+    broad geographic sweep or convergence on one payout address across a small
+    set of Spots. Novelty, a shared network, or one popular Spot is insufficient.
     """
     cutoff = int(now) - max(60, BROAD_BURST_WINDOW_SECONDS)
     candidates: list[RowDict] = []
@@ -134,7 +134,19 @@ def broad_new_identity_burst_claim_ids(events: list[RowDict], *, now: int) -> li
     if min(len(devices), len(wallets)) < minimum:
         return []
 
-    concentrated_sweep = 0 < len(spots) <= max(1, BROAD_BURST_MAX_TARGET_SPOTS)
+    payout_counts: dict[str, int] = {}
+    for event in candidates:
+        payout = str(event.get("payout_address") or "").strip().upper()
+        if payout:
+            payout_counts[payout] = payout_counts.get(payout, 0) + 1
+    # A crowd at one popular Spot is expected. Concentration only becomes a
+    # coordinated signal when the independent signers also converge on one
+    # receiving address. That address is evidence about these claims, not proof
+    # that its owner submitted them.
+    shared_payout = max(payout_counts.values(), default=0) >= minimum
+    concentrated_sweep = (
+        0 < len(spots) <= max(1, BROAD_BURST_MAX_TARGET_SPOTS) and shared_payout
+    )
     geographic_sweep = len(spots) >= minimum and claim_security._max_spread_metres(candidates) >= max(
         10_000,
         BROAD_BURST_MIN_SPREAD_METRES,

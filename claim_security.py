@@ -524,7 +524,7 @@ async def security_verify(payload: SecurityVerifyRequest, request: Request) -> J
 
             try:
                 user_id, _created = await user_registration_security.get_or_create_public_user(
-                    db, device_id_hash=device_id
+                    db, device_id_hash=device_id, source_network_hash=ip_fingerprint
                 )
             except user_registration_security.RegistrationRateLimited as exc:
                 return JSONResponse(

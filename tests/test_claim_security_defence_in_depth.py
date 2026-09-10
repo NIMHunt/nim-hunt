@@ -35,6 +35,7 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
             "spot_long": long,
             "spot_radius": 50,
             "centre_offset_metres": centre_offset,
+            "payout_address": "shared-payout",
         }
 
     def test_broad_burst_catches_coordinate_noise(self):
@@ -113,6 +114,24 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
             for i in range(defence.BROAD_BURST_MIN_IDENTITIES)
         ]
         self.assertTrue(defence.broad_new_identity_burst_claim_ids(events, now=now + 20))
+
+    def test_legitimate_venue_crowd_is_not_marked_from_novelty_or_wifi(self):
+        now = 1_700_000_000
+        events = [
+            {
+                **self._event(
+                    claim_id=i + 1, spot_id=1, claimed_at=now + i * 30,
+                    lat=51.5 + i * 0.000001, long=-0.1 - i * 0.000001,
+                    device=f"{i + 1:064x}", wallet=f"wallet-{i}", centre_offset=3 + i,
+                ),
+                "payout_address": f"independent-payout-{i}",
+                "ip_hash": "venue-public-wifi",
+            }
+            for i in range(20)
+        ]
+        self.assertEqual(
+            defence.broad_new_identity_burst_claim_ids(events, now=now + 15 * 60), []
+        )
 
     def test_source_network_alone_never_blocks(self):
         with mock.patch.object(

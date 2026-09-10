@@ -49,6 +49,13 @@ _CREATION_FEE_PROCESSING_MESSAGE = (
 )
 
 
+def _registration_source_network_hash(request: Request) -> str:
+    """Reuse the claim-security proxy policy without storing a raw address."""
+    import claim_security
+
+    return claim_security._ip_hash(claim_security._request_ip(request))
+
+
 def _creation_fee_processing_response(meta: dict[str, Any]) -> JSONResponse:
     return JSONResponse(
         {
@@ -3204,7 +3211,7 @@ async def home_metrics() -> JSONResponse:
 
 
 @router.post("/api/home/session")
-async def home_session(payload: HomeSessionRequest) -> JSONResponse:
+async def home_session(payload: HomeSessionRequest, request: Request) -> JSONResponse:
     """Create or retrieve the USER for this webview session.
 
     The JavaScript side asks Nimiq Pay for the device identifier. This route
@@ -3289,7 +3296,9 @@ async def home_session(payload: HomeSessionRequest) -> JSONResponse:
         async with db_access.transaction(db):
             try:
                 user_id, created = await user_registration_security.get_or_create_public_user(
-                    db, device_id_hash=device_id_hash
+                    db,
+                    device_id_hash=device_id_hash,
+                    source_network_hash=_registration_source_network_hash(request),
                 )
             except user_registration_security.RegistrationRateLimited as exc:
                 return JSONResponse(

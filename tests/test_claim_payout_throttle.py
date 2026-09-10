@@ -128,6 +128,37 @@ class ClaimPayoutReservationTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(unrelated["allow"])
         self.assertEqual(unrelated["reason"], "global_payout_count_limit")
 
+    async def test_large_payout_hold_is_durable_and_explicitly_releasable(self):
+        claim_id = 505
+        async with schema.get_db() as db:
+            await claim_payout_throttle.claim_security._metadata_set(
+                db,
+                claim_payout_throttle.claim_security._claim_record_key(claim_id),
+                {"claim_id": claim_id, "manual_review": False},
+            )
+            await db.commit()
+
+        with mock.patch.object(claim_payout_throttle, "MAX_AUTOMATIC_PAYOUT_LUNA", 10):
+            held = await self._reserve(claim_id=claim_id, amount=11)
+        self.assertFalse(held["allow"])
+        self.assertEqual(held["reason"], "individual_automatic_payout_limit")
+
+        async with schema.get_db() as db:
+            record = await claim_payout_throttle.claim_security.get_claim_security_record(
+                db, claim_id=claim_id
+            )
+            self.assertTrue(record["manual_review"])
+            self.assertEqual(record["manual_review_reason"], held["reason"])
+            released = await claim_payout_throttle.claim_security.release_claim_manual_review(
+                db, claim_id=claim_id
+            )
+            await db.commit()
+            self.assertTrue(released)
+            record = await claim_payout_throttle.claim_security.get_claim_security_record(
+                db, claim_id=claim_id
+            )
+        self.assertFalse(record["manual_review"])
+
 
 if __name__ == "__main__":
     unittest.main()

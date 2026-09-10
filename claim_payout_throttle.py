@@ -62,7 +62,7 @@ SPOT_MAX_PAYOUT_COUNT = _env_int("NIMHUNT_OPEN_SPOT_PAYOUT_MAX_COUNT", 10)
 SPOT_MAX_PAYOUT_NIM = _env_int("NIMHUNT_OPEN_SPOT_PAYOUT_MAX_NIM", 5_000)
 SPOT_MAX_PAYOUT_LUNA = SPOT_MAX_PAYOUT_NIM * int(getattr(const, "LUNA_PER_NIM", 100_000))
 SPOT_LIFETIME_AUTOMATIC_PERCENT = _env_int(
-    "NIMHUNT_OPEN_SPOT_LIFETIME_AUTOMATIC_PERCENT", 50
+    "NIMHUNT_OPEN_SPOT_LIFETIME_AUTOMATIC_PERCENT", 50, minimum=0
 )
 if SPOT_LIFETIME_AUTOMATIC_PERCENT > 100:
     raise ValueError("NIMHUNT_OPEN_SPOT_LIFETIME_AUTOMATIC_PERCENT must be at most 100")
@@ -187,6 +187,9 @@ def _clean_reservations(raw: Any, *, now: int) -> list[RowDict]:
             claim_id = int(item.get("claim_id") or 0)
             amount = int(item.get("amount") or 0)
             reserved_at = int(item.get("reserved_at") or 0)
+            short_reserved_at = int(item.get("short_reserved_at") or reserved_at)
+            daily_reserved_at = int(item.get("daily_reserved_at") or reserved_at)
+            spot_reserved_at = int(item.get("spot_reserved_at") or reserved_at)
             spot_id = int(item.get("spot_id") or 0)
         except (TypeError, ValueError):
             continue
@@ -197,6 +200,9 @@ def _clean_reservations(raw: Any, *, now: int) -> list[RowDict]:
                 "claim_id": claim_id,
                 "amount": amount,
                 "reserved_at": reserved_at,
+                "short_reserved_at": short_reserved_at,
+                "daily_reserved_at": daily_reserved_at,
+                "spot_reserved_at": spot_reserved_at,
                 "spot_id": spot_id,
             }
         )
@@ -391,7 +397,11 @@ async def reserve_payout_slot(
         payout_rows = await _recent_payout_rows(db, now=now)
         short_cutoff = int(now) - WINDOW_SECONDS
         short_rows = [row for row in payout_rows if int(row.get("created_at") or 0) > short_cutoff]
-        short_reservations = [item for item in reservations if int(item["reserved_at"]) > short_cutoff]
+        short_reservations = [
+            {**item, "reserved_at": int(item["short_reserved_at"])}
+            for item in reservations
+            if int(item["short_reserved_at"]) > short_cutoff
+        ]
         state, transaction_claim_ids = _combined_window_state(
             now=now,
             payout_rows=short_rows,
@@ -403,8 +413,9 @@ async def reserve_payout_slot(
             if int(row.get("created_at") or 0) > daily_cutoff
         ]
         daily_reservations = [
-            item for item in reservations
-            if int(item["reserved_at"]) > daily_cutoff
+            {**item, "reserved_at": int(item["daily_reserved_at"])}
+            for item in reservations
+            if int(item["daily_reserved_at"]) > daily_cutoff
         ]
         daily_state, daily_transaction_claim_ids = _combined_window_state(
             now=now, payout_rows=daily_rows, reservations=daily_reservations
@@ -438,13 +449,93 @@ async def reserve_payout_slot(
                 None,
             )
             if existing is not None:
-                decision = {
-                    "allow": True,
-                    "reason": "existing_payout_reservation",
-                    "window_payout_count": int(state["payout_count"]),
-                    "window_payout_amount": int(state["payout_amount"]),
-                    "reservation_reused": True,
-                }
+                # A lifetime reservation preserves only this claim's Spot
+                # allocation. Its short/daily authority expires independently.
+                # Exclude the claim's own reservation before rechecking so it
+                # is neither double-counted nor treated as a permanent permit.
+                without_existing = [
+                    item for item in reservations
+                    if int(item["claim_id"]) != claim_id
+                ]
+                short_valid = int(existing["short_reserved_at"]) > short_cutoff
+                daily_valid = int(existing["daily_reserved_at"]) > daily_cutoff
+                short_state, _ = _combined_window_state(
+                    now=now,
+                    payout_rows=short_rows,
+                    reservations=[
+                        {**item, "reserved_at": int(item["short_reserved_at"])}
+                        for item in without_existing
+                        if int(item["short_reserved_at"]) > short_cutoff
+                    ],
+                )
+                current_daily_state, _ = _combined_window_state(
+                    now=now,
+                    payout_rows=daily_rows,
+                    reservations=[
+                        {**item, "reserved_at": int(item["daily_reserved_at"])}
+                        for item in without_existing
+                        if int(item["daily_reserved_at"]) > daily_cutoff
+                    ],
+                )
+                decision = throttle_decision(
+                    state=short_state,
+                    daily_state=current_daily_state,
+                    amount=amount,
+                )
+                if bool(decision.get("allow")) and is_open_standard:
+                    record = await claim_security.get_claim_security_record(
+                        db, claim_id=claim_id
+                    )
+                    explicitly_released = bool(
+                        isinstance(record, dict)
+                        and record.get("manual_review_released_at")
+                    )
+                    if not explicitly_released:
+                        spot_cutoff = int(now) - SPOT_WINDOW_SECONDS
+                        spot_rows = [
+                            row for row in payout_rows
+                            if int(row.get("spot_id") or 0) == spot_id
+                            and int(row.get("created_at") or 0) > spot_cutoff
+                        ]
+                        spot_state, _ = _combined_window_state(
+                            now=now,
+                            payout_rows=spot_rows,
+                            reservations=[
+                                {
+                                    **item,
+                                    "reserved_at": int(item["spot_reserved_at"]),
+                                }
+                                for item in without_existing
+                                if int(item.get("spot_id") or 0) == spot_id
+                                and int(item["spot_reserved_at"]) > spot_cutoff
+                            ],
+                        )
+                        decision = _spot_window_decision(
+                            state=spot_state, amount=amount, spot_id=spot_id
+                        )
+                if bool(decision.get("allow")):
+                    if not short_valid:
+                        existing["short_reserved_at"] = int(now)
+                    if not daily_valid:
+                        existing["daily_reserved_at"] = int(now)
+                    if int(existing["spot_reserved_at"]) <= int(now) - SPOT_WINDOW_SECONDS:
+                        existing["spot_reserved_at"] = int(now)
+                    decision = {
+                        **decision,
+                        "reason": "existing_payout_reservation",
+                        "reservation_reused": True,
+                    }
+                elif decision.get("manual_review"):
+                    record = await claim_security.get_claim_security_record(
+                        db, claim_id=claim_id
+                    )
+                    if isinstance(record, dict):
+                        record["manual_review"] = True
+                        record["manual_review_reason"] = str(decision["reason"])
+                        record["manual_review_marked_at"] = int(now)
+                        await claim_security._metadata_set(
+                            db, claim_security._claim_record_key(claim_id), record
+                        )
             else:
                 decision = throttle_decision(state=state, daily_state=daily_state, amount=amount)
                 # Global circuit breakers remain authoritative. Only after they
@@ -481,9 +572,10 @@ async def reserve_payout_slot(
                         and int(row.get("created_at") or 0) > spot_cutoff
                     ]
                     spot_reservations = [
-                        item for item in reservations
+                        {**item, "reserved_at": int(item["spot_reserved_at"])}
+                        for item in reservations
                         if int(item.get("spot_id") or 0) == spot_id
-                        and int(item["reserved_at"]) > spot_cutoff
+                        and int(item["spot_reserved_at"]) > spot_cutoff
                     ]
                     spot_state, _ = _combined_window_state(
                         now=now,
@@ -533,6 +625,9 @@ async def reserve_payout_slot(
                             "claim_id": claim_id,
                             "amount": amount,
                             "reserved_at": int(now),
+                            "short_reserved_at": int(now),
+                            "daily_reserved_at": int(now),
+                            "spot_reserved_at": int(now),
                             "spot_id": spot_id,
                         }
                     )

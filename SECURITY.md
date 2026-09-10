@@ -100,7 +100,8 @@ authoritative. Configure the policy with
 `NIMHUNT_OPEN_SPOT_PAYOUT_WINDOW_SECONDS`,
 `NIMHUNT_OPEN_SPOT_PAYOUT_MAX_COUNT`, and
 `NIMHUNT_OPEN_SPOT_PAYOUT_MAX_NIM`. The lifetime percentage is configured with
-`NIMHUNT_OPEN_SPOT_LIFETIME_AUTOMATIC_PERCENT`.
+`NIMHUNT_OPEN_SPOT_LIFETIME_AUTOMATIC_PERCENT`; setting it to `0` is an
+emergency mode that sends every Open Standard Spot payout to manual review.
 
 Code-protected Standard Spots are deliberately unchanged: their finite,
 creator-issued, single-use claim codes are an additional admission signal and

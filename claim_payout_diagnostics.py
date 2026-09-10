@@ -15,6 +15,19 @@ from database import get_db
 
 RowDict = dict[str, Any]
 
+OPEN_SPOT_HOLD_REASON_PREFIXES = ("open_spot_payout_", "open_spot_lifetime_")
+
+
+def _add_open_spot_hold(
+    holds: dict[int, Counter[str]], *, reason: str, record: RowDict | None
+) -> None:
+    if not reason.startswith(OPEN_SPOT_HOLD_REASON_PREFIXES):
+        return
+    details = record.get("manual_review_details", {}) if record else {}
+    spot_id = int(details.get("spot_id") or 0)
+    if spot_id > 0:
+        holds.setdefault(spot_id, Counter())[reason] += 1
+
 
 def _same_canonical_address(left: Any, right: Any) -> bool | None:
     """Compare two Nimiq addresses without ever returning either address."""
@@ -151,14 +164,11 @@ async def claim_payout_diagnostics() -> RowDict:
             )
             reason = str(decision.get("reason") or "unknown")
             reason_counts[reason] += 1
-            if reason.startswith("open_spot_payout_"):
+            if reason.startswith(OPEN_SPOT_HOLD_REASON_PREFIXES):
                 record = await claim_security.get_claim_security_record(
                     db, claim_id=int(claim_id)
                 )
-                details = record.get("manual_review_details", {}) if record else {}
-                spot_id = int(details.get("spot_id") or 0)
-                if spot_id > 0:
-                    open_spot_holds.setdefault(spot_id, Counter())[reason] += 1
+                _add_open_spot_hold(open_spot_holds, reason=reason, record=record)
 
         latest_confirmed = await _latest_confirmed_standard_payout_comparison(
             db,

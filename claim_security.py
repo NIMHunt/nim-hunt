@@ -913,9 +913,21 @@ async def _payout_security_decision(db, *, claim_id: int) -> RowDict:
     claim_payout = _canonical_optional_address(claim.get(schema.CLAIM_PAYOUT_ADDRESS))
     verified_wallet = _canonical_optional_address(record.get("verified_wallet"))
     recorded_payout = _canonical_optional_address(record.get("payout_address"))
+    if verified_wallet is None:
+        record["manual_review"] = True
+        record["manual_review_reason"] = "claim_verified_wallet_missing_or_invalid"
+        record["manual_review_marked_at"] = int(now)
+        await _metadata_set(db, _claim_record_key(int(claim_id)), record)
+        await db.commit()
+        return {
+            "allow": False,
+            "reason": "claim_verified_wallet_missing_or_invalid",
+            "manual_review": True,
+        }
+
     # Pre-Phase-A claims may legitimately differ. Never rewrite or redirect
     # those entitlements: hold an observed mismatch durably for manual review.
-    if verified_wallet is not None and (
+    if (
         claim_payout != verified_wallet
         or (recorded_payout is not None and recorded_payout != claim_payout)
     ):

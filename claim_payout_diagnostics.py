@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+import claim_payout_throttle
 import claim_security
 import constants as const
 import database as schema
@@ -13,6 +14,19 @@ import settlement_updater
 from database import get_db
 
 RowDict = dict[str, Any]
+
+OPEN_SPOT_HOLD_REASON_PREFIXES = ("open_spot_payout_", "open_spot_lifetime_")
+
+
+def _add_open_spot_hold(
+    holds: dict[int, Counter[str]], *, reason: str, record: RowDict | None
+) -> None:
+    if not reason.startswith(OPEN_SPOT_HOLD_REASON_PREFIXES):
+        return
+    details = record.get("manual_review_details", {}) if record else {}
+    spot_id = int(details.get("spot_id") or 0)
+    if spot_id > 0:
+        holds.setdefault(spot_id, Counter())[reason] += 1
 
 
 def _same_canonical_address(left: Any, right: Any) -> bool | None:
@@ -129,6 +143,7 @@ async def claim_payout_diagnostics() -> RowDict:
     other authentication material.
     """
     reason_counts: Counter[str] = Counter()
+    open_spot_holds: dict[int, Counter[str]] = {}
     oldest_age_seconds = 0
 
     async with get_db() as db:
@@ -149,6 +164,11 @@ async def claim_payout_diagnostics() -> RowDict:
             )
             reason = str(decision.get("reason") or "unknown")
             reason_counts[reason] += 1
+            if reason.startswith(OPEN_SPOT_HOLD_REASON_PREFIXES):
+                record = await claim_security.get_claim_security_record(
+                    db, claim_id=int(claim_id)
+                )
+                _add_open_spot_hold(open_spot_holds, reason=reason, record=record)
 
         latest_confirmed = await _latest_confirmed_standard_payout_comparison(
             db,
@@ -182,6 +202,22 @@ async def claim_payout_diagnostics() -> RowDict:
         "unpaid_successful_standard_count": len(claim_ids),
         "oldest_unpaid_successful_standard_age_seconds": int(oldest_age_seconds),
         "security_decision_counts": dict(sorted(reason_counts.items())),
+        "open_spot_automatic_exposure": {
+            "window_seconds": int(claim_payout_throttle.SPOT_WINDOW_SECONDS),
+            "max_count": int(claim_payout_throttle.SPOT_MAX_PAYOUT_COUNT),
+            "max_amount_luna": int(claim_payout_throttle.SPOT_MAX_PAYOUT_LUNA),
+            "lifetime_automatic_percent": int(
+                claim_payout_throttle.SPOT_LIFETIME_AUTOMATIC_PERCENT
+            ),
+            "held_spots": [
+                {
+                    "spot_id": spot_id,
+                    "deferred_claim_count": sum(reasons.values()),
+                    "reason_counts": dict(sorted(reasons.items())),
+                }
+                for spot_id, reasons in sorted(open_spot_holds.items())
+            ],
+        },
         "last_standard_pass": {
             "checked_count": int(standard.get("checked_count") or 0),
             "submitted_count": int(standard.get("submitted_count") or 0),

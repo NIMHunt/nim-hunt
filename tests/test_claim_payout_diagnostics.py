@@ -13,6 +13,30 @@ VERIFIED_WALLET = "NQ48 LH6Q 7PFD LJYF 7PGB NJXL F8CX GHTJ YEKG"
 
 
 class ClaimPayoutDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
+    async def test_lifetime_holds_are_grouped_for_operator_diagnostics(self):
+        holds = {}
+        record = {"manual_review_details": {"spot_id": 73}}
+        claim_payout_diagnostics._add_open_spot_hold(
+            holds, reason="open_spot_lifetime_count_limit", record=record
+        )
+        claim_payout_diagnostics._add_open_spot_hold(
+            holds, reason="open_spot_lifetime_amount_limit", record=record
+        )
+        rendered = [
+            {
+                "spot_id": spot_id,
+                "deferred_claim_count": sum(reasons.values()),
+                "reason_counts": dict(sorted(reasons.items())),
+            }
+            for spot_id, reasons in sorted(holds.items())
+        ]
+        self.assertEqual(rendered[0]["spot_id"], 73)
+        self.assertEqual(rendered[0]["deferred_claim_count"], 2)
+        self.assertEqual(rendered[0]["reason_counts"], {
+            "open_spot_lifetime_amount_limit": 1,
+            "open_spot_lifetime_count_limit": 1,
+        })
+
     async def test_aggregates_security_hold_reasons_without_exposing_claim_details(self):
         fake_db = object()
 

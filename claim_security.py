@@ -883,6 +883,7 @@ async def release_claim_manual_review(db, *, claim_id: int) -> bool:
     record["manual_review"] = False
     record.pop("manual_review_reason", None)
     record.pop("manual_review_marked_at", None)
+    record.pop("manual_review_details", None)
     record["manual_review_released_at"] = await db_access.get_unixepoch(db)
     await _metadata_set(db, key, record)
     return True

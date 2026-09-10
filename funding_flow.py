@@ -25,6 +25,7 @@ from claim_wallet_hourly_limit import install as install_claim_wallet_hourly_lim
 from funding_fee_worker import install as install_fee_worker
 from funding_monitor import install as install_monitor
 from funding_status import install as install_status
+from home_metrics_capacity import install as install_home_metrics_capacity
 from refund_address_safety import install as install_refund_address_safety
 
 _INSTALLED = False
@@ -77,6 +78,11 @@ def install() -> None:
     # monkey-patch chain, so install them even under pytest. This keeps route
     # tests representative while preserving the existing worker-test isolation.
     _install_feature_routes()
+
+    # Home metrics are application-surface behaviour too. Install the
+    # capacity-aware Active Spots counter under pytest as well as production so
+    # route tests see the same semantics as the running app.
+    install_home_metrics_capacity()
 
     if _INSTALLED or "pytest" in sys.modules:
         return

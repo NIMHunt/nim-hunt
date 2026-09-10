@@ -52,6 +52,15 @@ DAILY_MAX_PAYOUT_NIM = _env_int("NIMHUNT_CLAIM_PAYOUT_DAILY_MAX_NIM", 50_000)
 DAILY_MAX_PAYOUT_LUNA = DAILY_MAX_PAYOUT_NIM * int(getattr(const, "LUNA_PER_NIM", 100_000))
 MAX_AUTOMATIC_PAYOUT_NIM = _env_int("NIMHUNT_CLAIM_MAX_AUTOMATIC_PAYOUT_NIM", 10_000)
 MAX_AUTOMATIC_PAYOUT_LUNA = MAX_AUTOMATIC_PAYOUT_NIM * int(getattr(const, "LUNA_PER_NIM", 100_000))
+# Open Standard Spots have no creator-controlled admission secret. Limit their
+# independent automatic blast radius even when every identity/location signal
+# is attacker-controlled. Ten minimum-sized claims still supports a small
+# legitimate crowd; the amount ceiling prevents fewer high-value claims from
+# consuming more than 5,000 NIM automatically in any rolling day.
+SPOT_WINDOW_SECONDS = _env_int("NIMHUNT_OPEN_SPOT_PAYOUT_WINDOW_SECONDS", 24 * 60 * 60)
+SPOT_MAX_PAYOUT_COUNT = _env_int("NIMHUNT_OPEN_SPOT_PAYOUT_MAX_COUNT", 10)
+SPOT_MAX_PAYOUT_NIM = _env_int("NIMHUNT_OPEN_SPOT_PAYOUT_MAX_NIM", 5_000)
+SPOT_MAX_PAYOUT_LUNA = SPOT_MAX_PAYOUT_NIM * int(getattr(const, "LUNA_PER_NIM", 100_000))
 
 RESERVATION_KEY = f"{claim_security.METADATA_PREFIX}payout_throttle_reservations"
 
@@ -165,7 +174,7 @@ def _clean_reservations(raw: Any, *, now: int) -> list[RowDict]:
     """Return well-formed, still-active payout reservations."""
     if not isinstance(raw, list):
         return []
-    cutoff = int(now) - max(WINDOW_SECONDS, DAILY_WINDOW_SECONDS)
+    cutoff = int(now) - max(WINDOW_SECONDS, DAILY_WINDOW_SECONDS, SPOT_WINDOW_SECONDS)
     clean: list[RowDict] = []
     for item in raw:
         if not isinstance(item, dict):
@@ -174,6 +183,7 @@ def _clean_reservations(raw: Any, *, now: int) -> list[RowDict]:
             claim_id = int(item.get("claim_id") or 0)
             amount = int(item.get("amount") or 0)
             reserved_at = int(item.get("reserved_at") or 0)
+            spot_id = int(item.get("spot_id") or 0)
         except (TypeError, ValueError):
             continue
         if claim_id <= 0 or amount <= 0 or reserved_at <= cutoff:
@@ -183,20 +193,22 @@ def _clean_reservations(raw: Any, *, now: int) -> list[RowDict]:
                 "claim_id": claim_id,
                 "amount": amount,
                 "reserved_at": reserved_at,
+                "spot_id": spot_id,
             }
         )
     return clean
 
 
 async def _recent_payout_rows(db, *, now: int) -> list[RowDict]:
-    cutoff = int(now) - max(WINDOW_SECONDS, DAILY_WINDOW_SECONDS)
+    cutoff = int(now) - max(WINDOW_SECONDS, DAILY_WINDOW_SECONDS, SPOT_WINDOW_SECONDS)
     rows = await db.execute_fetchall(
         f"""
         SELECT
             {schema.TRANS_ID} AS trans_id,
             {schema.TRANS_CLAIM_ID} AS claim_id,
             {schema.TRANS_AMOUNT} AS amount,
-            {schema.TRANS_CREATED_AT} AS created_at
+            {schema.TRANS_CREATED_AT} AS created_at,
+            {schema.TRANS_SPOT_ID} AS spot_id
         FROM {schema.TRANS_TABLE_NAME}
         WHERE {schema.TRANS_TYPE} = ?
           AND {schema.TRANS_STATUS} != ?
@@ -255,6 +267,25 @@ def _combined_window_state(
     )
 
 
+def _spot_window_decision(*, state: RowDict, amount: int, spot_id: int) -> RowDict:
+    count = max(0, int(state.get("payout_count") or 0))
+    exposure = max(0, int(state.get("payout_amount") or 0))
+    details = {
+        "spot_id": int(spot_id),
+        "spot_window_seconds": int(SPOT_WINDOW_SECONDS),
+        "spot_payout_count": count,
+        "spot_payout_amount": exposure,
+        "spot_max_payout_count": int(SPOT_MAX_PAYOUT_COUNT),
+        "spot_max_payout_amount": int(SPOT_MAX_PAYOUT_LUNA),
+        "manual_review": True,
+    }
+    if count >= SPOT_MAX_PAYOUT_COUNT:
+        return {"allow": False, "reason": "open_spot_payout_count_limit", **details}
+    if exposure + int(amount) > SPOT_MAX_PAYOUT_LUNA:
+        return {"allow": False, "reason": "open_spot_payout_amount_limit", **details}
+    return {"allow": True, "reason": "within_open_spot_payout_limits", **details}
+
+
 async def reserve_payout_slot(
     db,
     *,
@@ -295,6 +326,19 @@ async def reserve_payout_slot(
         now = await db_access.get_unixepoch(db)
         raw = await claim_security._metadata_get(db, RESERVATION_KEY)
         reservations = _clean_reservations(raw, now=now)
+        # Reservations written by the immediately preceding release did not
+        # carry a Spot id. Resolve and persist it before applying the new cap so
+        # a rolling deployment cannot reset in-flight exposure accounting.
+        for reservation in reservations:
+            if int(reservation.get("spot_id") or 0) > 0:
+                continue
+            reserved_claim = await db_access.get_claim(
+                db, claim_id=int(reservation["claim_id"])
+            )
+            if reserved_claim is not None:
+                reservation["spot_id"] = int(
+                    reserved_claim.get(schema.CLAIM_SPOT_ID) or 0
+                )
         payout_rows = await _recent_payout_rows(db, now=now)
         short_cutoff = int(now) - WINDOW_SECONDS
         short_rows = [row for row in payout_rows if int(row.get("created_at") or 0) > short_cutoff]
@@ -308,6 +352,15 @@ async def reserve_payout_slot(
             now=now, payout_rows=payout_rows, reservations=reservations
         )
         transaction_claim_ids.update(daily_transaction_claim_ids)
+
+        claim = await db_access.get_claim(db, claim_id=claim_id)
+        spot_id = int(claim.get(schema.CLAIM_SPOT_ID) or 0) if claim is not None else 0
+        spot = await db_access.get_spot(db, spot_id=spot_id) if spot_id > 0 else None
+        is_open_standard = bool(
+            spot is not None
+            and not bool(spot.get(schema.SPOT_USE_PASSWORD))
+            and not await db_access.is_prizedraw(db, spot_id=spot_id)
+        )
 
         if claim_id in transaction_claim_ids:
             decision: RowDict = {
@@ -336,6 +389,33 @@ async def reserve_payout_slot(
                 }
             else:
                 decision = throttle_decision(state=state, daily_state=daily_state, amount=amount)
+                # Global circuit breakers remain authoritative. Only after they
+                # allow a payout do we apply the independent Open-Spot budget.
+                if bool(decision.get("allow")) and is_open_standard:
+                    spot_cutoff = int(now) - SPOT_WINDOW_SECONDS
+                    spot_rows = [
+                        row for row in payout_rows
+                        if int(row.get("spot_id") or 0) == spot_id
+                        and int(row.get("created_at") or 0) > spot_cutoff
+                    ]
+                    spot_reservations = [
+                        item for item in reservations
+                        if int(item.get("spot_id") or 0) == spot_id
+                        and int(item["reserved_at"]) > spot_cutoff
+                    ]
+                    spot_state, _ = _combined_window_state(
+                        now=now,
+                        payout_rows=spot_rows,
+                        reservations=spot_reservations,
+                    )
+                    record = await claim_security.get_claim_security_record(db, claim_id=claim_id)
+                    explicitly_released = bool(
+                        isinstance(record, dict) and record.get("manual_review_released_at")
+                    )
+                    if not explicitly_released:
+                        decision = _spot_window_decision(
+                            state=spot_state, amount=amount, spot_id=spot_id
+                        )
                 if decision.get("manual_review"):
                     record = await claim_security.get_claim_security_record(
                         db, claim_id=claim_id
@@ -344,6 +424,15 @@ async def reserve_payout_slot(
                         record["manual_review"] = True
                         record["manual_review_reason"] = str(decision["reason"])
                         record["manual_review_marked_at"] = int(now)
+                        record["manual_review_details"] = {
+                            key: decision[key]
+                            for key in (
+                                "spot_id", "spot_window_seconds", "spot_payout_count",
+                                "spot_payout_amount", "spot_max_payout_count",
+                                "spot_max_payout_amount",
+                            )
+                            if key in decision
+                        }
                         await claim_security._metadata_set(
                             db, claim_security._claim_record_key(claim_id), record
                         )
@@ -353,6 +442,7 @@ async def reserve_payout_slot(
                             "claim_id": claim_id,
                             "amount": amount,
                             "reserved_at": int(now),
+                            "spot_id": spot_id,
                         }
                     )
                     decision = {
@@ -440,6 +530,9 @@ __all__ = [
     "DAILY_MAX_PAYOUT_COUNT",
     "DAILY_MAX_PAYOUT_LUNA",
     "MAX_AUTOMATIC_PAYOUT_LUNA",
+    "SPOT_WINDOW_SECONDS",
+    "SPOT_MAX_PAYOUT_COUNT",
+    "SPOT_MAX_PAYOUT_LUNA",
     "RESERVATION_KEY",
     "WINDOW_SECONDS",
     "install",

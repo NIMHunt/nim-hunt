@@ -46,6 +46,7 @@ from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+import claim_authorization
 import constants as const
 import database as schema
 import db_access
@@ -55,18 +56,28 @@ import wallet
 from database import get_db
 
 RowDict = dict[str, Any]
-ASGIApp = Callable[[dict[str, Any], Callable[..., Awaitable[dict[str, Any]]], Callable[[dict[str, Any]], Awaitable[None]]], Awaitable[None]]
+ASGIApp = Callable[
+    [
+        dict[str, Any],
+        Callable[..., Awaitable[dict[str, Any]]],
+        Callable[[dict[str, Any]], Awaitable[None]],
+    ],
+    Awaitable[None],
+]
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/security", tags=["claim-security"])
 
 _DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _CLAIM_CREATE_RE = re.compile(r"^/api/spot/(?P<spot_id>[1-9][0-9]*)/claim$")
-_CLAIM_PRIVATE_RE = re.compile(r"^/api/claim/(?P<claim_id>[1-9][0-9]*)/(?:detail|location)$")
+_CLAIM_PRIVATE_RE = re.compile(
+    r"^/api/claim/(?P<claim_id>[1-9][0-9]*)/(?:detail|location)$"
+)
 
 SESSION_COOKIE_NAME = "nimhunt_claim_session"
 METADATA_PREFIX = "claim_security:"
 CHALLENGE_PREFIX = f"{METADATA_PREFIX}challenge:"
+CLAIM_AUTHORIZATION_PREFIX = f"{METADATA_PREFIX}claim_authorization:"
 SESSION_PREFIX = f"{METADATA_PREFIX}session:"
 USER_BINDING_PREFIX = f"{METADATA_PREFIX}user:"
 CLAIM_RECORD_PREFIX = f"{METADATA_PREFIX}claim:"
@@ -89,9 +100,16 @@ def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
 
 
 CHALLENGE_TTL_SECONDS = _env_int("NIMHUNT_CLAIM_AUTH_CHALLENGE_TTL_SECONDS", 5 * 60)
-SESSION_TTL_SECONDS = _env_int("NIMHUNT_CLAIM_AUTH_SESSION_TTL_SECONDS", 30 * 24 * 60 * 60)
+CLAIM_AUTHORIZATION_TTL_SECONDS = _env_int(
+    "NIMHUNT_CLAIM_AUTHORIZATION_TTL_SECONDS", 90
+)
+SESSION_TTL_SECONDS = _env_int(
+    "NIMHUNT_CLAIM_AUTH_SESSION_TTL_SECONDS", 30 * 24 * 60 * 60
+)
 PAYOUT_HOLD_SECONDS = _env_int("NIMHUNT_CLAIM_PAYOUT_SECURITY_HOLD_SECONDS", 5 * 60)
-EVENT_RETENTION_SECONDS = _env_int("NIMHUNT_CLAIM_SECURITY_EVENT_RETENTION_SECONDS", 24 * 60 * 60)
+EVENT_RETENTION_SECONDS = _env_int(
+    "NIMHUNT_CLAIM_SECURITY_EVENT_RETENTION_SECONDS", 24 * 60 * 60
+)
 MAX_RECENT_EVENTS = _env_int("NIMHUNT_CLAIM_SECURITY_MAX_RECENT_EVENTS", 200)
 
 STRONG_TRAVEL_MIN_METRES = _env_int("NIMHUNT_CLAIM_SECURITY_TRAVEL_MIN_METRES", 1_000)
@@ -106,11 +124,19 @@ AUTH_RATE_LIMIT_PER_DEVICE = _env_int("NIMHUNT_CLAIM_AUTH_RATE_LIMIT_PER_DEVICE"
 
 BURST_WINDOW_SECONDS = _env_int("NIMHUNT_CLAIM_SECURITY_BURST_WINDOW_SECONDS", 10 * 60)
 BURST_MIN_IDENTITIES = _env_int("NIMHUNT_CLAIM_SECURITY_BURST_MIN_IDENTITIES", 4)
-BURST_MIN_SPREAD_METRES = _env_int("NIMHUNT_CLAIM_SECURITY_BURST_MIN_SPREAD_METRES", 50_000)
-BURST_CENTRE_TOLERANCE_METRES = _env_int("NIMHUNT_CLAIM_SECURITY_BURST_CENTRE_TOLERANCE_METRES", 5)
-NEW_IDENTITY_MAX_AGE_SECONDS = _env_int("NIMHUNT_CLAIM_SECURITY_NEW_IDENTITY_MAX_AGE_SECONDS", 60 * 60)
+BURST_MIN_SPREAD_METRES = _env_int(
+    "NIMHUNT_CLAIM_SECURITY_BURST_MIN_SPREAD_METRES", 50_000
+)
+BURST_CENTRE_TOLERANCE_METRES = _env_int(
+    "NIMHUNT_CLAIM_SECURITY_BURST_CENTRE_TOLERANCE_METRES", 5
+)
+NEW_IDENTITY_MAX_AGE_SECONDS = _env_int(
+    "NIMHUNT_CLAIM_SECURITY_NEW_IDENTITY_MAX_AGE_SECONDS", 60 * 60
+)
 
-_VERIFY_HELPER = Path(__file__).resolve().parent / "helpers" / "verify_nimiq_message.mjs"
+_VERIFY_HELPER = (
+    Path(__file__).resolve().parent / "helpers" / "verify_nimiq_message.mjs"
+)
 _NODE_BINARY = os.getenv("NIMHUNT_NIMIQ_NODE_BINARY", "node").strip() or "node"
 
 _ORIGINAL_SUBMIT_CLAIM_REWARD = trans_updater.submit_claim_reward_transaction
@@ -125,6 +151,14 @@ class SecurityVerifyRequest(SecurityDeviceRequest):
     challenge_id: str = Field(min_length=10, max_length=128)
     public_key: str = Field(min_length=64, max_length=66)
     signature: str = Field(min_length=128, max_length=130)
+
+
+class ClaimAuthorizationPrepareRequest(SecurityDeviceRequest):
+    spot_id: int = Field(gt=0)
+    action: str = Field(default="claim", min_length=1, max_length=32)
+    lat: float
+    long: float
+    accuracy: float | None = None
 
 
 def _clean_device_id(value: Any) -> str:
@@ -254,7 +288,9 @@ def _cookie_token_from_scope(scope: dict[str, Any]) -> str | None:
     return str(morsel.value) if morsel is not None else None
 
 
-async def _load_session(db, *, token: str | None, device_id_hash: str, now: int) -> RowDict | None:
+async def _load_session(
+    db, *, token: str | None, device_id_hash: str, now: int
+) -> RowDict | None:
     if not token:
         return None
     value = await _metadata_get(db, _session_key(token))
@@ -331,9 +367,15 @@ def _verify_signature_sync(*, message: str, public_key: str, signature: str) -> 
     try:
         result = json.loads((completed.stdout or "{}").strip())
     except json.JSONDecodeError as exc:
-        raise RuntimeError("Nimiq authentication verifier returned invalid JSON") from exc
+        raise RuntimeError(
+            "Nimiq authentication verifier returned invalid JSON"
+        ) from exc
 
-    if completed.returncode != 0 or not isinstance(result, dict) or result.get("ok") is False:
+    if (
+        completed.returncode != 0
+        or not isinstance(result, dict)
+        or result.get("ok") is False
+    ):
         message_text = "Invalid Nimiq authentication signature"
         if isinstance(result, dict) and result.get("message"):
             message_text = str(result["message"])
@@ -356,19 +398,28 @@ async def _verify_signature(*, message: str, public_key: str, signature: str) ->
 
 
 @router.post("/session")
-async def security_session_status(payload: SecurityDeviceRequest, request: Request) -> JSONResponse:
+async def security_session_status(
+    payload: SecurityDeviceRequest, request: Request
+) -> JSONResponse:
     try:
         device_id = _clean_device_id(payload.device_id_hash)
     except ValueError as exc:
         return JSONResponse(
-            {"ok": False, "authenticated": False, "code": "invalid_device", "message": str(exc)},
+            {
+                "ok": False,
+                "authenticated": False,
+                "code": "invalid_device",
+                "message": str(exc),
+            },
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
     token = request.cookies.get(SESSION_COOKIE_NAME)
     async with get_db() as db:
         now = await db_access.get_unixepoch(db)
-        session = await _load_session(db, token=token, device_id_hash=device_id, now=now)
+        session = await _load_session(
+            db, token=token, device_id_hash=device_id, now=now
+        )
         if session is None:
             return JSONResponse({"ok": True, "authenticated": False})
         user = await db_access.get_user_by_id(db, user_id=int(session["user_id"]))
@@ -386,7 +437,9 @@ async def security_session_status(payload: SecurityDeviceRequest, request: Reque
 
 
 @router.post("/challenge")
-async def security_challenge(payload: SecurityDeviceRequest, request: Request) -> JSONResponse:
+async def security_challenge(
+    payload: SecurityDeviceRequest, request: Request
+) -> JSONResponse:
     try:
         device_id = _clean_device_id(payload.device_id_hash)
     except ValueError as exc:
@@ -457,7 +510,9 @@ async def security_challenge(payload: SecurityDeviceRequest, request: Request) -
 
 
 @router.post("/verify")
-async def security_verify(payload: SecurityVerifyRequest, request: Request) -> JSONResponse:
+async def security_verify(
+    payload: SecurityVerifyRequest, request: Request
+) -> JSONResponse:
     try:
         device_id = _clean_device_id(payload.device_id_hash)
     except ValueError as exc:
@@ -472,12 +527,20 @@ async def security_verify(payload: SecurityVerifyRequest, request: Request) -> J
         challenge = await _metadata_get(db, challenge_key)
     if not isinstance(challenge, dict):
         return JSONResponse(
-            {"ok": False, "code": "challenge_missing", "message": "This authentication challenge is no longer valid."},
+            {
+                "ok": False,
+                "code": "challenge_missing",
+                "message": "This authentication challenge is no longer valid.",
+            },
             status_code=status.HTTP_409_CONFLICT,
         )
     if str(challenge.get("device_id_hash") or "") != device_id:
         return JSONResponse(
-            {"ok": False, "code": "challenge_mismatch", "message": "The authentication challenge belongs to another device."},
+            {
+                "ok": False,
+                "code": "challenge_mismatch",
+                "message": "The authentication challenge belongs to another device.",
+            },
             status_code=status.HTTP_409_CONFLICT,
         )
     if int(challenge.get("expires_at") or 0) <= int(now):
@@ -485,7 +548,11 @@ async def security_verify(payload: SecurityVerifyRequest, request: Request) -> J
             async with db_access.transaction(db):
                 await _metadata_delete(db, challenge_key)
         return JSONResponse(
-            {"ok": False, "code": "challenge_expired", "message": "The authentication challenge expired. Please try again."},
+            {
+                "ok": False,
+                "code": "challenge_expired",
+                "message": "The authentication challenge expired. Please try again.",
+            },
             status_code=status.HTTP_409_CONFLICT,
         )
 
@@ -513,30 +580,50 @@ async def security_verify(payload: SecurityVerifyRequest, request: Request) -> J
         async with db_access.transaction(db, immediate=True):
             now = await db_access.get_unixepoch(db)
             fresh_challenge = await _metadata_get(db, challenge_key)
-            if not isinstance(fresh_challenge, dict) or int(fresh_challenge.get("expires_at") or 0) <= int(now):
+            if not isinstance(fresh_challenge, dict) or int(
+                fresh_challenge.get("expires_at") or 0
+            ) <= int(now):
                 return JSONResponse(
-                    {"ok": False, "code": "challenge_used", "message": "This authentication challenge has already been used."},
+                    {
+                        "ok": False,
+                        "code": "challenge_used",
+                        "message": "This authentication challenge has already been used.",
+                    },
                     status_code=status.HTTP_409_CONFLICT,
                 )
             if str(fresh_challenge.get("device_id_hash") or "") != device_id:
                 return JSONResponse(
-                    {"ok": False, "code": "challenge_mismatch", "message": "The authentication challenge belongs to another device."},
+                    {
+                        "ok": False,
+                        "code": "challenge_mismatch",
+                        "message": "The authentication challenge belongs to another device.",
+                    },
                     status_code=status.HTTP_409_CONFLICT,
                 )
 
             try:
-                user_id, _created = await user_registration_security.get_or_create_public_user(
+                (
+                    user_id,
+                    _created,
+                ) = await user_registration_security.get_or_create_public_user(
                     db, device_id_hash=device_id, source_network_hash=ip_fingerprint
                 )
             except user_registration_security.RegistrationRateLimited as exc:
                 return JSONResponse(
-                    {"ok": False, "code": "registration_rate_limited", "message": str(exc), "retry_at": exc.retry_at},
+                    {
+                        "ok": False,
+                        "code": "registration_rate_limited",
+                        "message": str(exc),
+                        "retry_at": exc.retry_at,
+                    },
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 )
             binding_key = _user_binding_key(user_id)
             existing_binding = await _metadata_get(db, binding_key)
             if isinstance(existing_binding, dict):
-                previous_wallet = _canonical_optional_address(existing_binding.get("wallet_address"))
+                previous_wallet = _canonical_optional_address(
+                    existing_binding.get("wallet_address")
+                )
                 if previous_wallet is not None and previous_wallet != wallet_address:
                     return JSONResponse(
                         {
@@ -591,6 +678,118 @@ async def security_verify(payload: SecurityVerifyRequest, request: Request) -> J
         path="/",
     )
     return response
+
+
+def _claim_environment() -> str:
+    return str(getattr(const, "DEPLOYMENT_MODE", "development"))
+
+
+def _claim_network() -> str:
+    value = str(getattr(const, "NIMIQ_NETWORK", "unknown"))
+    return {
+        "MainAlbatross": "mainnet",
+        "TestAlbatross": "testnet",
+        "DevAlbatross": "devnet",
+    }.get(value, value)
+
+
+@router.post("/claim-challenge")
+async def prepare_claim_authorization(
+    payload: ClaimAuthorizationPrepareRequest, request: Request
+) -> JSONResponse:
+    """Create a durable, short-lived envelope from session-owned identity data."""
+    try:
+        device_id = _clean_device_id(payload.device_id_hash)
+        fixed = claim_authorization.canonical_location(
+            payload.lat, payload.long, payload.accuracy
+        )
+    except ValueError as exc:
+        return _security_error_response(
+            code="claim_authorization_invalid", message=str(exc), http_status=400
+        )
+    if payload.action != claim_authorization.ACTION:
+        return _security_error_response(
+            code="claim_authorization_invalid",
+            message="Unsupported claim action.",
+            http_status=400,
+        )
+
+    async with get_db() as db:
+        async with db_access.transaction(db, immediate=True):
+            now = await db_access.get_unixepoch(db)
+            session = await _load_session(
+                db,
+                token=request.cookies.get(SESSION_COOKIE_NAME),
+                device_id_hash=device_id,
+                now=now,
+            )
+            if session is None:
+                return _security_error_response(
+                    code="wallet_auth_required",
+                    message="Verify your Nimiq wallet before claiming.",
+                    http_status=401,
+                )
+            spot = await db_access.get_spot(db, spot_id=int(payload.spot_id))
+            if spot is None:
+                return _security_error_response(
+                    code="spot_missing", message="Spot not found.", http_status=404
+                )
+            wallet_address = _canonical_optional_address(session["wallet_address"])
+            if wallet_address is None:
+                return _security_error_response(
+                    code="wallet_auth_required",
+                    message="The verified wallet is invalid.",
+                    http_status=401,
+                )
+            challenge_id = secrets.token_urlsafe(24)
+            nonce = secrets.token_hex(32)
+            expires_at = int(now) + CLAIM_AUTHORIZATION_TTL_SECONDS
+            message = claim_authorization.build_message(
+                environment=_claim_environment(),
+                network=_claim_network(),
+                spot_id=int(payload.spot_id),
+                receiving_wallet=wallet_address,
+                device=device_id,
+                latitude_e6=fixed[0],
+                longitude_e6=fixed[1],
+                accuracy_cm=fixed[2],
+                nonce=nonce,
+                issued_at=int(now),
+                expires_at=expires_at,
+            )
+            record = {
+                "version": claim_authorization.VERSION,
+                "status": "issued",
+                "message": message,
+                "message_hash": _sha256_text(message),
+                "nonce_hash": _sha256_text(nonce),
+                "spot_id": int(payload.spot_id),
+                "action": claim_authorization.ACTION,
+                "device_id_hash": device_id,
+                "receiving_wallet": wallet_address,
+                "latitude_e6": fixed[0],
+                "longitude_e6": fixed[1],
+                "accuracy_cm": fixed[2],
+                "environment": _claim_environment(),
+                "network": _claim_network(),
+                "issued_at": int(now),
+                "expires_at": expires_at,
+            }
+            await _metadata_set(
+                db, f"{CLAIM_AUTHORIZATION_PREFIX}{challenge_id}", record
+            )
+    return JSONResponse(
+        {
+            "ok": True,
+            "challenge_id": challenge_id,
+            "message": message,
+            "receiving_wallet": wallet_address,
+            "expires_at": expires_at,
+            "latitude_e6": fixed[0],
+            "longitude_e6": fixed[1],
+            "accuracy_cm": fixed[2],
+        }
+    )
 
 
 async def _load_recent_events(db, *, now: int) -> list[RowDict]:
@@ -679,7 +878,10 @@ def _preclaim_risk(events: list[RowDict], target: RowDict) -> RowDict:
                 max_mps=STRONG_TRAVEL_MAX_MPS,
                 min_metres=STRONG_TRAVEL_MIN_METRES,
             )
-            if violation and (strongest is None or int(violation["retry_at"]) > int(strongest["retry_at"])):
+            if violation and (
+                strongest is None
+                or int(violation["retry_at"]) > int(strongest["retry_at"])
+            ):
                 strongest = {
                     **violation,
                     "blocked": True,
@@ -700,7 +902,9 @@ def _preclaim_risk(events: list[RowDict], target: RowDict) -> RowDict:
             and int(event.get("claimed_at") or 0) > int(target["claimed_at"]) - 60 * 60
         ]
         if len(wallet_events) >= WALLET_HOURLY_CLAIM_LIMIT:
-            retry_at = min(int(event["claimed_at"]) for event in wallet_events) + 60 * 60 + 1
+            retry_at = (
+                min(int(event["claimed_at"]) for event in wallet_events) + 60 * 60 + 1
+            )
             return {
                 "blocked": True,
                 "reason": "wallet_rate_limit",
@@ -710,7 +914,9 @@ def _preclaim_risk(events: list[RowDict], target: RowDict) -> RowDict:
 
     ip_value = str(target.get("ip_hash") or "")
     if ip_value:
-        same_ip = [event for event in events if str(event.get("ip_hash") or "") == ip_value]
+        same_ip = [
+            event for event in events if str(event.get("ip_hash") or "") == ip_value
+        ]
         for previous in same_ip:
             violation = _travel_violation(
                 previous,
@@ -754,14 +960,21 @@ def _coordinated_burst_claim_ids(events: list[RowDict], *, now: int) -> list[int
         try:
             if int(event.get("claimed_at") or 0) < cutoff:
                 continue
-            user_age = int(event.get("claimed_at") or 0) - int(event.get("user_created_at") or 0)
-            session_age = int(event.get("claimed_at") or 0) - int(event.get("session_created_at") or 0)
+            user_age = int(event.get("claimed_at") or 0) - int(
+                event.get("user_created_at") or 0
+            )
+            session_age = int(event.get("claimed_at") or 0) - int(
+                event.get("session_created_at") or 0
+            )
             centre_offset = float(event.get("centre_offset_metres"))
         except (TypeError, ValueError):
             continue
         if user_age < 0 or session_age < 0:
             continue
-        if user_age > NEW_IDENTITY_MAX_AGE_SECONDS or session_age > NEW_IDENTITY_MAX_AGE_SECONDS:
+        if (
+            user_age > NEW_IDENTITY_MAX_AGE_SECONDS
+            or session_age > NEW_IDENTITY_MAX_AGE_SECONDS
+        ):
             continue
         if centre_offset > BURST_CENTRE_TOLERANCE_METRES:
             continue
@@ -769,17 +982,37 @@ def _coordinated_burst_claim_ids(events: list[RowDict], *, now: int) -> list[int
 
     if len(candidates) < BURST_MIN_IDENTITIES:
         return []
-    devices = {str(event.get("device_id_hash") or "") for event in candidates if event.get("device_id_hash")}
-    wallets = {str(event.get("verified_wallet") or "") for event in candidates if event.get("verified_wallet")}
-    spots = {int(event.get("spot_id") or 0) for event in candidates if int(event.get("spot_id") or 0) > 0}
+    devices = {
+        str(event.get("device_id_hash") or "")
+        for event in candidates
+        if event.get("device_id_hash")
+    }
+    wallets = {
+        str(event.get("verified_wallet") or "")
+        for event in candidates
+        if event.get("verified_wallet")
+    }
+    spots = {
+        int(event.get("spot_id") or 0)
+        for event in candidates
+        if int(event.get("spot_id") or 0) > 0
+    }
     if min(len(devices), len(wallets), len(spots)) < BURST_MIN_IDENTITIES:
         return []
     if _max_spread_metres(candidates) < BURST_MIN_SPREAD_METRES:
         return []
-    return sorted({int(event["claim_id"]) for event in candidates if int(event.get("claim_id") or 0) > 0})
+    return sorted(
+        {
+            int(event["claim_id"])
+            for event in candidates
+            if int(event.get("claim_id") or 0) > 0
+        }
+    )
 
 
-async def _mark_manual_review(db, *, claim_ids: list[int], reason: str, now: int) -> None:
+async def _mark_manual_review(
+    db, *, claim_ids: list[int], reason: str, now: int
+) -> None:
     if not claim_ids:
         return
     for claim_id in sorted({int(value) for value in claim_ids if int(value) > 0}):
@@ -800,7 +1033,9 @@ async def _mark_manual_review(db, *, claim_ids: list[int], reason: str, now: int
             "detected_at": int(now),
         },
     )
-    logger.warning("Claim-security manual review hold: reason=%s claims=%s", reason, claim_ids)
+    logger.warning(
+        "Claim-security manual review hold: reason=%s claims=%s", reason, claim_ids
+    )
 
 
 async def _record_claim_event(
@@ -809,19 +1044,30 @@ async def _record_claim_event(
     session: RowDict,
     request_body: RowDict,
     ip_fingerprint: str,
+    authorization: RowDict | None = None,
 ) -> None:
     async with get_db() as db:
         async with db_access.transaction(db, immediate=True):
             now = await db_access.get_unixepoch(db)
             claim = await db_access.get_claim(db, claim_id=int(claim_id))
             if claim is None:
-                raise RuntimeError(f"claim id={claim_id} disappeared before security recording")
-            spot = await db_access.get_spot(db, spot_id=int(claim[schema.CLAIM_SPOT_ID]))
+                raise RuntimeError(
+                    f"claim id={claim_id} disappeared before security recording"
+                )
+            spot = await db_access.get_spot(
+                db, spot_id=int(claim[schema.CLAIM_SPOT_ID])
+            )
             if spot is None:
-                raise RuntimeError(f"spot for claim id={claim_id} disappeared before security recording")
-            user = await db_access.get_user_by_id(db, user_id=int(claim[schema.CLAIM_RECIPIENT]))
+                raise RuntimeError(
+                    f"spot for claim id={claim_id} disappeared before security recording"
+                )
+            user = await db_access.get_user_by_id(
+                db, user_id=int(claim[schema.CLAIM_RECIPIENT])
+            )
             if user is None:
-                raise RuntimeError(f"user for claim id={claim_id} disappeared before security recording")
+                raise RuntimeError(
+                    f"user for claim id={claim_id} disappeared before security recording"
+                )
 
             reported_lat = float(request_body.get("lat", claim[schema.CLAIM_LAT]))
             reported_long = float(request_body.get("long", claim[schema.CLAIM_LONG]))
@@ -833,7 +1079,9 @@ async def _record_claim_event(
                 "user_id": int(claim[schema.CLAIM_RECIPIENT]),
                 "device_id_hash": str(session["device_id_hash"]),
                 "verified_wallet": str(session["wallet_address"]),
-                "payout_address": _canonical_optional_address(claim.get(schema.CLAIM_PAYOUT_ADDRESS)),
+                "payout_address": _canonical_optional_address(
+                    claim.get(schema.CLAIM_PAYOUT_ADDRESS)
+                ),
                 "ip_hash": str(ip_fingerprint),
                 "claimed_at": int(claim.get(schema.CLAIM_CLAIMED_AT) or now),
                 "recorded_at": int(now),
@@ -852,10 +1100,30 @@ async def _record_claim_event(
                 ),
                 "manual_review": False,
             }
+            if isinstance(authorization, dict):
+                event["claim_authorization"] = {
+                    "version": int(authorization.get("version") or 0),
+                    "message_hash": str(authorization.get("message_hash") or ""),
+                    "nonce_hash": str(authorization.get("nonce_hash") or ""),
+                    "receiving_wallet": str(
+                        authorization.get("receiving_wallet") or ""
+                    ),
+                    "spot_id": int(authorization.get("spot_id") or 0),
+                    "latitude_e6": int(authorization.get("latitude_e6") or 0),
+                    "longitude_e6": int(authorization.get("longitude_e6") or 0),
+                    "accuracy_cm": int(authorization.get("accuracy_cm") or 0),
+                    "issued_at": int(authorization.get("issued_at") or 0),
+                    "expires_at": int(authorization.get("expires_at") or 0),
+                    "claimed_at": int(now),
+                }
             await _metadata_set(db, _claim_record_key(claim_id), event)
 
             events = await _load_recent_events(db, now=now)
-            events = [item for item in events if int(item.get("claim_id") or 0) != int(claim_id)]
+            events = [
+                item
+                for item in events
+                if int(item.get("claim_id") or 0) != int(claim_id)
+            ]
             events.append(event)
             events = events[-MAX_RECENT_EVENTS:]
             await _metadata_set(db, RECENT_EVENTS_KEY, events)
@@ -900,7 +1168,11 @@ async def _payout_security_decision(db, *, claim_id: int) -> RowDict:
     record = await get_claim_security_record(db, claim_id=int(claim_id))
     if record is None:
         if bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
-            return {"allow": False, "reason": "security_record_missing", "manual_review": True}
+            return {
+                "allow": False,
+                "reason": "security_record_missing",
+                "manual_review": True,
+            }
         return {"allow": True, "reason": "development_without_security_record"}
 
     if bool(record.get("manual_review")):
@@ -927,9 +1199,8 @@ async def _payout_security_decision(db, *, claim_id: int) -> RowDict:
 
     # Pre-Phase-A claims may legitimately differ. Never rewrite or redirect
     # those entitlements: hold an observed mismatch durably for manual review.
-    if (
-        claim_payout != verified_wallet
-        or (recorded_payout is not None and recorded_payout != claim_payout)
+    if claim_payout != verified_wallet or (
+        recorded_payout is not None and recorded_payout != claim_payout
     ):
         record["manual_review"] = True
         record["manual_review_reason"] = "legacy_claim_payout_identity_mismatch"
@@ -993,14 +1264,18 @@ async def submit_claim_reward_transaction_with_security(
     )
 
 
-def _security_error_response(*, code: str, message: str, http_status: int, **extra: Any) -> JSONResponse:
+def _security_error_response(
+    *, code: str, message: str, http_status: int, **extra: Any
+) -> JSONResponse:
     return JSONResponse(
         {"ok": False, "code": str(code), "message": str(message), **extra},
         status_code=int(http_status),
     )
 
 
-async def _read_request_body(receive: Callable[..., Awaitable[dict[str, Any]]]) -> bytes:
+async def _read_request_body(
+    receive: Callable[..., Awaitable[dict[str, Any]]],
+) -> bytes:
     chunks: list[bytes] = []
     while True:
         message = await receive()
@@ -1052,7 +1327,11 @@ async def _preclaim_decision(
     async with get_db() as db:
         now = await db_access.get_unixepoch(db)
         spot = await db_access.get_spot(db, spot_id=int(spot_id))
-        if spot is None or spot.get(schema.SPOT_LAT) is None or spot.get(schema.SPOT_LONG) is None:
+        if (
+            spot is None
+            or spot.get(schema.SPOT_LAT) is None
+            or spot.get(schema.SPOT_LONG) is None
+        ):
             return {"blocked": False, "reason": "spot_unavailable_for_security_check"}
         events = await _load_recent_events(db, now=now)
 
@@ -1116,10 +1395,15 @@ async def guard_http_request(
     token = _cookie_token_from_scope(scope)
     async with get_db() as db:
         now = await db_access.get_unixepoch(db)
-        session = await _load_session(db, token=token, device_id_hash=device_id, now=now)
+        session = await _load_session(
+            db, token=token, device_id_hash=device_id, now=now
+        )
         if session is not None:
             user = await db_access.get_user_by_id(db, user_id=int(session["user_id"]))
-            if user is None or str(user[schema.USER_DEVICE_ID_HASH]).lower() != device_id:
+            if (
+                user is None
+                or str(user[schema.USER_DEVICE_ID_HASH]).lower() != device_id
+            ):
                 session = None
 
     if session is None:
@@ -1134,6 +1418,108 @@ async def guard_http_request(
     ip_fingerprint = _ip_hash(_scope_ip(scope))
     if claim_match is not None:
         spot_id = int(claim_match.group("spot_id"))
+        proof = request_body.get("claim_authorization")
+        if not isinstance(proof, dict):
+            response = _security_error_response(
+                code="claim_authorization_required",
+                message="Approve this exact claim in Nimiq Pay.",
+                http_status=401,
+            )
+            await response(scope, _replay_receive(b""), send)
+            return True
+        challenge_id = str(proof.get("challenge_id") or "")
+        auth_key = f"{CLAIM_AUTHORIZATION_PREFIX}{challenge_id}"
+        async with get_db() as db:
+            now = await db_access.get_unixepoch(db)
+            authorization = await _metadata_get(db, auth_key)
+        if not isinstance(authorization, dict):
+            response = _security_error_response(
+                code="claim_authorization_missing",
+                message="This claim approval is no longer valid.",
+                http_status=409,
+            )
+            await response(scope, _replay_receive(b""), send)
+            return True
+        if authorization.get("status") != "issued" or int(
+            authorization.get("expires_at") or 0
+        ) <= int(now):
+            response = _security_error_response(
+                code="claim_authorization_used",
+                message="This claim approval expired or has already been used.",
+                http_status=409,
+            )
+            await response(scope, _replay_receive(b""), send)
+            return True
+        try:
+            fixed = claim_authorization.canonical_location(
+                request_body.get("lat"),
+                request_body.get("long"),
+                request_body.get("accuracy"),
+            )
+            signer = await _verify_signature(
+                message=str(authorization["message"]),
+                public_key=str(proof.get("public_key") or ""),
+                signature=str(proof.get("signature") or ""),
+            )
+        except (ValueError, RuntimeError) as exc:
+            response = _security_error_response(
+                code="claim_signature_invalid", message=str(exc), http_status=401
+            )
+            await response(scope, _replay_receive(b""), send)
+            return True
+        expected = _canonical_optional_address(authorization.get("receiving_wallet"))
+        fields_match = (
+            int(authorization.get("spot_id") or 0) == spot_id
+            and str(authorization.get("device_id_hash")) == device_id
+            and tuple(fixed)
+            == (
+                int(authorization["latitude_e6"]),
+                int(authorization["longitude_e6"]),
+                int(authorization["accuracy_cm"]),
+            )
+            and str(authorization.get("action")) == "claim"
+            and str(authorization.get("environment")) == _claim_environment()
+            and str(authorization.get("network")) == _claim_network()
+        )
+        if not fields_match:
+            response = _security_error_response(
+                code="claim_authorization_mismatch",
+                message="The claim details changed after approval. Prepare and approve the claim again.",
+                http_status=409,
+            )
+            await response(scope, _replay_receive(b""), send)
+            return True
+        if expected is None or signer != expected or expected != session["wallet_address"]:
+            response = _security_error_response(
+                code="claim_wallet_mismatch",
+                message="The wallet approving this claim differs from your verified claim wallet. Reauthenticate the intended wallet and try again.",
+                http_status=409,
+            )
+            await response(scope, _replay_receive(b""), send)
+            return True
+        # BEGIN IMMEDIATE plus the conditional status check is the single-use
+        # boundary across workers and survives process restart.
+        async with get_db() as db:
+            async with db_access.transaction(db, immediate=True):
+                fresh = await _metadata_get(db, auth_key)
+                now = await db_access.get_unixepoch(db)
+                if (
+                    not isinstance(fresh, dict)
+                    or fresh.get("status") != "issued"
+                    or int(fresh.get("expires_at") or 0) <= now
+                ):
+                    response = _security_error_response(
+                        code="claim_authorization_used",
+                        message="This claim approval expired or has already been used.",
+                        http_status=409,
+                    )
+                    await response(scope, _replay_receive(b""), send)
+                    return True
+                fresh["status"] = "processing"
+                fresh["proof_hash"] = _sha256_text(
+                    f"{proof.get('public_key')}:{proof.get('signature')}"
+                )
+                await _metadata_set(db, auth_key, fresh)
         decision = await _preclaim_decision(
             spot_id=spot_id,
             session=session,
@@ -1164,7 +1550,11 @@ async def guard_http_request(
 
     if claim_match is not None:
         response_status, response_data = _response_json(captured)
-        if 200 <= response_status < 300 and isinstance(response_data, dict) and response_data.get("ok") is True:
+        if (
+            200 <= response_status < 300
+            and isinstance(response_data, dict)
+            and response_data.get("ok") is True
+        ):
             claim_data = response_data.get("claim")
             claim_id = claim_data.get("id") if isinstance(claim_data, dict) else None
             if claim_id is not None:
@@ -1174,12 +1564,26 @@ async def guard_http_request(
                         session=session,
                         request_body=request_body,
                         ip_fingerprint=ip_fingerprint,
+                        authorization=authorization,
                     )
+                    async with get_db() as db:
+                        async with db_access.transaction(db, immediate=True):
+                            completed = await _metadata_get(db, auth_key)
+                            if isinstance(completed, dict):
+                                completed["status"] = "consumed"
+                                completed["claim_id"] = int(claim_id)
+                                completed["claimed_at"] = await db_access.get_unixepoch(
+                                    db
+                                )
+                                completed.pop("message", None)
+                                await _metadata_set(db, auth_key, completed)
                 except Exception:
                     # The payout boundary fails closed when this marker is absent,
                     # so never create a duplicate claim merely because audit
                     # recording failed after the claim itself committed.
-                    logger.exception("Failed to persist security record for claim=%s", claim_id)
+                    logger.exception(
+                        "Failed to persist security record for claim=%s", claim_id
+                    )
 
     for message in captured:
         await send(message)
@@ -1192,7 +1596,9 @@ def install() -> None:
     if _INSTALLED:
         return
 
-    trans_updater.submit_claim_reward_transaction = submit_claim_reward_transaction_with_security
+    trans_updater.submit_claim_reward_transaction = (
+        submit_claim_reward_transaction_with_security
+    )
 
     # public_html is imported before funding_flow.install() in main.py. Import it
     # lazily here to avoid a module cycle during application startup.
@@ -1208,6 +1614,7 @@ __all__ = [
     "BURST_MIN_SPREAD_METRES",
     "BURST_WINDOW_SECONDS",
     "CHALLENGE_TTL_SECONDS",
+    "CLAIM_AUTHORIZATION_TTL_SECONDS",
     "PAYOUT_HOLD_SECONDS",
     "SESSION_TTL_SECONDS",
     "SESSION_COOKIE_NAME",

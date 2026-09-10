@@ -107,3 +107,21 @@ Code-protected Standard Spots are deliberately unchanged: their finite,
 creator-issued, single-use claim codes are an additional admission signal and
 already bound participation to the configured Spot capacity. Prizedraw
 settlement is likewise outside this Open Standard Spot containment rule.
+# Claim authorization boundary
+
+Every new public Standard claim (open or code-protected), Prizedraw entry, and
+duration-claim start is approved with a version 2 Nimiq signed message prepared
+by the server. The message binds the Spot, device, fixed-point location,
+accuracy, deployment environment, Nimiq network, server nonce and lifetime to
+the verified session wallet. That wallet remains the immutable receiving
+address. Authorizations are durably single-use; raw signatures and nonces are
+not retained after successful use.
+
+Duration heartbeats continue to use the authenticated session. Nimiq Pay's
+interactive `sign()` would otherwise prompt every heartbeat, substantially
+degrading the duration flow; heartbeat-specific signing is deferred until a
+non-disruptive wallet mechanism is available.
+
+> A valid claim signature proves that the receiving wallet authorised the
+> reported location. It does not prove the receiving wallet was physically at
+> that location.

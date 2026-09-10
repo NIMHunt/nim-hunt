@@ -73,15 +73,21 @@ an appropriate configured ceiling or manual process, an operator deliberately
 clears the marker with `claim_security.release_claim_manual_review()`; it is
 never released merely because time elapsed.
 
-Open Standard Spots also have an independent, durable rolling exposure budget.
+Open Standard Spots also have independent rolling and lifetime exposure budgets.
 By default, no more than 10 payouts or 5,000 NIM (whichever is reached first)
-can be reserved automatically for one Open Spot in 24 hours. Therefore, even if
-every wallet, device, IP and location heuristic fails, the default maximum
-automatic loss attributable to one attacked Open Spot is 5,000 NIM per rolling
-24 hours, and can be lower because the 10-payout bound and the stricter global
-circuit breakers still apply. This is a rate-of-loss containment boundary, not
-a claim that Sybil users can be identified; a patient attacker can cause another
-5,000 NIM of exposure after the rolling window has fully elapsed.
+can be reserved automatically for one Open Spot in 24 hours. In addition, no
+more than 50% of that Spot's configured claim capacity or reward pool may ever
+be paid automatically. Whichever count/value/rolling/lifetime boundary is
+strictest wins. The lifetime boundary does not reset, so waiting 24 or 72 hours
+cannot progressively drain the remainder automatically.
+
+At the default 50%, Open Spots configured for 1, 4, 10, 20, and 50 claims permit
+respectively 0, 2, 5, 10, and 10 automatic payouts (the 50-claim Spot reaches the
+rolling absolute count boundary first). A one-claim Open Spot therefore always
+requires manual review: without a creator-issued or otherwise scarce admission
+credential, automatically paying one untrusted claimant necessarily risks 100%
+of its reward pool. Wallet, device, IP, and GPS heuristics cannot solve that
+inherent case.
 
 Claims beyond either per-Spot boundary retain their existing status and
 entitlement but receive a durable manual-review marker with the Spot id, observed
@@ -93,7 +99,8 @@ per-Spot automatic boundary for that claim, while global limits remain
 authoritative. Configure the policy with
 `NIMHUNT_OPEN_SPOT_PAYOUT_WINDOW_SECONDS`,
 `NIMHUNT_OPEN_SPOT_PAYOUT_MAX_COUNT`, and
-`NIMHUNT_OPEN_SPOT_PAYOUT_MAX_NIM`.
+`NIMHUNT_OPEN_SPOT_PAYOUT_MAX_NIM`. The lifetime percentage is configured with
+`NIMHUNT_OPEN_SPOT_LIFETIME_AUTOMATIC_PERCENT`.
 
 Code-protected Standard Spots are deliberately unchanged: their finite,
 creator-issued, single-use claim codes are an additional admission signal and

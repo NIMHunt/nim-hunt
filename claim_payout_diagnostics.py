@@ -196,6 +196,9 @@ async def claim_payout_diagnostics() -> RowDict:
             "window_seconds": int(claim_payout_throttle.SPOT_WINDOW_SECONDS),
             "max_count": int(claim_payout_throttle.SPOT_MAX_PAYOUT_COUNT),
             "max_amount_luna": int(claim_payout_throttle.SPOT_MAX_PAYOUT_LUNA),
+            "lifetime_automatic_percent": int(
+                claim_payout_throttle.SPOT_LIFETIME_AUTOMATIC_PERCENT
+            ),
             "held_spots": [
                 {
                     "spot_id": spot_id,

@@ -115,12 +115,20 @@ class ClaimPayoutReservationTest(unittest.IsolatedAsyncioTestCase):
                 amount=amount,
             )
 
-    async def _open_spot_claims(self, count: int, *, use_password: bool = False) -> tuple[int, list[int]]:
+    async def _open_spot_claims(
+        self,
+        count: int,
+        *,
+        use_password: bool = False,
+        is_prizedraw: bool = False,
+        total_value: int | None = None,
+    ) -> tuple[int, list[int]]:
         async with schema.get_db() as db:
             owner = await db_access.create_user(
                 db, device_id_hash=hashlib.sha256(b"exposure-owner").hexdigest()
             )
-            spot_id = await db_access.create_spot(
+            create = db_access.create_prizedraw if is_prizedraw else db_access.create_spot
+            spot_id = await create(
                 db,
                 created_by=owner,
                 title="Exposure boundary",
@@ -130,9 +138,8 @@ class ClaimPayoutReservationTest(unittest.IsolatedAsyncioTestCase):
                 claim_duration=0,
                 max_claims_per_user=1,
                 max_total_claims=count,
-                total_value=max(
-                    const.MIN_SPOT_TOTAL_VALUE,
-                    count * const.MIN_STANDARD_CLAIM_PAYOUT,
+                total_value=total_value or max(
+                    const.MIN_SPOT_TOTAL_VALUE, count * const.MIN_STANDARD_CLAIM_PAYOUT
                 ),
                 starts_at=int(time.time()) - 60,
                 ends_at=24 * 60 * 60,
@@ -252,6 +259,24 @@ class ClaimPayoutReservationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["manual_review_reason"], "open_spot_payout_count_limit")
         self.assertEqual(record["manual_review_details"]["spot_id"], spot_id)
 
+    async def test_default_lifetime_policy_protects_small_open_spots(self):
+        for capacity, expected_automatic in ((1, 0), (2, 1), (4, 2), (10, 5), (20, 10), (50, 10)):
+            with self.subTest(capacity=capacity):
+                # Each subcase needs an independent database because durable
+                # reservations intentionally survive for the Spot lifetime.
+                await self.asyncTearDown()
+                await self.asyncSetUp()
+                _spot_id, claim_ids = await self._open_spot_claims(capacity)
+                with (
+                    mock.patch.object(claim_payout_throttle, "MAX_PAYOUT_COUNT", 1_000),
+                    mock.patch.object(claim_payout_throttle, "MAX_PAYOUT_LUNA", 10**15),
+                    mock.patch.object(claim_payout_throttle, "DAILY_MAX_PAYOUT_COUNT", 1_000),
+                    mock.patch.object(claim_payout_throttle, "DAILY_MAX_PAYOUT_LUNA", 10**15),
+                ):
+                    results = [await self._reserve(claim_id=claim_id) for claim_id in claim_ids]
+                self.assertEqual(sum(bool(result["allow"]) for result in results), expected_automatic)
+                self.assertTrue(all(result.get("manual_review") for result in results[expected_automatic:]))
+
     async def test_concurrent_open_spot_claims_share_atomic_final_allowance(self):
         _spot_id, claim_ids = await self._open_spot_claims(2)
         with (
@@ -268,8 +293,27 @@ class ClaimPayoutReservationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(bool(result["allow"]) for result in results), 1)
         self.assertEqual(
             [result for result in results if not result["allow"]][0]["reason"],
-            "open_spot_payout_count_limit",
+            "open_spot_lifetime_count_limit",
         )
+
+    async def test_restart_preserves_lifetime_exposure(self):
+        _spot_id, claim_ids = await self._open_spot_claims(2)
+        self.assertTrue((await self._reserve(claim_id=claim_ids[0]))["allow"])
+        await cache.force_all_cache_clear()
+        await schema.init_db()
+        after_restart = await self._reserve(claim_id=claim_ids[1])
+        self.assertFalse(after_restart["allow"])
+        self.assertEqual(after_restart["reason"], "open_spot_lifetime_count_limit")
+
+    async def test_high_value_reward_hits_amount_boundary_before_count_boundary(self):
+        total_value = 20_000 * const.LUNA_PER_NIM
+        _spot_id, claim_ids = await self._open_spot_claims(4, total_value=total_value)
+        reward = total_value // 4
+        first = await self._reserve(claim_id=claim_ids[0], amount=reward)
+        second = await self._reserve(claim_id=claim_ids[1], amount=reward)
+        self.assertTrue(first["allow"])
+        self.assertFalse(second["allow"])
+        self.assertEqual(second["reason"], "open_spot_payout_amount_limit")
 
     async def test_operator_release_bypasses_spot_cap_but_not_global_cap(self):
         _spot_id, claim_ids = await self._open_spot_claims(2)
@@ -319,7 +363,48 @@ class ClaimPayoutReservationTest(unittest.IsolatedAsyncioTestCase):
                 ))
                 results = [await self._reserve(claim_id=claim_id) for claim_id in batch]
             allowed_per_day.append(sum(bool(result["allow"]) for result in results))
-        self.assertEqual(allowed_per_day, [10, 10, 10])
+        self.assertEqual(allowed_per_day, [10, 5, 0])
+
+    async def test_code_protected_and_prizedraw_spots_are_intentionally_exempt(self):
+        for options in ({"use_password": True}, {"is_prizedraw": True}):
+            with self.subTest(options=options):
+                await self.asyncTearDown()
+                await self.asyncSetUp()
+                _spot_id, claim_ids = await self._open_spot_claims(2, **options)
+                with (
+                    mock.patch.object(claim_payout_throttle, "MAX_PAYOUT_COUNT", 100),
+                    mock.patch.object(claim_payout_throttle, "MAX_PAYOUT_LUNA", 10**15),
+                    mock.patch.object(claim_payout_throttle, "DAILY_MAX_PAYOUT_COUNT", 100),
+                    mock.patch.object(claim_payout_throttle, "DAILY_MAX_PAYOUT_LUNA", 10**15),
+                ):
+                    results = [await self._reserve(claim_id=claim_id) for claim_id in claim_ids]
+                self.assertTrue(all(result["allow"] for result in results), results)
+
+    async def test_long_spot_window_does_not_lengthen_global_daily_window(self):
+        _spot_id, claim_ids = await self._open_spot_claims(2, use_password=True)
+        now = 1_700_000_000
+        async with schema.get_db() as db:
+            await claim_payout_throttle.claim_security._metadata_set(
+                db,
+                claim_payout_throttle.RESERVATION_KEY,
+                [{
+                    "claim_id": claim_ids[0],
+                    "amount": 100,
+                    "reserved_at": now - 2 * 24 * 60 * 60,
+                    "spot_id": _spot_id,
+                }],
+            )
+            await db.commit()
+        with (
+            mock.patch.object(claim_payout_throttle, "SPOT_WINDOW_SECONDS", 3 * 24 * 60 * 60),
+            mock.patch.object(claim_payout_throttle, "DAILY_WINDOW_SECONDS", 24 * 60 * 60),
+            mock.patch.object(claim_payout_throttle, "DAILY_MAX_PAYOUT_COUNT", 1),
+            mock.patch.object(claim_payout_throttle, "MAX_PAYOUT_COUNT", 100),
+            mock.patch.object(claim_payout_throttle, "MAX_PAYOUT_LUNA", 10**15),
+            mock.patch.object(claim_payout_throttle.db_access, "get_unixepoch", mock.AsyncMock(return_value=now)),
+        ):
+            result = await self._reserve(claim_id=claim_ids[1])
+        self.assertTrue(result["allow"])
 
 
 if __name__ == "__main__":

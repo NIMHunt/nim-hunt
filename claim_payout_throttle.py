@@ -61,6 +61,11 @@ SPOT_WINDOW_SECONDS = _env_int("NIMHUNT_OPEN_SPOT_PAYOUT_WINDOW_SECONDS", 24 * 6
 SPOT_MAX_PAYOUT_COUNT = _env_int("NIMHUNT_OPEN_SPOT_PAYOUT_MAX_COUNT", 10)
 SPOT_MAX_PAYOUT_NIM = _env_int("NIMHUNT_OPEN_SPOT_PAYOUT_MAX_NIM", 5_000)
 SPOT_MAX_PAYOUT_LUNA = SPOT_MAX_PAYOUT_NIM * int(getattr(const, "LUNA_PER_NIM", 100_000))
+SPOT_LIFETIME_AUTOMATIC_PERCENT = _env_int(
+    "NIMHUNT_OPEN_SPOT_LIFETIME_AUTOMATIC_PERCENT", 50
+)
+if SPOT_LIFETIME_AUTOMATIC_PERCENT > 100:
+    raise ValueError("NIMHUNT_OPEN_SPOT_LIFETIME_AUTOMATIC_PERCENT must be at most 100")
 
 RESERVATION_KEY = f"{claim_security.METADATA_PREFIX}payout_throttle_reservations"
 
@@ -174,7 +179,6 @@ def _clean_reservations(raw: Any, *, now: int) -> list[RowDict]:
     """Return well-formed, still-active payout reservations."""
     if not isinstance(raw, list):
         return []
-    cutoff = int(now) - max(WINDOW_SECONDS, DAILY_WINDOW_SECONDS, SPOT_WINDOW_SECONDS)
     clean: list[RowDict] = []
     for item in raw:
         if not isinstance(item, dict):
@@ -186,7 +190,7 @@ def _clean_reservations(raw: Any, *, now: int) -> list[RowDict]:
             spot_id = int(item.get("spot_id") or 0)
         except (TypeError, ValueError):
             continue
-        if claim_id <= 0 or amount <= 0 or reserved_at <= cutoff:
+        if claim_id <= 0 or amount <= 0 or reserved_at <= 0:
             continue
         clean.append(
             {
@@ -219,6 +223,25 @@ async def _recent_payout_rows(db, *, now: int) -> list[RowDict]:
             const.TRANS_STATUS_FAILED,
             cutoff,
         ),
+    )
+    return [dict(row) for row in rows]
+
+
+async def _lifetime_spot_payout_rows(db, *, spot_id: int) -> list[RowDict]:
+    rows = await db.execute_fetchall(
+        f"""
+        SELECT
+            {schema.TRANS_ID} AS trans_id,
+            {schema.TRANS_CLAIM_ID} AS claim_id,
+            {schema.TRANS_AMOUNT} AS amount,
+            {schema.TRANS_CREATED_AT} AS created_at,
+            {schema.TRANS_SPOT_ID} AS spot_id
+        FROM {schema.TRANS_TABLE_NAME}
+        WHERE {schema.TRANS_TYPE} = ?
+          AND {schema.TRANS_STATUS} != ?
+          AND {schema.TRANS_SPOT_ID} = ?;
+        """,
+        (const.TRANS_TYPE_CLAIM, const.TRANS_STATUS_FAILED, int(spot_id)),
     )
     return [dict(row) for row in rows]
 
@@ -286,6 +309,32 @@ def _spot_window_decision(*, state: RowDict, amount: int, spot_id: int) -> RowDi
     return {"allow": True, "reason": "within_open_spot_payout_limits", **details}
 
 
+def _spot_lifetime_decision(
+    *, state: RowDict, amount: int, spot: RowDict
+) -> RowDict:
+    spot_id = int(spot[schema.SPOT_ID])
+    capacity = max(1, int(spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) or 0))
+    reward_pool = max(0, int(spot.get(schema.SPOT_TOTAL_VALUE) or 0))
+    max_count = capacity * SPOT_LIFETIME_AUTOMATIC_PERCENT // 100
+    max_amount = reward_pool * SPOT_LIFETIME_AUTOMATIC_PERCENT // 100
+    count = max(0, int(state.get("payout_count") or 0))
+    exposure = max(0, int(state.get("payout_amount") or 0))
+    details = {
+        "spot_id": spot_id,
+        "spot_lifetime_automatic_percent": int(SPOT_LIFETIME_AUTOMATIC_PERCENT),
+        "spot_lifetime_payout_count": count,
+        "spot_lifetime_payout_amount": exposure,
+        "spot_lifetime_max_payout_count": max_count,
+        "spot_lifetime_max_payout_amount": max_amount,
+        "manual_review": True,
+    }
+    if count >= max_count:
+        return {"allow": False, "reason": "open_spot_lifetime_count_limit", **details}
+    if exposure + int(amount) > max_amount:
+        return {"allow": False, "reason": "open_spot_lifetime_amount_limit", **details}
+    return {"allow": True, "reason": "within_open_spot_lifetime_limits", **details}
+
+
 async def reserve_payout_slot(
     db,
     *,
@@ -348,8 +397,17 @@ async def reserve_payout_slot(
             payout_rows=short_rows,
             reservations=short_reservations,
         )
+        daily_cutoff = int(now) - DAILY_WINDOW_SECONDS
+        daily_rows = [
+            row for row in payout_rows
+            if int(row.get("created_at") or 0) > daily_cutoff
+        ]
+        daily_reservations = [
+            item for item in reservations
+            if int(item["reserved_at"]) > daily_cutoff
+        ]
         daily_state, daily_transaction_claim_ids = _combined_window_state(
-            now=now, payout_rows=payout_rows, reservations=reservations
+            now=now, payout_rows=daily_rows, reservations=daily_reservations
         )
         transaction_claim_ids.update(daily_transaction_claim_ids)
 
@@ -392,6 +450,30 @@ async def reserve_payout_slot(
                 # Global circuit breakers remain authoritative. Only after they
                 # allow a payout do we apply the independent Open-Spot budget.
                 if bool(decision.get("allow")) and is_open_standard:
+                    lifetime_rows = await _lifetime_spot_payout_rows(db, spot_id=spot_id)
+                    lifetime_transaction_ids = {
+                        int(row.get("claim_id") or 0) for row in lifetime_rows
+                    }
+                    # Materialised intents are authoritative; discard their
+                    # now-redundant reservations. Unmaterialised reservations
+                    # remain for the Spot lifetime so a crash after reservation
+                    # cannot silently restore automatic allowance.
+                    reservations = [
+                        item for item in reservations
+                        if not (
+                            int(item.get("spot_id") or 0) == spot_id
+                            and int(item["claim_id"]) in lifetime_transaction_ids
+                        )
+                    ]
+                    lifetime_reservations = [
+                        item for item in reservations
+                        if int(item.get("spot_id") or 0) == spot_id
+                    ]
+                    lifetime_state, _ = _combined_window_state(
+                        now=now,
+                        payout_rows=lifetime_rows,
+                        reservations=lifetime_reservations,
+                    )
                     spot_cutoff = int(now) - SPOT_WINDOW_SECONDS
                     spot_rows = [
                         row for row in payout_rows
@@ -413,9 +495,13 @@ async def reserve_payout_slot(
                         isinstance(record, dict) and record.get("manual_review_released_at")
                     )
                     if not explicitly_released:
-                        decision = _spot_window_decision(
-                            state=spot_state, amount=amount, spot_id=spot_id
+                        decision = _spot_lifetime_decision(
+                            state=lifetime_state, amount=amount, spot=spot
                         )
+                        if bool(decision.get("allow")):
+                            decision = _spot_window_decision(
+                                state=spot_state, amount=amount, spot_id=spot_id
+                            )
                 if decision.get("manual_review"):
                     record = await claim_security.get_claim_security_record(
                         db, claim_id=claim_id
@@ -430,6 +516,11 @@ async def reserve_payout_slot(
                                 "spot_id", "spot_window_seconds", "spot_payout_count",
                                 "spot_payout_amount", "spot_max_payout_count",
                                 "spot_max_payout_amount",
+                                "spot_lifetime_automatic_percent",
+                                "spot_lifetime_payout_count",
+                                "spot_lifetime_payout_amount",
+                                "spot_lifetime_max_payout_count",
+                                "spot_lifetime_max_payout_amount",
                             )
                             if key in decision
                         }
@@ -533,6 +624,7 @@ __all__ = [
     "SPOT_WINDOW_SECONDS",
     "SPOT_MAX_PAYOUT_COUNT",
     "SPOT_MAX_PAYOUT_LUNA",
+    "SPOT_LIFETIME_AUTOMATIC_PERCENT",
     "RESERVATION_KEY",
     "WINDOW_SECONDS",
     "install",

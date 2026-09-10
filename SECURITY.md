@@ -117,6 +117,16 @@ the verified session wallet. That wallet remains the immutable receiving
 address. Authorizations are durably single-use; raw signatures and nonces are
 not retained after successful use.
 
+The durable authorization state machine is `issued → verifying → processing →
+retired`. The `verifying` transition is committed before the one permitted Node
+signature-verifier invocation. Successful claim audit recording retires the
+challenge immediately; rejected attempts are also retired. Expired `issued`
+rows and worker-abandoned `verifying`/`processing` rows are reclaimed in small,
+oldest-first batches during later issuance. Missing or retired random challenge
+IDs are terminal failures, so cleanup cannot re-enable replay. If a worker dies
+after claim creation but before its audit marker, payout remains fail-closed;
+the non-issued authorization cannot create another claim and is later cleaned.
+
 Duration heartbeats continue to use the authenticated session. Nimiq Pay's
 interactive `sign()` would otherwise prompt every heartbeat, substantially
 degrading the duration flow; heartbeat-specific signing is deferred until a

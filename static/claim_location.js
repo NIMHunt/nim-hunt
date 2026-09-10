@@ -1,4 +1,5 @@
 const FRESH_SAMPLE_MAX_AGE_MS = 15000;
+const COLLECTION_BUDGET_MS = 12000;
 
 function median(values) {
     const sorted = [...values].sort((a, b) => a - b);
@@ -31,15 +32,34 @@ function onePosition(geolocation, options) {
     return new Promise((resolve, reject) => geolocation.getCurrentPosition(resolve, reject, options));
 }
 
-export async function collectFreshClaimLocation({ geolocation = globalThis.navigator?.geolocation, count = 3 } = {}) {
+function withinBudget(promise, milliseconds) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Location collection timed out.')), milliseconds);
+        promise.then(
+            (value) => { clearTimeout(timer); resolve(value); },
+            (error) => { clearTimeout(timer); reject(error); },
+        );
+    });
+}
+
+export async function collectFreshClaimLocation({
+    geolocation = globalThis.navigator?.geolocation,
+    count = 3,
+    budgetMs = COLLECTION_BUDGET_MS,
+    now = () => Date.now(),
+} = {}) {
     if (!geolocation?.getCurrentPosition) throw new Error('Location permission is required to claim.');
     const samples = [];
     let lastError = null;
+    const deadline = now() + budgetMs;
     for (let index = 0; index < count; index += 1) {
+        const remaining = deadline - now();
+        if (remaining <= 0) break;
         try {
-            const position = await onePosition(geolocation, {
-                enableHighAccuracy: true, maximumAge: 0, timeout: 8000,
-            });
+            const timeout = Math.min(6000, remaining);
+            const position = await withinBudget(onePosition(geolocation, {
+                enableHighAccuracy: true, maximumAge: 0, timeout,
+            }), timeout);
             samples.push({
                 lat: position?.coords?.latitude, long: position?.coords?.longitude,
                 accuracy: position?.coords?.accuracy, timestamp: position?.timestamp,
@@ -48,7 +68,9 @@ export async function collectFreshClaimLocation({ geolocation = globalThis.navig
             lastError = error;
             if (Number(error?.code) === 1) throw new Error('Location permission was denied. Allow precise location and retry.');
         }
-        if (index + 1 < count) await new Promise((resolve) => setTimeout(resolve, 250));
+        if (index + 1 < count && deadline - now() > 250) {
+            await new Promise((resolve) => setTimeout(resolve, 250));
+        }
     }
     try {
         return combineFreshClaimLocations(samples);

@@ -36,6 +36,7 @@ def _is_ephemeral_key(key: str) -> bool:
     return key.startswith(
         (
             claim_security.CHALLENGE_PREFIX,
+            claim_security.CLAIM_AUTHORIZATION_PREFIX,
             claim_security.SESSION_PREFIX,
             claim_security.RATE_PREFIX,
         )
@@ -47,6 +48,22 @@ def _prune_value(*, key: str, raw_value: str, now: int) -> tuple[str, Any | None
     try:
         value = json.loads(str(raw_value))
     except (TypeError, ValueError, json.JSONDecodeError):
+        return "delete", None
+
+    if key.startswith(claim_security.CLAIM_AUTHORIZATION_PREFIX):
+        if not isinstance(value, dict):
+            return "delete", None
+        try:
+            expires_at = int(value.get("expires_at") or 0)
+        except (TypeError, ValueError):
+            return "delete", None
+        state = str(value.get("status") or "")
+        if state == "issued":
+            return ("delete", None) if expires_at <= int(now) else ("keep", value)
+        if state in {"verifying", "processing", "failed"}:
+            removable_at = expires_at + claim_security.CLAIM_AUTHORIZATION_VERIFY_GRACE_SECONDS
+            return ("delete", None) if removable_at <= int(now) else ("keep", value)
+        # Consumed/unknown authorizations cannot be used and need no tombstone.
         return "delete", None
 
     if key.startswith((claim_security.CHALLENGE_PREFIX, claim_security.SESSION_PREFIX)):
@@ -61,7 +78,10 @@ def _prune_value(*, key: str, raw_value: str, now: int) -> tuple[str, Any | None
     if key.startswith(claim_security.RATE_PREFIX):
         if not isinstance(value, list):
             return "delete", None
-        cutoff = int(now) - int(claim_security.AUTH_RATE_WINDOW_SECONDS)
+        cutoff = int(now) - max(
+            int(claim_security.AUTH_RATE_WINDOW_SECONDS),
+            int(claim_security.CLAIM_AUTHORIZATION_RATE_WINDOW_SECONDS),
+        )
         kept: list[int] = []
         for item in value:
             try:
@@ -96,6 +116,7 @@ async def _ephemeral_rows_after_cursor(
                 {schema.APP_METADATA_KEY} LIKE ?
              OR {schema.APP_METADATA_KEY} LIKE ?
              OR {schema.APP_METADATA_KEY} LIKE ?
+             OR {schema.APP_METADATA_KEY} LIKE ?
           )
         ORDER BY {schema.APP_METADATA_KEY}
         LIMIT ?;
@@ -103,6 +124,7 @@ async def _ephemeral_rows_after_cursor(
         (
             str(cursor),
             f"{claim_security.CHALLENGE_PREFIX}%",
+            f"{claim_security.CLAIM_AUTHORIZATION_PREFIX}%",
             f"{claim_security.SESSION_PREFIX}%",
             f"{claim_security.RATE_PREFIX}%",
             int(limit),

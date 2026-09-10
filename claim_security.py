@@ -103,6 +103,21 @@ CHALLENGE_TTL_SECONDS = _env_int("NIMHUNT_CLAIM_AUTH_CHALLENGE_TTL_SECONDS", 5 *
 CLAIM_AUTHORIZATION_TTL_SECONDS = _env_int(
     "NIMHUNT_CLAIM_AUTHORIZATION_TTL_SECONDS", 90
 )
+CLAIM_AUTHORIZATION_VERIFY_GRACE_SECONDS = _env_int(
+    "NIMHUNT_CLAIM_AUTHORIZATION_VERIFY_GRACE_SECONDS", 5 * 60
+)
+CLAIM_AUTHORIZATION_CLEANUP_BATCH = _env_int(
+    "NIMHUNT_CLAIM_AUTHORIZATION_CLEANUP_BATCH", 64
+)
+CLAIM_AUTHORIZATION_RATE_WINDOW_SECONDS = _env_int(
+    "NIMHUNT_CLAIM_AUTHORIZATION_RATE_WINDOW_SECONDS", 10 * 60
+)
+CLAIM_AUTHORIZATION_RATE_PER_DEVICE = _env_int(
+    "NIMHUNT_CLAIM_AUTHORIZATION_RATE_PER_DEVICE", 8
+)
+CLAIM_AUTHORIZATION_RATE_PER_WALLET = _env_int(
+    "NIMHUNT_CLAIM_AUTHORIZATION_RATE_PER_WALLET", 16
+)
 SESSION_TTL_SECONDS = _env_int(
     "NIMHUNT_CLAIM_AUTH_SESSION_TTL_SECONDS", 30 * 24 * 60 * 60
 )
@@ -182,6 +197,62 @@ def _user_binding_key(user_id: int) -> str:
 
 def _claim_record_key(claim_id: int) -> str:
     return f"{CLAIM_RECORD_PREFIX}{int(claim_id)}"
+
+
+def _claim_authorization_key(challenge_id: str) -> str:
+    """Return the durable key; timestamp-first IDs make cleanup index-bounded."""
+    clean = str(challenge_id or "")
+    if not re.fullmatch(r"[0-9]{12}\.[A-Za-z0-9_-]{20,64}", clean):
+        raise ValueError("Invalid claim authorization identifier")
+    return f"{CLAIM_AUTHORIZATION_PREFIX}{clean}"
+
+
+async def _cleanup_claim_authorizations(db, *, now: int) -> int:
+    """Delete only an oldest, bounded batch of irreversibly unusable records.
+
+    Issued records become unusable at expiry. Verifying/processing records get
+    a grace period for a slow worker or crash. Deletion can never enable replay:
+    final submission requires the original random identifier to still resolve.
+    """
+    cutoff = int(now) - CLAIM_AUTHORIZATION_VERIFY_GRACE_SECONDS
+    cur = await db.execute(
+        f"""
+        SELECT {schema.APP_METADATA_KEY} AS key, {schema.APP_METADATA_VALUE} AS value
+        FROM {schema.APP_METADATA_TABLE_NAME}
+        WHERE {schema.APP_METADATA_KEY} LIKE ?
+        ORDER BY {schema.APP_METADATA_KEY}
+        LIMIT ?;
+        """,
+        (f"{CLAIM_AUTHORIZATION_PREFIX}%", CLAIM_AUTHORIZATION_CLEANUP_BATCH),
+    )
+    rows = await cur.fetchall()
+    removable: list[str] = []
+    for row in rows:
+        try:
+            record = json.loads(str(row["value"]))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            removable.append(str(row["key"]))
+            continue
+        expires_at = (
+            int(record.get("expires_at") or 0) if isinstance(record, dict) else 0
+        )
+        state = str(record.get("status") or "") if isinstance(record, dict) else ""
+        if state == "issued" and expires_at <= int(now):
+            removable.append(str(row["key"]))
+        elif state in {"verifying", "processing", "failed"} and expires_at <= cutoff:
+            removable.append(str(row["key"]))
+        elif state == "consumed":
+            removable.append(str(row["key"]))
+    for key in removable:
+        await _metadata_delete(db, key)
+    return len(removable)
+
+
+async def _retire_claim_authorization(key: str) -> None:
+    """Make an attempted authorization permanently unusable and reclaim it."""
+    async with get_db() as db:
+        async with db_access.transaction(db, immediate=True):
+            await _metadata_delete(db, key)
 
 
 def _canonical_optional_address(value: Any) -> str | None:
@@ -717,6 +788,7 @@ async def prepare_claim_authorization(
     async with get_db() as db:
         async with db_access.transaction(db, immediate=True):
             now = await db_access.get_unixepoch(db)
+            await _cleanup_claim_authorizations(db, now=now)
             session = await _load_session(
                 db,
                 token=request.cookies.get(SESSION_COOKIE_NAME),
@@ -741,7 +813,28 @@ async def prepare_claim_authorization(
                     message="The verified wallet is invalid.",
                     http_status=401,
                 )
-            challenge_id = secrets.token_urlsafe(24)
+            allowed_device, retry_device = await _rate_limit_bucket(
+                db,
+                key=f"{RATE_PREFIX}claim_authorization:device:{device_id}",
+                now=now,
+                window_seconds=CLAIM_AUTHORIZATION_RATE_WINDOW_SECONDS,
+                limit=CLAIM_AUTHORIZATION_RATE_PER_DEVICE,
+            )
+            allowed_wallet, retry_wallet = await _rate_limit_bucket(
+                db,
+                key=f"{RATE_PREFIX}claim_authorization:wallet:{_sha256_text(wallet_address)}",
+                now=now,
+                window_seconds=CLAIM_AUTHORIZATION_RATE_WINDOW_SECONDS,
+                limit=CLAIM_AUTHORIZATION_RATE_PER_WALLET,
+            )
+            if not allowed_device or not allowed_wallet:
+                return _security_error_response(
+                    code="claim_authorization_rate_limited",
+                    message="Too many claim approvals were prepared. Please wait and try again.",
+                    http_status=429,
+                    retry_at=max(retry_device, retry_wallet),
+                )
+            challenge_id = f"{int(now + CLAIM_AUTHORIZATION_TTL_SECONDS):012d}.{secrets.token_urlsafe(24)}"
             nonce = secrets.token_hex(32)
             expires_at = int(now) + CLAIM_AUTHORIZATION_TTL_SECONDS
             message = claim_authorization.build_message(
@@ -775,9 +868,7 @@ async def prepare_claim_authorization(
                 "issued_at": int(now),
                 "expires_at": expires_at,
             }
-            await _metadata_set(
-                db, f"{CLAIM_AUTHORIZATION_PREFIX}{challenge_id}", record
-            )
+            await _metadata_set(db, _claim_authorization_key(challenge_id), record)
     return JSONResponse(
         {
             "ok": True,
@@ -1428,7 +1519,14 @@ async def guard_http_request(
             await response(scope, _replay_receive(b""), send)
             return True
         challenge_id = str(proof.get("challenge_id") or "")
-        auth_key = f"{CLAIM_AUTHORIZATION_PREFIX}{challenge_id}"
+        try:
+            auth_key = _claim_authorization_key(challenge_id)
+        except ValueError as exc:
+            response = _security_error_response(
+                code="claim_authorization_missing", message=str(exc), http_status=409
+            )
+            await response(scope, _replay_receive(b""), send)
+            return True
         async with get_db() as db:
             now = await db_access.get_unixepoch(db)
             authorization = await _metadata_get(db, auth_key)
@@ -1456,14 +1554,9 @@ async def guard_http_request(
                 request_body.get("long"),
                 request_body.get("accuracy"),
             )
-            signer = await _verify_signature(
-                message=str(authorization["message"]),
-                public_key=str(proof.get("public_key") or ""),
-                signature=str(proof.get("signature") or ""),
-            )
-        except (ValueError, RuntimeError) as exc:
+        except ValueError as exc:
             response = _security_error_response(
-                code="claim_signature_invalid", message=str(exc), http_status=401
+                code="claim_authorization_mismatch", message=str(exc), http_status=409
             )
             await response(scope, _replay_receive(b""), send)
             return True
@@ -1489,16 +1582,9 @@ async def guard_http_request(
             )
             await response(scope, _replay_receive(b""), send)
             return True
-        if expected is None or signer != expected or expected != session["wallet_address"]:
-            response = _security_error_response(
-                code="claim_wallet_mismatch",
-                message="The wallet approving this claim differs from your verified claim wallet. Reauthenticate the intended wallet and try again.",
-                http_status=409,
-            )
-            await response(scope, _replay_receive(b""), send)
-            return True
-        # BEGIN IMMEDIATE plus the conditional status check is the single-use
-        # boundary across workers and survives process restart.
+        # Claim the one permitted expensive verification attempt before
+        # launching Node. A crash leaves a non-replayable `verifying` record,
+        # which bounded cleanup retires after its grace period.
         async with get_db() as db:
             async with db_access.transaction(db, immediate=True):
                 fresh = await _metadata_get(db, auth_key)
@@ -1515,10 +1601,51 @@ async def guard_http_request(
                     )
                     await response(scope, _replay_receive(b""), send)
                     return True
-                fresh["status"] = "processing"
+                fresh["status"] = "verifying"
+                fresh["verifying_at"] = int(now)
                 fresh["proof_hash"] = _sha256_text(
                     f"{proof.get('public_key')}:{proof.get('signature')}"
                 )
+                await _metadata_set(db, auth_key, fresh)
+        try:
+            signer = await _verify_signature(
+                message=str(authorization["message"]),
+                public_key=str(proof.get("public_key") or ""),
+                signature=str(proof.get("signature") or ""),
+            )
+        except (ValueError, RuntimeError) as exc:
+            await _retire_claim_authorization(auth_key)
+            response = _security_error_response(
+                code="claim_signature_invalid", message=str(exc), http_status=401
+            )
+            await response(scope, _replay_receive(b""), send)
+            return True
+        if (
+            expected is None
+            or signer != expected
+            or expected != session["wallet_address"]
+        ):
+            await _retire_claim_authorization(auth_key)
+            response = _security_error_response(
+                code="claim_wallet_mismatch",
+                message="The wallet approving this claim differs from your verified claim wallet. Reauthenticate the intended wallet and try again.",
+                http_status=409,
+            )
+            await response(scope, _replay_receive(b""), send)
+            return True
+        async with get_db() as db:
+            async with db_access.transaction(db, immediate=True):
+                fresh = await _metadata_get(db, auth_key)
+                if not isinstance(fresh, dict) or fresh.get("status") != "verifying":
+                    response = _security_error_response(
+                        code="claim_authorization_used",
+                        message="This claim approval has already been used.",
+                        http_status=409,
+                    )
+                    await response(scope, _replay_receive(b""), send)
+                    return True
+                fresh["status"] = "processing"
+                fresh["processing_at"] = await db_access.get_unixepoch(db)
                 await _metadata_set(db, auth_key, fresh)
         decision = await _preclaim_decision(
             spot_id=spot_id,
@@ -1527,6 +1654,7 @@ async def guard_http_request(
             ip_fingerprint=ip_fingerprint,
         )
         if bool(decision.get("blocked")):
+            await _retire_claim_authorization(auth_key)
             retry_at = int(decision.get("retry_at") or 0)
             response = _security_error_response(
                 code="claim_security_cooldown",
@@ -1570,13 +1698,10 @@ async def guard_http_request(
                         async with db_access.transaction(db, immediate=True):
                             completed = await _metadata_get(db, auth_key)
                             if isinstance(completed, dict):
-                                completed["status"] = "consumed"
-                                completed["claim_id"] = int(claim_id)
-                                completed["claimed_at"] = await db_access.get_unixepoch(
-                                    db
-                                )
-                                completed.pop("message", None)
-                                await _metadata_set(db, auth_key, completed)
+                                # The claim security record now owns the bounded
+                                # audit. Absence of this random key is a terminal
+                                # replay rejection, so no tombstone is required.
+                                await _metadata_delete(db, auth_key)
                 except Exception:
                     # The payout boundary fails closed when this marker is absent,
                     # so never create a duplicate claim merely because audit
@@ -1584,6 +1709,10 @@ async def guard_http_request(
                     logger.exception(
                         "Failed to persist security record for claim=%s", claim_id
                     )
+        elif "auth_key" in locals():
+            # A business-rule rejection did not create a claim. The attempted
+            # authorization remains terminal and can be reclaimed immediately.
+            await _retire_claim_authorization(auth_key)
 
     for message in captured:
         await send(message)

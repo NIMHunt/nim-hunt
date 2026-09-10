@@ -27,3 +27,13 @@ test('permission denial is understandable', async () => {
     const geolocation = { getCurrentPosition(_ok, fail) { fail({ code: 1 }); } };
     await assert.rejects(collectFreshClaimLocation({ geolocation }), /permission was denied/i);
 });
+
+test('three sequential requests obey one overall collection budget', async () => {
+    const started = Date.now();
+    const geolocation = { getCurrentPosition() {} };
+    await assert.rejects(
+        collectFreshClaimLocation({ geolocation, budgetMs: 40 }),
+        /fresh GPS readings are unavailable/i,
+    );
+    assert.ok(Date.now() - started < 200, 'overall timeout must not multiply by sample count');
+});

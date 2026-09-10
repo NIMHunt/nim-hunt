@@ -309,29 +309,14 @@ async def _metadata_delete(db, key: str) -> None:
 
 
 def _request_ip(request: Request) -> str:
-    # Railway/reverse proxies normally append the immediate client to the right
-    # side of X-Forwarded-For. We use it only as a secondary anti-abuse signal;
-    # wallet/device/payout identity remains authoritative.
-    forwarded = str(request.headers.get("x-forwarded-for") or "").strip()
-    if forwarded:
-        candidate = forwarded.split(",")[-1].strip()
-        if candidate:
-            return candidate
+    # Uvicorn's trusted-proxy middleware has already resolved Railway's
+    # forwarding chain into request.client. Never parse a raw client header.
     if request.client and request.client.host:
         return str(request.client.host)
     return "unknown"
 
 
 def _scope_ip(scope: dict[str, Any]) -> str:
-    headers = {
-        bytes(key).decode("latin-1").lower(): bytes(value).decode("latin-1")
-        for key, value in scope.get("headers", [])
-    }
-    forwarded = str(headers.get("x-forwarded-for") or "").strip()
-    if forwarded:
-        candidate = forwarded.split(",")[-1].strip()
-        if candidate:
-            return candidate
     client = scope.get("client")
     if isinstance(client, (list, tuple)) and client:
         return str(client[0])
@@ -1630,6 +1615,36 @@ async def guard_http_request(
                 code="claim_wallet_mismatch",
                 message="The wallet approving this claim differs from your verified claim wallet. Reauthenticate the intended wallet and try again.",
                 http_status=409,
+            )
+            await response(scope, _replay_receive(b""), send)
+            return True
+        # The signed authorization fixes both signer and GPS coordinates. Run
+        # fresh-account checks here, before the application claim endpoint, so
+        # a manually crafted POST cannot bypass Find Spots presentation.
+        import fresh_claim_guard
+        async with get_db() as db:
+            async with db_access.transaction(db, immediate=True):
+                spot = await db_access.get_spot(db, spot_id=spot_id)
+                fresh_decision = (
+                    {"allowed": False, "reason": "spot_missing"}
+                    if spot is None
+                    else await fresh_claim_guard.public_claim_decision(
+                        db,
+                        user_id=int(session["user_id"]),
+                        signer_address=signer,
+                        spot=spot,
+                        ip=fresh_claim_guard.genuine_client_ip(scope),
+                        lat=float(request_body.get("lat")),
+                        long=float(request_body.get("long")),
+                    )
+                )
+        if not fresh_decision.get("allowed"):
+            await _retire_claim_authorization(auth_key)
+            response = _security_error_response(
+                code="public_claim_temporarily_unavailable",
+                message=fresh_claim_guard.GENERIC_MESSAGE,
+                http_status=(status.HTTP_403_FORBIDDEN if fresh_decision.get("banned")
+                             else status.HTTP_429_TOO_MANY_REQUESTS),
             )
             await response(scope, _replay_receive(b""), send)
             return True

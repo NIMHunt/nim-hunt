@@ -1751,6 +1751,13 @@ async def init_db():
         await db.executescript(TRANS_VIEW_DETAIL_QUERY)
         await db.executescript(REPORT_VIEW_DETAIL_QUERY)
 
+        # Additive security rollout marker: accounts already in this database
+        # are explicitly grandfathered from the new first-location heuristic.
+        # Import lazily to avoid database/schema module cycles.
+        if bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
+            import fresh_claim_guard
+            await fresh_claim_guard.ensure_rollout_marker(db)
+
         await db.execute(f"PRAGMA user_version = {SCHEMA_VERSION};")
         await db.commit()
 

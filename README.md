@@ -658,6 +658,27 @@ destination, so verify this value before performing a production Spot ban.
 | `NIMHUNT_NIMIQ_ADDRESS_TX_LOOKUP_LIMIT` | `500` | recent address transactions inspected during fallback verification |
 | `NIMHUNT_NIMIQ_TRANSACTION_FEE` | `0` | outgoing network fee in Luna; public deployments currently require `0` |
 
+### Fresh-account claim safeguards
+
+Public deployments must configure an HTTPS IP-geolocation JSON endpoint. The
+URL is a template containing `{ip}`; responses must provide `latitude`,
+`longitude`, and `country_name` (the aliases `lat`, `lon`, and `country` are
+also accepted). An optional bearer token stays in the environment. Requests
+for private, loopback, reserved, or otherwise non-public addresses are never
+sent to the provider.
+
+| Variable | Default | Description |
+|---|---:|---|
+| `NIMHUNT_IP_GEOLOCATION_URL` | unset | HTTPS provider URL template, for example `https://provider.example/ip/{ip}` |
+| `NIMHUNT_IP_GEOLOCATION_API_KEY` | unset | optional provider bearer token |
+| `NIMHUNT_IP_GEOLOCATION_TIMEOUT_SECONDS` | `4` | provider and signer-history request timeout |
+| `NIMHUNT_CLAIM_IDENTITY_TRUST_AGE_SECONDS` | `2592000` | required account or oldest confirmed signer-activity age |
+| `NIMHUNT_CLAIM_SIGNER_HISTORY_NEGATIVE_CACHE_SECONDS` | `86400` | maximum negative signer-history cache lifetime |
+| `NIMHUNT_CLAIM_FIRST_LOCATION_MISMATCH_METRES` | `1500000` | minimum uncertainty-adjusted, cross-country mismatch distance |
+| `NIMHUNT_CLAIM_FIRST_LOCATION_COOLDOWN_SECONDS` | `86400` | retry delay after the first independent mismatch |
+| `NIMHUNT_CLAIM_FIRST_LOCATION_SECOND_COOLDOWN_SECONDS` | `604800` | retry delay after later independent mismatches |
+| `NIMHUNT_CLAIM_FIRST_LOCATION_BAN_STRIKES` | `3` | independent mismatch events before the existing banned status is used |
+
 `NIMHUNT_NIMIQ_TRANSACTION_FEE` is measured in **Luna**, unlike the platform-fee
 variables. The current funding model does not reserve an extra network-fee budget
 for every creation fee, claim, refund and Prizedraw payout, so both public modes

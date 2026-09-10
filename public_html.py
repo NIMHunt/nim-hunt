@@ -1764,7 +1764,7 @@ def _claim_kind_for_spot(spot: dict[str, Any], *, allowed: bool) -> str:
 
 
 @router.post("/api/spots/claim-status")
-async def spots_claim_status_api(payload: ClaimStatusRequest) -> JSONResponse:
+async def spots_claim_status_api(payload: ClaimStatusRequest, request: Request) -> JSONResponse:
     """Return current-user claim state for visible Find Spots entries."""
     ids = [int(v) for v in payload.spot_ids[:500] if int(v) > 0]
     if not ids:
@@ -1776,6 +1776,17 @@ async def spots_claim_status_api(payload: ClaimStatusRequest) -> JSONResponse:
             return JSONResponse({**meta, "statuses": {}}, status_code=http_status)
 
         now = await db_access.get_unixepoch(db)
+        signer_address = None
+        if bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
+            import claim_security
+            session = await claim_security._load_session(
+                db,
+                token=request.cookies.get(claim_security.SESSION_COOKIE_NAME),
+                device_id_hash=str(user[schema.USER_DEVICE_ID_HASH]).lower(),
+                now=now,
+            )
+            if isinstance(session, dict):
+                signer_address = session.get("wallet_address")
         statuses: dict[str, Any] = {}
         for spot_id in ids:
             spot = await db_access.get_spot_owner_summary(db, spot_id=spot_id)
@@ -1790,6 +1801,26 @@ async def spots_claim_status_api(payload: ClaimStatusRequest) -> JSONResponse:
                 location_accuracy_metres=payload.accuracy,
             )
             allowed = bool(rule.get("allowed"))
+            if allowed and int(spot.get(schema.SPOT_USE_PASSWORD) or 0) != 1 and bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
+                import fresh_claim_guard
+                if signer_address:
+                    security = await fresh_claim_guard.public_claim_decision(
+                        db,
+                        user_id=int(user[schema.USER_ID]),
+                        signer_address=str(signer_address),
+                        spot=spot,
+                        ip=fresh_claim_guard.genuine_client_ip(request),
+                        lat=float(payload.lat),
+                        long=float(payload.long),
+                    )
+                else:
+                    security = {"allowed": False, "reason": "signer_not_authenticated"}
+                if not security["allowed"]:
+                    allowed = False
+                    # Detailed security outcomes remain in durable metadata;
+                    # the browser receives no policy thresholds or strike data.
+                    rule["reason"] = "public_temporarily_unavailable"
+                    rule["message"] = fresh_claim_guard.GENERIC_MESSAGE
             is_prizedraw = _spot_is_prizedraw_row(spot)
             counted_claims = int(spot.get("success_claim_count") or 0)
             if is_prizedraw:

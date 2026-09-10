@@ -65,6 +65,27 @@ async def _wallet_recent_claim_window(
     return count, int(oldest) if oldest is not None else None
 
 
+async def _payout_address_recent_claim_window(
+    db, *, payout_address: str, now: int,
+) -> tuple[int, int | None]:
+    """Return the durable hourly claim count for a receiving address."""
+    canonical = claim_security._canonical_optional_address(payout_address)
+    if canonical is None:
+        return 0, None
+    cutoff = int(now) - 60 * 60
+    cur = await db.execute(
+        f"""
+        SELECT COUNT(*) AS n, MIN({schema.CLAIM_CLAIMED_AT}) AS oldest
+        FROM {schema.CLAIM_TABLE_NAME}
+        WHERE {schema.CLAIM_PAYOUT_ADDRESS} = ?
+          AND {schema.CLAIM_CLAIMED_AT} > ?;
+        """,
+        (canonical, cutoff),
+    )
+    row = await cur.fetchone()
+    return int(row["n"] or 0), (int(row["oldest"]) if row["oldest"] is not None else None)
+
+
 async def _durable_wallet_rate_decision(
     db,
     *,
@@ -86,6 +107,21 @@ async def _durable_wallet_rate_decision(
         "reason": "wallet_rate_limit",
         "signal": "verified wallet",
         "retry_at": retry_at,
+    }
+
+
+async def _durable_payout_address_rate_decision(db, *, payout_address: str, now: int) -> RowDict:
+    count, oldest = await _payout_address_recent_claim_window(
+        db, payout_address=payout_address, now=now
+    )
+    limit = max(1, int(claim_security.WALLET_HOURLY_CLAIM_LIMIT))
+    if count < limit:
+        return {"blocked": False, "reason": "allow"}
+    return {
+        "blocked": True,
+        "reason": "payout_address_rate_limit",
+        "signal": "payout address",
+        "retry_at": int(oldest if oldest is not None else now) + 60 * 60 + 1,
     }
 
 
@@ -159,6 +195,11 @@ async def _create_claim_attempt_with_durable_wallet_limit(
             )
             if decision.get("blocked"):
                 raise ValueError("Verified wallet hourly claim limit reached.")
+            payout_decision = await _durable_payout_address_rate_decision(
+                db, payout_address=str(payout_address or ""), now=now
+            )
+            if payout_decision.get("blocked"):
+                raise ValueError("Payout address hourly claim limit reached.")
 
     return await delegate(
         db,
@@ -192,6 +233,8 @@ def install() -> None:
 __all__ = [
     "_create_claim_attempt_with_durable_wallet_limit",
     "_durable_wallet_rate_decision",
+    "_durable_payout_address_rate_decision",
+    "_payout_address_recent_claim_window",
     "_preclaim_decision_with_durable_wallet_limit",
     "_wallet_recent_claim_window",
     "install",

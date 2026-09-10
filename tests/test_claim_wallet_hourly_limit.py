@@ -99,6 +99,23 @@ class ClaimWalletHourlyLimitTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision["reason"], "wallet_rate_limit")
         self.assertGreater(decision["retry_at"], now)
 
+    async def test_different_wallet_users_sharing_payout_address_hit_durable_limit(self):
+        payout = const.DEV_PLATFORM_FEE_ADDRESS
+        async with schema.get_db() as db:
+            owner_id = await self._user(db, "shared-owner")
+            spot_id = await self._spot(db, owner_id=owner_id)
+            with mock.patch.object(claim_security, "WALLET_HOURLY_CLAIM_LIMIT", 3):
+                for index in range(3):
+                    user_id = await self._user(db, f"shared-{index}")
+                    await db_access.create_claim(db, spot_id=spot_id, user_id=user_id,
+                        lat=51.5, long=-0.1, accuracy=1.0, payout_address=payout)
+                now = await db_access.get_unixepoch(db)
+                decision = await wallet_limit._durable_payout_address_rate_decision(
+                    db, payout_address=payout, now=now
+                )
+        self.assertTrue(decision["blocked"])
+        self.assertEqual(decision["reason"], "payout_address_rate_limit")
+
     async def test_transactional_recheck_blocks_last_slot_race(self):
         delegate = mock.AsyncMock(return_value={"id": 99})
         binding = {"wallet_address": const.DEV_PLATFORM_FEE_ADDRESS}

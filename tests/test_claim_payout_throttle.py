@@ -39,13 +39,27 @@ class ClaimPayoutThrottleTest(unittest.TestCase):
         self.assertFalse(decision["allow"])
         self.assertEqual(decision["reason"], "global_payout_amount_limit")
 
-    def test_single_large_leg_does_not_deadlock_forever(self):
-        with mock.patch.object(claim_payout_throttle, "MAX_PAYOUT_LUNA", 1_000):
+    def test_single_large_leg_is_deferred_by_absolute_automatic_limit(self):
+        with mock.patch.object(claim_payout_throttle, "MAX_AUTOMATIC_PAYOUT_LUNA", 1_000):
             decision = claim_payout_throttle.throttle_decision(
                 state=self._state(count=0, amount=0),
                 amount=5_000,
             )
-        self.assertTrue(decision["allow"])
+        self.assertFalse(decision["allow"])
+        self.assertEqual(decision["reason"], "individual_automatic_payout_limit")
+        self.assertTrue(decision["manual_review"])
+
+    def test_daily_limit_catches_attempts_spaced_beyond_short_window(self):
+        daily = self._state(count=5, amount=900)
+        with (
+            mock.patch.object(claim_payout_throttle, "DAILY_MAX_PAYOUT_COUNT", 50),
+            mock.patch.object(claim_payout_throttle, "DAILY_MAX_PAYOUT_LUNA", 1_000),
+        ):
+            decision = claim_payout_throttle.throttle_decision(
+                state=self._state(count=0, amount=0), daily_state=daily, amount=200
+            )
+        self.assertFalse(decision["allow"])
+        self.assertEqual(decision["reason"], "daily_payout_amount_limit")
 
     def test_normal_payout_is_allowed(self):
         with (

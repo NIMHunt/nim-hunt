@@ -44,6 +44,9 @@ BROAD_BURST_WINDOW_SECONDS = int(
 BROAD_BURST_MIN_IDENTITIES = int(
     os.getenv("NIMHUNT_CLAIM_SECURITY_BROAD_BURST_MIN_IDENTITIES", 5)
 )
+BROAD_BURST_MAX_TARGET_SPOTS = int(
+    os.getenv("NIMHUNT_CLAIM_SECURITY_BROAD_BURST_MAX_TARGET_SPOTS", 4)
+)
 BROAD_BURST_MIN_SPREAD_METRES = int(
     os.getenv("NIMHUNT_CLAIM_SECURITY_BROAD_BURST_MIN_SPREAD_METRES", 50_000)
 )
@@ -74,24 +77,38 @@ def broad_new_identity_burst_claim_ids(events: list[RowDict], *, now: int) -> li
     cutoff = int(now) - max(60, BROAD_BURST_WINDOW_SECONDS)
     candidates: list[RowDict] = []
 
+    # "New" means that this is the first retained claim event for both the
+    # wallet and device, not that the USER/session was created recently.  The
+    # latter let disposable identities be registered, aged for an hour, and
+    # then used together.  Event retention is deliberately much longer than
+    # the burst window, so pre-aging no longer changes this decision.
+    first_wallet_claim: dict[str, int] = {}
+    first_device_claim: dict[str, int] = {}
     for event in events:
         try:
             claimed_at = int(event.get("claimed_at") or 0)
-            user_created_at = int(event.get("user_created_at") or 0)
-            session_created_at = int(event.get("session_created_at") or 0)
+        except (TypeError, ValueError):
+            continue
+        wallet_id = str(event.get("verified_wallet") or "")
+        device_id = str(event.get("device_id_hash") or "")
+        if wallet_id:
+            first_wallet_claim[wallet_id] = min(first_wallet_claim.get(wallet_id, claimed_at), claimed_at)
+        if device_id:
+            first_device_claim[device_id] = min(first_device_claim.get(device_id, claimed_at), claimed_at)
+
+    for event in events:
+        try:
+            claimed_at = int(event.get("claimed_at") or 0)
         except (TypeError, ValueError):
             continue
 
         if claimed_at < cutoff:
             continue
-        user_age = claimed_at - user_created_at
-        session_age = claimed_at - session_created_at
-        if user_age < 0 or session_age < 0:
+        wallet_id = str(event.get("verified_wallet") or "")
+        device_id = str(event.get("device_id_hash") or "")
+        if not wallet_id or not device_id:
             continue
-        if (
-            user_age > claim_security.NEW_IDENTITY_MAX_AGE_SECONDS
-            or session_age > claim_security.NEW_IDENTITY_MAX_AGE_SECONDS
-        ):
+        if first_wallet_claim.get(wallet_id) != claimed_at or first_device_claim.get(device_id) != claimed_at:
             continue
         candidates.append(event)
 
@@ -114,13 +131,15 @@ def broad_new_identity_burst_claim_ids(events: list[RowDict], *, now: int) -> li
         for event in candidates
         if int(event.get("spot_id") or 0) > 0
     }
-    if min(len(devices), len(wallets), len(spots)) < minimum:
+    if min(len(devices), len(wallets)) < minimum:
         return []
 
-    if claim_security._max_spread_metres(candidates) < max(
+    concentrated_sweep = 0 < len(spots) <= max(1, BROAD_BURST_MAX_TARGET_SPOTS)
+    geographic_sweep = len(spots) >= minimum and claim_security._max_spread_metres(candidates) >= max(
         10_000,
         BROAD_BURST_MIN_SPREAD_METRES,
-    ):
+    )
+    if not concentrated_sweep and not geographic_sweep:
         return []
 
     return sorted(
@@ -417,6 +436,7 @@ def install() -> None:
 
 __all__ = [
     "BROAD_BURST_MIN_IDENTITIES",
+    "BROAD_BURST_MAX_TARGET_SPOTS",
     "BROAD_BURST_MIN_SPREAD_METRES",
     "BROAD_BURST_WINDOW_SECONDS",
     "DEFAULT_PAYOUT_OBSERVATION_SECONDS",

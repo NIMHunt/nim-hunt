@@ -83,6 +83,37 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
             [],
         )
 
+    def test_broad_burst_catches_sweeps_of_one_to_four_spots(self):
+        now = 1_700_000_000
+        for spot_count in range(1, 5):
+            events = [
+                self._event(
+                    claim_id=index + 1,
+                    spot_id=(index % spot_count) + 1,
+                    claimed_at=now + index,
+                    lat=51.5,
+                    long=-0.1,
+                    device=f"{index + 1:064x}",
+                    wallet=f"wallet-{index}",
+                )
+                for index in range(defence.BROAD_BURST_MIN_IDENTITIES)
+            ]
+            with self.subTest(spot_count=spot_count):
+                self.assertEqual(
+                    defence.broad_new_identity_burst_claim_ids(events, now=now + 20),
+                    list(range(1, defence.BROAD_BURST_MIN_IDENTITIES + 1)),
+                )
+
+    def test_pre_aged_users_and_sessions_are_still_first_claim_identities(self):
+        now = 1_700_000_000
+        events = [
+            {**self._event(claim_id=i + 1, spot_id=1, claimed_at=now + i,
+                           lat=51.5, long=-0.1, device=f"{i + 1:064x}", wallet=f"wallet-{i}"),
+             "user_created_at": now - 86_400, "session_created_at": now - 7_200}
+            for i in range(defence.BROAD_BURST_MIN_IDENTITIES)
+        ]
+        self.assertTrue(defence.broad_new_identity_burst_claim_ids(events, now=now + 20))
+
     def test_source_network_alone_never_blocks(self):
         with mock.patch.object(
             defence,

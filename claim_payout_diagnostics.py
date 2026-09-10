@@ -75,9 +75,12 @@ async def _latest_confirmed_standard_payout_comparison(db, *, now: int) -> RowDi
     """Compare the three payout identities without exposing their values.
 
     The three relevant addresses are:
-    - the receiving target persisted on CLAIM from Nimiq Pay listAccounts();
-    - the recipient persisted on TRANSACTION after payout-address resolution;
-    - the wallet that signed NimHunt's anti-abuse challenge.
+    - the immutable signer-derived receiving target persisted on CLAIM;
+    - the recipient persisted on TRANSACTION at payout submission;
+    - the wallet that signed NimHunt's authentication challenge.
+
+    Legacy rows can still disagree; the booleans keep that condition visible
+    without exposing any address.
 
     Only equality booleans and timing are returned by the public diagnostics.
     """

@@ -906,19 +906,6 @@ function claimAuthPayload() {
     };
 }
 
-async function requestClaimPayoutAddress() {
-    try {
-        const nimiq = await init();
-        const accounts = await nimiq.listAccounts();
-        if (Array.isArray(accounts) && accounts.length > 0 && typeof accounts[0] === 'string') {
-            return accounts[0];
-        }
-    } catch (err) {
-        console.warn('Could not read Nimiq payout address before claim.', err);
-    }
-    return null;
-}
-
 function spotWithinRadius(spot) {
     const distance = Number(spot.distance_m);
     const radius = Number(spot.radius || 0);
@@ -1189,13 +1176,11 @@ function hideClaimModal() {
 }
 
 async function postClaimForSpot(spot, { claimCode = null, captchaPayload = {} } = {}) {
-    const payoutAddress = await requestClaimPayoutAddress();
     return fetchJsonWithBody(`/api/spot/${spot.id}/claim`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             ...claimAuthPayload(),
-            payout_address: payoutAddress,
             claim_code: claimCode,
             ...captchaPayload,
         }),

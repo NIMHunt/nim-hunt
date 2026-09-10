@@ -12,6 +12,8 @@ import constants as const
 import database as schema
 import db_access
 
+VALID_OTHER_ADDRESS = "NQ48 LH6Q 7PFD LJYF 7PGB NJXL F8CX GHTJ YEKG"
+
 
 class ClaimSecurityTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -150,6 +152,8 @@ class ClaimSecurityTest(unittest.IsolatedAsyncioTestCase):
                     "spot_id": spot_id,
                     "user_id": user_id,
                     "claimed_at": int(claim[schema.CLAIM_CLAIMED_AT]),
+                    "verified_wallet": claim[schema.CLAIM_PAYOUT_ADDRESS],
+                    "payout_address": claim[schema.CLAIM_PAYOUT_ADDRESS],
                     "manual_review": False,
                 },
             )
@@ -178,6 +182,8 @@ class ClaimSecurityTest(unittest.IsolatedAsyncioTestCase):
                     "spot_id": spot_id,
                     "user_id": user_id,
                     "claimed_at": old_time,
+                    "verified_wallet": const.DEV_PLATFORM_FEE_ADDRESS,
+                    "payout_address": const.DEV_PLATFORM_FEE_ADDRESS,
                     "manual_review": False,
                 },
             )
@@ -186,6 +192,65 @@ class ClaimSecurityTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(decision["allow"])
         self.assertEqual(decision["reason"], "security_checks_passed")
+
+    async def test_missing_or_invalid_verified_wallet_is_durably_held(self):
+        for suffix, verified_wallet in (("missing", None), ("invalid", "not-an-address")):
+            with self.subTest(verified_wallet=verified_wallet):
+                async with schema.get_db() as db:
+                    user_id, spot_id, claim_id = await self._claim(
+                        db,
+                        suffix=f"wallet-{suffix}",
+                    )
+                    claim = await db_access.get_claim(db, claim_id=claim_id)
+                    old_time = (
+                        await db_access.get_unixepoch(db)
+                        - claim_security.PAYOUT_HOLD_SECONDS
+                        - 5
+                    )
+                    await db.execute(
+                        f"UPDATE {schema.CLAIM_TABLE_NAME} "
+                        f"SET {schema.CLAIM_CLAIMED_AT} = ? "
+                        f"WHERE {schema.CLAIM_ID} = ?;",
+                        (old_time, claim_id),
+                    )
+                    record = {
+                        "claim_id": claim_id,
+                        "spot_id": spot_id,
+                        "user_id": user_id,
+                        "claimed_at": old_time,
+                        "payout_address": claim[schema.CLAIM_PAYOUT_ADDRESS],
+                        "manual_review": False,
+                    }
+                    if verified_wallet is not None:
+                        record["verified_wallet"] = verified_wallet
+                    await claim_security._metadata_set(
+                        db,
+                        claim_security._claim_record_key(claim_id),
+                        record,
+                    )
+                    await db.commit()
+
+                    decision = await claim_security._payout_security_decision(
+                        db,
+                        claim_id=claim_id,
+                    )
+                    stored = await claim_security.get_claim_security_record(
+                        db,
+                        claim_id=claim_id,
+                    )
+
+                self.assertFalse(decision["allow"])
+                self.assertNotEqual(decision["reason"], "security_checks_passed")
+                self.assertEqual(
+                    decision["reason"],
+                    "claim_verified_wallet_missing_or_invalid",
+                )
+                self.assertTrue(decision["manual_review"])
+                self.assertTrue(stored["manual_review"])
+                self.assertEqual(
+                    stored["manual_review_reason"],
+                    "claim_verified_wallet_missing_or_invalid",
+                )
 
     async def test_manual_review_never_auto_releases_with_age(self):
         async with schema.get_db() as db:
@@ -215,6 +280,54 @@ class ClaimSecurityTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(decision["allow"])
         self.assertTrue(decision["manual_review"])
         self.assertEqual(decision["reason"], "coordinated_test_burst")
+
+    async def test_legacy_matching_claim_can_settle(self):
+        async with schema.get_db() as db:
+            user_id, spot_id, claim_id = await self._claim(db, suffix="legacy-matching")
+            claim = await db_access.get_claim(db, claim_id=claim_id)
+            old_time = await db_access.get_unixepoch(db) - claim_security.PAYOUT_HOLD_SECONDS - 5
+            await db.execute(
+                f"UPDATE {schema.CLAIM_TABLE_NAME} SET {schema.CLAIM_CLAIMED_AT} = ? WHERE {schema.CLAIM_ID} = ?;",
+                (old_time, claim_id),
+            )
+            await claim_security._metadata_set(db, claim_security._claim_record_key(claim_id), {
+                "claim_id": claim_id,
+                "spot_id": spot_id,
+                "user_id": user_id,
+                "claimed_at": old_time,
+                "verified_wallet": claim[schema.CLAIM_PAYOUT_ADDRESS],
+                "payout_address": claim[schema.CLAIM_PAYOUT_ADDRESS],
+                "manual_review": False,
+            })
+            await db.commit()
+            decision = await claim_security._payout_security_decision(db, claim_id=claim_id)
+
+        self.assertTrue(decision["allow"])
+
+    async def test_legacy_mismatched_claim_is_durably_held_without_rewrite(self):
+        async with schema.get_db() as db:
+            user_id, spot_id, claim_id = await self._claim(db, suffix="legacy-mismatch")
+            claim = await db_access.get_claim(db, claim_id=claim_id)
+            original_payout = claim[schema.CLAIM_PAYOUT_ADDRESS]
+            await claim_security._metadata_set(db, claim_security._claim_record_key(claim_id), {
+                "claim_id": claim_id,
+                "spot_id": spot_id,
+                "user_id": user_id,
+                "claimed_at": int(claim[schema.CLAIM_CLAIMED_AT]),
+                "verified_wallet": VALID_OTHER_ADDRESS,
+                "payout_address": original_payout,
+                "manual_review": False,
+            })
+            await db.commit()
+            decision = await claim_security._payout_security_decision(db, claim_id=claim_id)
+            unchanged = await db_access.get_claim(db, claim_id=claim_id)
+            record = await claim_security.get_claim_security_record(db, claim_id=claim_id)
+
+        self.assertFalse(decision["allow"])
+        self.assertTrue(decision["manual_review"])
+        self.assertEqual(decision["reason"], "legacy_claim_payout_identity_mismatch")
+        self.assertEqual(unchanged[schema.CLAIM_PAYOUT_ADDRESS], original_payout)
+        self.assertTrue(record["manual_review"])
 
     def test_same_verified_wallet_cannot_teleport_via_new_device(self):
         now = 1_700_000_000

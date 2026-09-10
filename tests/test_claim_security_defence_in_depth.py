@@ -148,7 +148,7 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(decision["blocked"])
         self.assertEqual(decision["reason"], "allow")
 
-    async def test_public_claim_preserves_nimiq_pay_payout_while_signer_drives_limits(self):
+    async def test_public_claim_uses_verified_signer_as_payout(self):
         verified = const.DEV_PLATFORM_FEE_ADDRESS
         delegate = mock.AsyncMock(return_value={"id": 7})
         binding = {"wallet_address": verified}
@@ -194,11 +194,14 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             delegate.await_args.kwargs["payout_address"],
+            verified,
+        )
+        self.assertNotEqual(
+            delegate.await_args.kwargs["payout_address"],
             defence.claim_security._canonical_optional_address(VALID_NIMIQ_PAY_PAYOUT),
         )
-        self.assertNotEqual(delegate.await_args.kwargs["payout_address"], verified)
 
-    async def test_public_claim_requires_valid_nimiq_pay_payout_address(self):
+    async def test_public_claim_does_not_require_browser_payout_address(self):
         verified = const.DEV_PLATFORM_FEE_ADDRESS
         delegate = mock.AsyncMock(return_value={"id": 7})
         binding = {"wallet_address": verified}
@@ -224,17 +227,20 @@ class ClaimSecurityDefenceInDepthTest(unittest.IsolatedAsyncioTestCase):
         ):
             for payout_address in (None, "", "not-a-nimiq-address"):
                 with self.subTest(payout_address=payout_address):
-                    with self.assertRaisesRegex(ValueError, "valid Nimiq Pay payout address"):
-                        await defence._create_claim_attempt_bound_to_verified_wallet(
-                            object(),
-                            spot_id=3,
-                            user_id=4,
-                            lat=51.5,
-                            long=-0.1,
-                            payout_address=payout_address,
-                        )
+                    await defence._create_claim_attempt_bound_to_verified_wallet(
+                        object(),
+                        spot_id=3,
+                        user_id=4,
+                        lat=51.5,
+                        long=-0.1,
+                        payout_address=payout_address,
+                    )
 
-        delegate.assert_not_awaited()
+        self.assertEqual(delegate.await_count, 3)
+        self.assertTrue(all(
+            call.kwargs["payout_address"] == verified
+            for call in delegate.await_args_list
+        ))
 
     async def test_same_verified_wallet_cannot_reset_spot_limit_with_new_device(self):
         verified = const.DEV_PLATFORM_FEE_ADDRESS

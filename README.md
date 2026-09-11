@@ -685,13 +685,15 @@ continue that restriction while preserving the event count. IP geolocation is
 only a weak heuristic and never permanently bans an account by itself. Existing
 impossible-travel, claim-security, and administrator ban paths remain unchanged.
 
-Railway does not publish a stable ingress CIDR suitable for Uvicorn's
-`forwarded_allow_ips`, so the deployment retains `*`. This is safe only under
-the existing deployment boundary: the container port is not directly exposed
-to public clients and Railway's edge is the sole public ingress responsible for
-setting the forwarded chain. A deployment that exposes the container directly
-must instead configure a concrete trusted-proxy allowlist; otherwise forwarded
-client identity is forgeable and the first-location signal must not be enabled.
+The [Railway public-networking documentation](https://docs.railway.com/guides/public-networking)
+documents its HTTP proxy source range as `100.0.0.0/8`. The Railway launcher
+passes that CIDR to Uvicorn's
+[`forwarded_allow_ips`](https://www.uvicorn.org/settings/#http), so forwarded
+headers are accepted only when the immediate connection is from Railway's HTTP
+proxy range. Uvicorn then walks the forwarded chain from the trusted proxy side
+and exposes the first untrusted address as `request.client`. Railway must remain
+the sole public ingress; deployments using another proxy must configure that
+proxy's authoritative range rather than widening this value to `*`.
 
 `NIMHUNT_NIMIQ_TRANSACTION_FEE` is measured in **Luna**, unlike the platform-fee
 variables. The current funding model does not reserve an extra network-fee budget

@@ -5,7 +5,7 @@
     "buildCommand": "pip install -r requirements.txt && npm ci --prefix helpers"
   },
   "deploy": {
-    "startCommand": "python railway_start.py --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips '*'",
+    "startCommand": "python railway_start.py --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips '100.0.0.0/8'",
     "healthcheckPath": "/healthz",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",

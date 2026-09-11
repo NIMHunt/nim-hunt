@@ -206,8 +206,10 @@ async def duplicate_spot_api(
                         status.HTTP_429_TOO_MANY_REQUESTS,
                     )
 
-            deposit_record = await draft_creation.derive_reserved_deposit(
-                reservation["deposit_key_index"]
+            deposit_record = await draft_creation.derive_admitted_deposit(
+                reservation_id=reservation["id"],
+                user_id=user_id,
+                key_index=reservation["deposit_key_index"],
             )
             async with db_access.transaction(db, immediate=True):
                 new_spot_id = await duplicate_owned_spot_as_draft(
@@ -218,9 +220,6 @@ async def duplicate_spot_api(
                     now=now,
                     draft_limit=draft_limit,
                     deposit_record=deposit_record,
-                )
-                await db_access.consume_draft_creation(
-                    db, reservation_id=reservation["id"], user_id=user_id
                 )
         except DuplicateSpotError as exc:
             error = {

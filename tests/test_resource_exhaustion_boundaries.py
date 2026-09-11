@@ -16,6 +16,7 @@ import main
 import public_html
 import request_body_limit
 import social_preview
+from spot_duplicate import duplicate_owned_spot_as_draft
 
 
 def _scope(*, content_length: int | None = None, path: str = "/api/test") -> dict:
@@ -214,6 +215,9 @@ class PublicTransactionHealthTest(unittest.IsolatedAsyncioTestCase):
 
 class DraftCreationAdmissionTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        draft_creation._derivation_semaphore = asyncio.Semaphore(
+            const.DRAFT_DERIVATION_MAX_CONCURRENCY
+        )
         self.tmp = tempfile.NamedTemporaryFile(suffix=".db")
         self.old_path = schema.DB_PATH
         schema.DB_PATH = self.tmp.name
@@ -275,6 +279,57 @@ class DraftCreationAdmissionTest(unittest.IsolatedAsyncioTestCase):
                 await first
             await draft_creation.derive_reserved_deposit(2)
         self.assertEqual(maximum, 1)
+
+    async def test_successful_derivations_remain_counted_when_only_draft_capacity_is_inserted(self):
+        async with schema.get_db() as db:
+            source_id = await db_access.create_spot(
+                db, created_by=self.user_id, title="Duplicate Source"
+            )
+            await db.commit()
+            reservations = []
+            for _ in range(5):
+                async with db_access.transaction(db, immediate=True):
+                    reservations.append(
+                        await db_access.reserve_draft_creation(db, user_id=self.user_id)
+                    )
+
+        records = await asyncio.gather(
+            *(
+                draft_creation.derive_admitted_deposit(
+                    reservation_id=item["id"],
+                    user_id=self.user_id,
+                    key_index=item["deposit_key_index"],
+                )
+                for item in reservations
+            )
+        )
+        async with schema.get_db() as db:
+            async with db_access.transaction(db, immediate=True):
+                await db_access.create_spot(
+                    db,
+                    created_by=self.user_id,
+                    title="Ordinary Winner",
+                    deposit_record=records[0],
+                )
+            async with db_access.transaction(db, immediate=True):
+                await duplicate_owned_spot_as_draft(
+                    db,
+                    source_spot_id=source_id,
+                    user_id=self.user_id,
+                    title="Duplicate Winner",
+                    now=await db_access.get_unixepoch(db),
+                    draft_limit=3,
+                    deposit_record=records[1],
+                )
+            self.assertEqual(
+                await db_access.count_draft_spots_by_user(db, user_id=self.user_id), 3
+            )
+            cur = await db.execute(
+                f"SELECT COUNT(*) AS n FROM {schema.DRAFT_CREATION_ADMISSION_TABLE_NAME} "
+                f"WHERE {schema.DRAFT_CREATION_ADMISSION_STATUS} = ?;",
+                (schema.DRAFT_ADMISSION_CONSUMED,),
+            )
+            self.assertEqual(int((await cur.fetchone())["n"]), 5)
 
 
 if __name__ == "__main__":

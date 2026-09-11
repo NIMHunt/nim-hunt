@@ -2665,8 +2665,10 @@ async def create_draft_spot_api(payload: CreateDraftSpotRequest) -> JSONResponse
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 )
 
-        deposit_record = await draft_creation.derive_reserved_deposit(
-            reservation["deposit_key_index"]
+        deposit_record = await draft_creation.derive_admitted_deposit(
+            reservation_id=reservation["id"],
+            user_id=user_id,
+            key_index=reservation["deposit_key_index"],
         )
         async with db_access.transaction(db, immediate=True):
             # Another request may have filled the simultaneous-draft capacity
@@ -2699,9 +2701,6 @@ async def create_draft_spot_api(payload: CreateDraftSpotRequest) -> JSONResponse
                     title=payload.title,
                     deposit_record=deposit_record,
                 )
-            await db_access.consume_draft_creation(
-                db, reservation_id=reservation["id"], user_id=user_id
-            )
 
         await _notify_user_cache(db, user_id=user_id)
         spot = await db_access.get_spot_owner_summary(db, spot_id=spot_id)

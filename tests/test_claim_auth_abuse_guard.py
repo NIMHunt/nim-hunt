@@ -5,11 +5,14 @@ import tempfile
 import unittest
 from unittest import mock
 
+from fastapi import FastAPI
+
 import cache
 import claim_auth_abuse_guard
 import claim_security
 import constants as const
 import database as schema
+import db_access
 import social_preview
 
 
@@ -113,39 +116,63 @@ class ClaimAuthAbuseGuardTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(claim_auth_abuse_guard._verify_path(scope))
 
     async def test_twenty_devices_on_shared_wifi_pass_through_middleware(self):
-        calls = []
-
-        async def app(scope, receive, send):
-            calls.append((scope["path"], json.loads((await receive())["body"])))
-            await send({"type": "http.response.start", "status": 200, "headers": []})
-            await send({"type": "http.response.body", "body": b'{"ok":true}'})
-
         async def delegate(inner, scope, receive, send):
             await inner(scope, receive, send)
             return True
 
-        middleware = social_preview.SocialPreviewMiddleware(app)
-        statuses = []
+        application = FastAPI()
+        application.include_router(claim_security.router)
+        middleware = social_preview.SocialPreviewMiddleware(application)
+
+        async def post(path, payload):
+            body = json.dumps(payload).encode()
+            scope = self._scope()
+            scope["path"] = path
+            scope["raw_path"] = path.encode()
+            scope["headers"].append((b"content-type", b"application/json"))
+            messages = []
+            await middleware(scope, self._receive(body), self._send_to(messages))
+            status_code = next(
+                item["status"] for item in messages if item["type"] == "http.response.start"
+            )
+            response_body = b"".join(
+                item.get("body", b"")
+                for item in messages
+                if item["type"] == "http.response.body"
+            )
+            return status_code, json.loads(response_body)
+
         with (
             mock.patch.object(const, "PUBLIC_DEPLOYMENT", True),
             mock.patch.object(claim_auth_abuse_guard, "_DELEGATE", delegate),
             mock.patch.object(claim_security, "guard_http_request", claim_auth_abuse_guard.guard_http_request_with_verify_rate_limit),
+            mock.patch.object(
+                claim_security,
+                "_verify_signature",
+                new=mock.AsyncMock(
+                    return_value="NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF"
+                ),
+            ),
         ):
             for index in range(20):
                 device = f"{index:064x}"
-                for path in ("/api/security/challenge", "/api/security/verify"):
-                    scope = self._scope()
-                    scope["path"] = path
-                    messages = []
-                    await middleware(
-                        scope,
-                        self._receive(json.dumps({"device_id_hash": device}).encode()),
-                        self._send_to(messages),
+                challenge_status, challenge = await post(
+                    "/api/security/challenge", {"device_id_hash": device}
+                )
+                self.assertEqual(challenge_status, 200, challenge)
+                verification_status, verification = await post(
+                        "/api/security/verify",
+                        {
+                            "device_id_hash": device,
+                            "challenge_id": challenge["challenge_id"],
+                            "public_key": "d" * 64,
+                            "signature": "e" * 128,
+                        },
                     )
-                    statuses.append(next(m["status"] for m in messages if m["type"] == "http.response.start"))
+                self.assertEqual(verification_status, 200, verification)
 
-        self.assertEqual(statuses, [200] * 40)
-        self.assertEqual(len(calls), 40)
+        async with schema.get_db() as db:
+            self.assertEqual(await db_access.count_users(db), 20)
 
 
 if __name__ == "__main__":

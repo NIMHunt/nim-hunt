@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import tempfile
 import unittest
 from unittest import mock
@@ -27,147 +28,225 @@ class LocationBehaviorGuardTests(unittest.IsolatedAsyncioTestCase):
         )
         await self.db.commit()
         self.now = await db_access.get_unixepoch(self.db)
+        self.spots: dict[int, dict] = {}
 
     async def asyncTearDown(self):
         await self.context.__aexit__(None, None, None)
         schema.DB_PATH = self.old_path
         self.tmp.close()
 
-    @staticmethod
-    def spot(spot_id: int, *, lat: float = 51.5, long: float = -0.1, radius: int = 50,
-             password: int = 0) -> dict:
-        return {
+    def spot(self, spot_id: int, *, metres: float = 0, radius: int = 50,
+             password: int = 0, owner: int = 999) -> dict:
+        value = {
             schema.SPOT_ID: spot_id,
-            schema.SPOT_LAT: lat,
-            schema.SPOT_LONG: long,
+            schema.SPOT_CREATED_BY: owner,
+            schema.SPOT_LAT: 51.5 + metres / 111_195,
+            schema.SPOT_LONG: -0.1,
             schema.SPOT_RADIUS: radius,
             schema.SPOT_USE_PASSWORD: password,
         }
+        self.spots[spot_id] = value
+        return value
 
-    async def claim(self, spot_id: int, *, offset_metres: float = 0, now: int | None = None,
-                    password: int = 0, corroborated: bool = False):
-        # Latitude is approximately 111,195 metres per degree here.
-        spot = self.spot(spot_id, password=password)
-        with mock.patch.object(db_access, "is_spot_currently_claimable", mock.AsyncMock(return_value=True)):
+    async def claim(self, spot_id: int, *, metres: float | None = None,
+                    noise_metres: float = 0, now: int | None = None,
+                    password: int = 0, owner: int = 999, corroborated: bool = False):
+        centre = float((spot_id - 1) * 100 if metres is None else metres)
+        spot = self.spot(spot_id, metres=centre, password=password, owner=owner)
+
+        async def get_spot(_db, *, spot_id):
+            return self.spots.get(int(spot_id))
+
+        with mock.patch.object(db_access, "is_spot_currently_claimable", mock.AsyncMock(return_value=True)), \
+             mock.patch.object(db_access, "get_spot", side_effect=get_spot):
             result = await guard.observe_signed_claim(
                 self.db, user_id=self.user_id, spot=spot,
-                lat=51.5 + offset_metres / 111_195, long=-0.1,
-                location_accuracy_metres=999_999, now=self.now if now is None else now,
-                corroborated=corroborated,
+                lat=float(spot[schema.SPOT_LAT]) + noise_metres / 111_195,
+                long=float(spot[schema.SPOT_LONG]), location_accuracy_metres=999_999,
+                now=self.now if now is None else now, corroborated=corroborated,
             )
         await self.db.commit()
         return result
 
-    async def test_one_exact_centre_claim_records_without_punishment(self):
+    async def find(self, spots: list[dict], *, lat: float, long: float, now: int):
+        with mock.patch.object(guard, "_claimable_public_spots", mock.AsyncMock(return_value=spots)):
+            return await guard.observe_find_location(
+                self.db, user_id=self.user_id, lat=lat, long=long, now=now
+            )
+
+    async def mature(self, *, start: int | None = None):
+        base = self.now if start is None else start
+        result = None
+        for index in range(1, 5):
+            result = await self.claim(index, now=base + index)
+        return result
+
+    async def test_one_exact_centre_claim_is_non_punitive_and_bad_accuracy_does_not_erase_it(self):
         result = await self.claim(1)
         self.assertFalse(result["restricted"])
-        self.assertEqual(result["state"]["near_centre_spot_ids"], [1])
+        self.assertEqual(result["state"]["centre_location_spot_ids"], [1])
 
-    async def test_same_spot_retries_do_not_inflate_distinct_centre_evidence(self):
+    async def test_same_spot_retry_and_ordinary_noise_do_not_inflate_centre_evidence(self):
         await self.claim(1)
-        await self.claim(1, now=self.now + guard.OBSERVATION_WINDOW_SECONDS + 1)
+        await self.claim(1, now=self.now + guard.SIGNED_RETRY_WINDOW_SECONDS + 1)
+        await self.claim(2, noise_metres=8, now=self.now + guard.SIGNED_RETRY_WINDOW_SECONDS + 2)
         state = await guard.get_state(self.db, user_id=self.user_id)
-        self.assertEqual(state["near_centre_spot_ids"], [1])
-        self.assertEqual(state["signed_inside_observations"], 2)
+        self.assertEqual(state["centre_location_spot_ids"], [1])
 
-    async def test_distinct_near_centres_accumulate_but_noise_does_not(self):
-        await self.claim(1, offset_metres=0.4)
-        await self.claim(2, offset_metres=1.2, now=self.now + 1)
-        await self.claim(3, offset_metres=8, now=self.now + 2)
+    async def test_colocated_and_nearby_spots_are_one_physical_location(self):
+        await self.claim(1, metres=0)
+        await self.claim(2, metres=0, now=self.now + 1)
+        await self.claim(3, metres=20, now=self.now + 2)
         state = await guard.get_state(self.db, user_id=self.user_id)
-        self.assertEqual(state["near_centre_spot_ids"], [1, 2])
-        self.assertEqual(state["inside_spot_ids"], [1, 2, 3])
+        self.assertEqual(state["centre_location_spot_ids"], [1])
+        self.assertEqual(state["inside_streak_spot_ids"], [1])
 
-    async def test_find_polling_is_deduplicated_and_outside_history_is_normal(self):
-        with mock.patch.object(guard, "_claimable_public_spots", mock.AsyncMock(return_value=[])):
-            for second in range(20):
-                await guard.observe_find_location(
-                    self.db, user_id=self.user_id, lat=0, long=0, now=self.now + second
-                )
-            await guard.observe_find_location(
-                self.db, user_id=self.user_id, lat=1, long=1,
-                now=self.now + guard.FIND_OBSERVATION_WINDOW_SECONDS + 1,
-            )
+    async def test_geographically_distinct_locations_build_evidence(self):
+        for index in range(1, 4):
+            await self.claim(index, now=self.now + index)
         state = await guard.get_state(self.db, user_id=self.user_id)
-        self.assertEqual(state["meaningful_observations"], 2)
-        self.assertEqual(state["browser_outside_observations"], 2)
+        self.assertEqual(state["centre_location_spot_ids"], [1, 2, 3])
+        self.assertEqual(state["inside_streak_spot_ids"], [1, 2, 3])
 
-    async def test_outside_between_spots_breaks_inside_only_sequence(self):
+    async def test_outside_resets_streak_but_later_b_c_d_e_can_mature(self):
         await self.claim(1)
-        with mock.patch.object(guard, "_claimable_public_spots", mock.AsyncMock(return_value=[])):
-            await guard.observe_find_location(
-                self.db, user_id=self.user_id, lat=0, long=0, now=self.now + 1
-            )
-        await self.claim(2, now=self.now + 2)
+        await self.find([], lat=0, long=0, now=self.now + 2)
+        for index in range(2, 6):
+            result = await self.claim(index, noise_metres=5, now=self.now + index + 2)
+        self.assertFalse(result["restricted"])
+        self.assertEqual(result["state"]["inside_streak_spot_ids"], [2, 3, 4, 5])
+        self.assertEqual(result["state"]["browser_outside_observations"], 1)
+
+    async def test_inside_find_poll_does_not_hide_later_outside_transition(self):
+        await self.claim(1)
+        own_or_other = self.spot(90, metres=0, radius=50)
+        await self.find([own_or_other], lat=51.5, long=-0.1, now=self.now + 60)
+        await self.find([], lat=0, long=0, now=self.now + 5 * 60)
+        await self.claim(2, now=self.now + 6 * 60)
         state = await guard.get_state(self.db, user_id=self.user_id)
-        self.assertEqual(state["inside_transitions_without_outside"], 0)
+        self.assertEqual(state["browser_outside_observations"], 1)
+        self.assertEqual(state["inside_streak_spot_ids"], [2])
+
+    async def test_repeated_outside_polling_is_heavily_deduplicated(self):
+        for second in range(20):
+            await self.find([], lat=0, long=0, now=self.now + second)
+        state = await guard.get_state(self.db, user_id=self.user_id)
+        self.assertEqual(state["meaningful_observations"], 1)
         self.assertEqual(state["browser_outside_observations"], 1)
 
-    async def test_delayed_distinct_inside_only_appearances_accumulate(self):
-        for index in range(1, 5):
-            result = await self.claim(index, offset_metres=5, now=self.now + index * 7 * 86400)
-        self.assertFalse(result["restricted"])  # inside-only is supporting evidence, not a ban
-        self.assertEqual(result["state"]["inside_transitions_without_outside"], 3)
-
-    async def test_combined_evidence_temporarily_restricts_without_banning(self):
-        for index in range(1, 5):
-            result = await self.claim(
-                index, offset_metres=0.5, now=self.now + index * guard.OBSERVATION_WINDOW_SECONDS
-            )
+    async def test_restriction_does_not_slide_and_consumed_evidence_does_not_rearm(self):
+        result = await self.mature()
+        expiry = result["state"]["restricted_until"]
         self.assertTrue(result["restricted"])
-        user = await db_access.get_user_by_id(self.db, user_id=self.user_id)
-        self.assertNotEqual(int(user[schema.USER_STATUS]), const.USER_STATUS_BANNED)
+        during = await self.claim(99, now=expiry - 1)
+        self.assertTrue(during["restricted"])
+        self.assertEqual(during["state"]["restricted_until"], expiry)
+        self.assertFalse((await guard.current_decision(
+            self.db, user_id=self.user_id, now=expiry
+        ))["restricted"])
+        first_after = await self.claim(100, now=expiry)
+        self.assertFalse(first_after["restricted"])
+        self.assertEqual(first_after["state"]["inside_streak_spot_ids"], [100])
 
-    async def test_independent_fresh_location_anomaly_corroborates_one_pattern(self):
-        for index in range(1, 4):
-            result = await self.claim(index, now=self.now + index, corroborated=True)
+    async def test_new_post_expiry_episode_can_restrict_again(self):
+        first = await self.mature()
+        expiry = first["state"]["restricted_until"]
+        result = None
+        for index in range(10, 14):
+            result = await self.claim(index, now=expiry + index)
         self.assertTrue(result["restricted"])
+        self.assertGreater(result["state"]["restricted_until"], expiry)
 
-    async def test_password_and_unclaimable_spots_are_excluded(self):
-        password = await self.claim(1, password=1)
-        self.assertEqual(password["reason"], "password_exempt")
+    async def test_password_unclaimable_and_own_spots_are_excluded(self):
+        self.assertEqual((await self.claim(1, password=1))["reason"], "password_exempt")
+        own = await self.claim(2, owner=self.user_id)
+        self.assertEqual(own["reason"], "own_spot_exempt")
         with mock.patch.object(db_access, "is_spot_currently_claimable", mock.AsyncMock(return_value=False)):
             expired = await guard.observe_signed_claim(
-                self.db, user_id=self.user_id, spot=self.spot(2), lat=51.5, long=-0.1,
+                self.db, user_id=self.user_id, spot=self.spot(3), lat=51.5, long=-0.1,
                 now=self.now,
             )
         self.assertEqual(expired["reason"], "spot_not_claimable")
         self.assertEqual((await guard.get_state(self.db, user_id=self.user_id))["meaningful_observations"], 0)
 
-    async def test_server_coordinates_radius_and_no_raw_history_storage(self):
-        spot = self.spot(9, lat=20, long=30, radius=25)
-        with mock.patch.object(db_access, "is_spot_currently_claimable", mock.AsyncMock(return_value=True)):
-            await guard.observe_signed_claim(
-                self.db, user_id=self.user_id, spot=spot, lat=20, long=30,
-                location_accuracy_metres=1_000_000, now=self.now,
-            )
+    async def test_own_spot_is_outside_but_overlapping_other_spot_remains_inside(self):
+        await self.claim(1)
+        own = self.spot(80, metres=500, owner=self.user_id)
+        # The eligible lookup excludes `own`; no other Spot means ordinary outside.
+        await self.find([], lat=float(own[schema.SPOT_LAT]), long=-0.1, now=self.now + 1)
+        self.assertTrue((await guard.get_state(self.db, user_id=self.user_id))["outside_since_last_inside"])
+        other = self.spot(81, metres=500, owner=777)
+        await self.claim(2, now=self.now + 2)
+        await self.find([other], lat=float(other[schema.SPOT_LAT]), long=-0.1, now=self.now + 3)
         state = await guard.get_state(self.db, user_id=self.user_id)
-        self.assertEqual(state["near_centre_spot_ids"], [9])
+        self.assertFalse(state["outside_since_last_inside"])
+        self.assertEqual(state["browser_outside_observations"], 1)
+
+    async def test_eligible_lookup_filters_ownership_server_side(self):
+        class CursorDb:
+            def __init__(self):
+                self.params = None
+
+            async def execute_fetchall(self, query, params):
+                self.query, self.params = query, params
+                return []
+
+        fake = CursorDb()
+        await guard._claimable_public_spots(fake, user_id=self.user_id)
+        self.assertIn(f"{schema.SPOT_CREATED_BY} != ?", fake.query)
+        self.assertEqual(fake.params, (self.user_id,))
+
+    async def test_state_is_hard_bounded_after_many_distinct_spots(self):
+        # Keep one mature signal from restricting by adding ordinary GPS noise.
+        for index in range(1, 501):
+            await self.claim(index, noise_metres=5, now=self.now + index)
+        state = await guard.get_state(self.db, user_id=self.user_id)
+        encoded = json.dumps(state)
+        self.assertLessEqual(len(state["inside_streak_spot_ids"]), 4)
+        self.assertLessEqual(len(state["centre_location_spot_ids"]), 3)
+        self.assertEqual(state["meaningful_observations"], guard.MAX_DIAGNOSTIC_COUNT)
+        self.assertLess(len(encoded), 700)
         self.assertNotIn("lat", state)
         self.assertNotIn("long", state)
-        self.assertLess(len(str(state)), 1_000)
+
+    async def test_v1_migration_discards_old_lists_and_preserves_finite_expiry(self):
+        await self.db.execute(
+            f"INSERT INTO {schema.APP_METADATA_TABLE_NAME} VALUES (?, ?)",
+            (guard._key(self.user_id), json.dumps({
+                "version": 1, "inside_spot_ids": list(range(100)),
+                "near_centre_spot_ids": list(range(100)), "restricted_until": self.now + 20,
+            })),
+        )
+        state = await guard.get_state(self.db, user_id=self.user_id)
+        self.assertEqual(state["centre_location_spot_ids"], [])
+        self.assertEqual(state["inside_streak_spot_ids"], [])
+        self.assertEqual(state["restricted_until"], self.now + 20)
 
     async def test_concurrent_same_event_is_counted_once(self):
         other_context = schema.get_db()
         other_db = await other_context.__aenter__()
+        spot = self.spot(12)
+
+        async def get_spot(_db, *, spot_id):
+            return self.spots.get(int(spot_id))
+
         try:
-            spot = self.spot(12)
-            with mock.patch.object(
-                db_access, "is_spot_currently_claimable", mock.AsyncMock(return_value=True)
-            ):
+            with mock.patch.object(db_access, "is_spot_currently_claimable", mock.AsyncMock(return_value=True)), \
+                 mock.patch.object(db_access, "get_spot", side_effect=get_spot):
                 await asyncio.gather(*(
                     guard.observe_signed_claim(
-                        db,
-                        user_id=self.user_id,
-                        spot=spot,
-                        lat=51.5,
-                        long=-0.1,
-                        now=self.now,
-                    )
-                    for db in (self.db, other_db)
+                        db, user_id=self.user_id, spot=spot, lat=float(spot[schema.SPOT_LAT]),
+                        long=-0.1, now=self.now,
+                    ) for db in (self.db, other_db)
                 ))
             state = await guard.get_state(self.db, user_id=self.user_id)
             self.assertEqual(state["meaningful_observations"], 1)
-            self.assertEqual(state["near_centre_spot_ids"], [12])
+            self.assertEqual(state["centre_location_spot_ids"], [12])
         finally:
             await other_context.__aexit__(None, None, None)
+
+    async def test_combined_evidence_never_bans(self):
+        result = await self.mature()
+        self.assertTrue(result["restricted"])
+        user = await db_access.get_user_by_id(self.db, user_id=self.user_id)
+        self.assertNotEqual(int(user[schema.USER_STATUS]), const.USER_STATUS_BANNED)

@@ -18,6 +18,7 @@ import os
 import urllib.error
 import urllib.request
 from typing import Any
+from urllib.parse import urlparse
 
 import constants as const
 import database as schema
@@ -29,6 +30,21 @@ ROLLOUT_KEY = "fresh_claim_guard:activated_at"
 SIGNER_PREFIX = "fresh_claim_guard:signer:"
 LOCATION_PREFIX = "fresh_claim_guard:location:"
 GENERIC_MESSAGE = "Public Spots are temporarily unavailable for this account. Please try again later."
+
+
+def validate_ip_geolocation_configuration() -> None:
+    """Reject an unusable public-provider URL without exposing credentials."""
+    template = os.getenv("NIMHUNT_IP_GEOLOCATION_URL", "").strip()
+    try:
+        parsed = urlparse(template)
+    except ValueError as exc:
+        raise RuntimeError(
+            "NIMHUNT_IP_GEOLOCATION_URL must be a valid HTTPS URL containing {ip}"
+        ) from exc
+    if parsed.scheme.lower() != "https" or not parsed.hostname or "{ip}" not in template:
+        raise RuntimeError(
+            "NIMHUNT_IP_GEOLOCATION_URL must be a valid HTTPS URL containing {ip}"
+        )
 
 
 def _key(prefix: str, value: str | int) -> str:
@@ -126,7 +142,21 @@ async def _oldest_confirmed_activity(address: str) -> int | None:
     raise RuntimeError("Nimiq transaction history exceeded the configured page limit")
 
 
+def _cached_signer_decision(cached: Any, *, address: str, now: int) -> dict[str, Any] | None:
+    if not isinstance(cached, dict) or cached.get("address") != address:
+        return None
+    if cached.get("trusted") is True:
+        return {"trusted": True, "reason": "signer_established"}
+    if int(cached.get("refresh_at") or 0) <= int(now):
+        return None
+    reason = ("signer_history_unavailable"
+              if cached.get("result") == "provider_failure"
+              else "signer_not_yet_trusted")
+    return {"trusted": False, "reason": reason}
+
+
 async def signer_or_account_trusted(db, *, user: dict[str, Any], signer_address: str, now: int) -> dict[str, Any]:
+    """Resolve signer trust without holding a SQLite write lock over RPC I/O."""
     age = max(0, int(now) - int(user[schema.USER_CREATED_AT]))
     if age >= const.CLAIM_IDENTITY_TRUST_AGE_SECONDS:
         return {"trusted": True, "reason": "account_established"}
@@ -135,24 +165,46 @@ async def signer_or_account_trusted(db, *, user: dict[str, Any], signer_address:
     )
     cache_key = _key(SIGNER_PREFIX, address)
     cached = await _get(db, cache_key)
-    if isinstance(cached, dict) and cached.get("address") == address:
-        if cached.get("trusted") is True:
-            return {"trusted": True, "reason": "signer_established"}
-        if int(cached.get("refresh_at") or 0) > int(now):
-            return {"trusted": False, "reason": "signer_not_yet_trusted"}
+    decision = _cached_signer_decision(cached, address=address, now=now)
+    if decision is not None:
+        return decision
+    if db.in_transaction:
+        raise RuntimeError("signer-history lookup requires a connection outside a transaction")
+    lookup_started_at = int(now)
     try:
         oldest = await _oldest_confirmed_activity(address)
     except Exception:
         logger.warning("Signer history unavailable for user=%s", user[schema.USER_ID])
-        return {"trusted": False, "reason": "signer_history_unavailable"}
+        lookup_result = "provider_failure"
+        oldest = None
+    else:
+        lookup_result = "history"
     trusted = oldest is not None and oldest <= now - const.CLAIM_IDENTITY_TRUST_AGE_SECONDS
-    refresh_at = now + const.CLAIM_SIGNER_HISTORY_NEGATIVE_CACHE_SECONDS
+    refresh_at = (now + const.CLAIM_SIGNER_HISTORY_FAILURE_RETRY_SECONDS
+                  if lookup_result == "provider_failure"
+                  else now + const.CLAIM_SIGNER_HISTORY_NEGATIVE_CACHE_SECONDS)
     if oldest is not None and not trusted:
         refresh_at = min(refresh_at, oldest + const.CLAIM_IDENTITY_TRUST_AGE_SECONDS + 1)
-    await _set(db, cache_key, {
-        "address": address, "trusted": trusted, "oldest_confirmed_at": oldest,
-        "checked_at": now, "refresh_at": None if trusted else refresh_at,
-    })
+    async with db_access.transaction(db, immediate=True):
+        # Re-read after RPC I/O. Never let a stale failure/negative overwrite a
+        # positive result or another request's newer completed lookup.
+        current_user = await db_access.get_user_by_id(db, user_id=int(user[schema.USER_ID]))
+        if current_user is None or int(current_user[schema.USER_STATUS]) == const.USER_STATUS_BANNED:
+            return {"trusted": False, "reason": "user_not_allowed"}
+        current = await _get(db, cache_key)
+        current_decision = _cached_signer_decision(current, address=address, now=now)
+        if current_decision is not None and current.get("trusted") is True:
+            return current_decision
+        if (not trusted and current_decision is not None
+                and int(current.get("checked_at") or 0) >= lookup_started_at):
+            return current_decision
+        await _set(db, cache_key, {
+            "address": address, "trusted": trusted, "result": lookup_result,
+            "oldest_confirmed_at": oldest, "checked_at": now,
+            "refresh_at": None if trusted else refresh_at,
+        })
+    if lookup_result == "provider_failure":
+        return {"trusted": False, "reason": "signer_history_unavailable"}
     return {"trusted": trusted, "reason": "signer_established" if trusted else "signer_not_yet_trusted"}
 
 
@@ -202,62 +254,116 @@ def _country(value: Any) -> str:
     return " ".join(str(value or "").casefold().split())
 
 
+def _location_state_decision(state: Any, *, now: int) -> dict[str, Any] | None:
+    if not isinstance(state, dict):
+        return None
+    if state.get("verified_at"):
+        return {"allowed": True, "reason": "first_location_verified"}
+    if int(state.get("retry_at") or 0) > now:
+        return {
+            "allowed": False,
+            "reason": str(
+                state.get("restriction_reason")
+                or "first_location_mismatch_restriction"
+            ),
+        }
+    return None
+
+
 async def first_location_decision(db, *, user: dict[str, Any], ip: str | None,
                                   gps_lat: float, gps_long: float,
                                   gps_country: str | None, now: int) -> dict[str, Any]:
-    rollout = await ensure_rollout_marker(db)
+    rollout = await _get(db, ROLLOUT_KEY)
+    if not isinstance(rollout, dict):
+        async with db_access.transaction(db, immediate=True):
+            rollout = await ensure_rollout_marker(db)
     if (int(user[schema.USER_ID]) <= rollout["legacy_max_user_id"] or
             int(user[schema.USER_CREATED_AT]) < rollout["activated_at"]):
         return {"allowed": True, "reason": "legacy_account"}
     key = _key(LOCATION_PREFIX, int(user[schema.USER_ID]))
     state = await _get(db, key)
-    state = dict(state) if isinstance(state, dict) else {"mismatch_count": 0}
-    if state.get("verified_at"):
-        return {"allowed": True, "reason": "first_location_verified"}
-    if int(state.get("retry_at") or 0) > now:
-        return {"allowed": False, "reason": str(state.get("restriction_reason") or "first_location_mismatch_restriction")}
+    existing = _location_state_decision(state, now=now)
+    if existing is not None:
+        return existing
+    if db.in_transaction:
+        raise RuntimeError("IP-geolocation lookup requires a connection outside a transaction")
+    lookup_started_at = int(now)
+    outcome: dict[str, Any]
     if ip is None:
-        state.update({"last_result": "unknown", "retry_at": now + const.CLAIM_FIRST_LOCATION_UNKNOWN_RETRY_SECONDS,
-                      "restriction_reason": "first_location_provider_unavailable"})
+        outcome = {"kind": "unknown"}
+    else:
+        try:
+            location = await lookup_ip_location(ip)
+            ip_lat = float(location.get("latitude", location.get("lat")))
+            ip_long = float(location.get("longitude", location.get("lon")))
+            if not (-90 <= ip_lat <= 90 and -180 <= ip_long <= 180):
+                raise ValueError("IP geolocation coordinates are invalid")
+            ip_country = _country(location.get("country_name", location.get("country")))
+            uncertainty_km = max(0.0, float(location.get("accuracy_radius_km") or 0))
+            distance = db_access.distance_metres(ip_lat, ip_long, gps_lat, gps_long)
+            same_country = bool(ip_country and _country(gps_country) == ip_country)
+            blatant = (
+                not same_country
+                and distance - uncertainty_km * 1000
+                >= const.CLAIM_FIRST_LOCATION_MISMATCH_METRES
+            )
+            outcome = {
+                "kind": "mismatch" if blatant else "match",
+                "ip_country": ip_country,
+                "gps_country": _country(gps_country),
+                "distance_km": round(distance / 1000),
+            }
+        except Exception:
+            # Configuration is validated at public startup. Runtime transport,
+            # HTTP, decoding and unusable-response failures remain UNKNOWN.
+            outcome = {"kind": "unknown"}
+
+    async with db_access.transaction(db, immediate=True):
+        # Re-read after provider I/O. A concurrent verification, ban, or newer
+        # restriction always wins over this potentially stale observation.
+        current_user = await db_access.get_user_by_id(db, user_id=int(user[schema.USER_ID]))
+        if current_user is None or int(current_user[schema.USER_STATUS]) == const.USER_STATUS_BANNED:
+            return {"allowed": False, "reason": "user_not_allowed"}
+        current = await _get(db, key)
+        current_decision = _location_state_decision(current, now=now)
+        if current_decision is not None:
+            return current_decision
+        if isinstance(current, dict) and int(current.get("decision_at") or 0) >= lookup_started_at:
+            # Another equally/newer lookup completed while this one was in
+            # flight. Its durable result is authoritative even if its retry
+            # boundary is exactly the mocked/current second.
+            return _location_state_decision(current, now=now) or {
+                "allowed": False,
+                "reason": str(current.get("restriction_reason") or "first_location_provider_unavailable"),
+            }
+        state = dict(current) if isinstance(current, dict) else {"mismatch_count": 0}
+        if outcome["kind"] == "match":
+            state.update({"verified_at": now, "decision_at": now, "last_result": "match",
+                          "ip_country": outcome["ip_country"],
+                          "gps_country": outcome["gps_country"]})
+            state.pop("retry_at", None)
+            state.pop("restriction_reason", None)
+            await _set(db, key, state)
+            return {"allowed": True, "reason": "first_location_verified"}
+        if outcome["kind"] == "unknown":
+            state.update({"decision_at": now, "last_result": "unknown",
+                          "retry_at": now + const.CLAIM_FIRST_LOCATION_UNKNOWN_RETRY_SECONDS,
+                          "restriction_reason": "first_location_provider_unavailable"})
+            await _set(db, key, state)
+            return {"allowed": False, "reason": "first_location_provider_unavailable"}
+        strikes = int(state.get("mismatch_count") or 0) + 1
+        cooldown = (const.CLAIM_FIRST_LOCATION_COOLDOWN_SECONDS if strikes == 1
+                    else const.CLAIM_FIRST_LOCATION_SECOND_COOLDOWN_SECONDS)
+        state.update({"mismatch_count": strikes, "decision_at": now,
+                      "last_result": "blatant_mismatch", "last_mismatch_at": now,
+                      "retry_at": now + cooldown,
+                      "restriction_reason": "first_location_mismatch_restriction",
+                      "ip_country": outcome["ip_country"],
+                      "gps_country": outcome["gps_country"],
+                      "distance_km": outcome["distance_km"]})
         await _set(db, key, state)
-        return {"allowed": False, "reason": "first_location_provider_unavailable"}
-    try:
-        location = await lookup_ip_location(ip)
-        ip_lat = float(location.get("latitude", location.get("lat")))
-        ip_long = float(location.get("longitude", location.get("lon")))
-        ip_country = _country(location.get("country_name", location.get("country")))
-        uncertainty_km = max(0.0, float(location.get("accuracy_radius_km") or 0))
-        distance = db_access.distance_metres(ip_lat, ip_long, gps_lat, gps_long)
-    except (OSError, ValueError, TypeError, urllib.error.URLError, json.JSONDecodeError):
-        state.update({"last_result": "unknown", "retry_at": now + const.CLAIM_FIRST_LOCATION_UNKNOWN_RETRY_SECONDS,
-                      "restriction_reason": "first_location_provider_unavailable"})
-        await _set(db, key, state)
-        return {"allowed": False, "reason": "first_location_provider_unavailable"}
-    same_country = bool(ip_country and _country(gps_country) == ip_country)
-    blatant = (not same_country and
-               distance - uncertainty_km * 1000 >= const.CLAIM_FIRST_LOCATION_MISMATCH_METRES)
-    if not blatant:
-        state.update({"verified_at": now, "last_result": "match",
-                      "ip_country": ip_country, "gps_country": _country(gps_country)})
-        state.pop("retry_at", None)
-        await _set(db, key, state)
-        return {"allowed": True, "reason": "first_location_verified"}
-    strikes = int(state.get("mismatch_count") or 0) + 1
-    # A strike is independent only because this branch cannot run before the
-    # previous retry_at. Refreshes and retries inside one cooldown return above.
-    cooldown = (const.CLAIM_FIRST_LOCATION_COOLDOWN_SECONDS if strikes == 1
-                else const.CLAIM_FIRST_LOCATION_SECOND_COOLDOWN_SECONDS)
-    state.update({"mismatch_count": strikes, "last_result": "blatant_mismatch",
-                  "last_mismatch_at": now, "retry_at": now + cooldown,
-                  "restriction_reason": "first_location_mismatch_restriction",
-                  "ip_country": ip_country, "gps_country": _country(gps_country),
-                  "distance_km": round(distance / 1000)})
-    await _set(db, key, state)
-    if strikes >= const.CLAIM_FIRST_LOCATION_BAN_STRIKES:
-        await db_access.set_user_status_to_banned(db, user_id=int(user[schema.USER_ID]))
-        logger.warning("Banned user=%s after %s independent first-location mismatches",
-                       user[schema.USER_ID], strikes)
-        return {"allowed": False, "reason": "repeated_location_mismatch", "banned": True}
+    # Repeated weak IP evidence can extend the strong restriction indefinitely,
+    # but never sets USER_STATUS_BANNED without a separate strong signal.
     logger.warning("Restricted public claims for user=%s after location mismatch event=%s",
                    user[schema.USER_ID], strikes)
     return {"allowed": False, "reason": "first_location_mismatch_restriction"}
@@ -268,6 +374,8 @@ async def public_claim_decision(db, *, user_id: int, signer_address: str,
                                 lat: float, long: float) -> dict[str, Any]:
     if int(spot.get(schema.SPOT_USE_PASSWORD) or 0) == 1:
         return {"allowed": True, "reason": "password_exempt"}
+    if db.in_transaction:
+        raise RuntimeError("fresh public-claim evaluation requires no active transaction")
     user = await db_access.get_user_by_id(db, user_id=user_id)
     if user is None or int(user[schema.USER_STATUS]) == const.USER_STATUS_BANNED:
         return {"allowed": False, "reason": "user_not_allowed"}

@@ -68,13 +68,28 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
         rpc.assert_not_awaited()
 
     async def test_history_failure_is_not_cached_as_no_history(self):
-        rpc = mock.AsyncMock(side_effect=RuntimeError("offline"))
+        rpc = mock.AsyncMock(side_effect=[RuntimeError("offline"),
+                                         {"data": [self.tx(40 * 86400)]}])
         with mock.patch.object(guard.trans_updater, "get_chain_transactions_by_address", rpc):
-            for _ in range(2):
-                result = await guard.signer_or_account_trusted(
-                    self.db, user=self.user, signer_address=self.address, now=self.now)
-        self.assertFalse(result["trusted"])
+            first = await guard.signer_or_account_trusted(
+                self.db, user=self.user, signer_address=self.address, now=self.now)
+            failed_cache = await guard._get(
+                self.db, guard._key(guard.SIGNER_PREFIX, self.address)
+            )
+            repeated = await guard.signer_or_account_trusted(
+                self.db, user=self.user, signer_address=self.address, now=self.now + 1)
+            recovered = await guard.signer_or_account_trusted(
+                self.db, user=self.user, signer_address=self.address,
+                now=self.now + const.CLAIM_SIGNER_HISTORY_FAILURE_RETRY_SECONDS + 1)
+        self.assertFalse(first["trusted"] or repeated["trusted"])
+        self.assertEqual(first["reason"], "signer_history_unavailable")
+        self.assertEqual(failed_cache["result"], "provider_failure")
+        self.assertIsNone(failed_cache["oldest_confirmed_at"])
+        self.assertTrue(recovered["trusted"])
         self.assertEqual(rpc.await_count, 2)
+        cached = await guard._get(self.db, guard._key(guard.SIGNER_PREFIX, self.address))
+        self.assertTrue(cached["trusted"])
+        self.assertNotEqual(cached["result"], "provider_failure")
 
     async def test_negative_cache_refreshes(self):
         rpc = mock.AsyncMock(side_effect=[{"data": []}, {"data": [self.tx(40 * 86400)]}])
@@ -109,7 +124,7 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
                 "latitude": 43.0, "longitude": -79.0, "country_name": "United States"})):
             self.assertTrue((await self.location())["allowed"])
 
-    async def test_mismatch_cooldown_deduplicates_and_escalates_independent_events(self):
+    async def test_mismatch_cooldown_deduplicates_and_never_bans_by_itself(self):
         provider = mock.AsyncMock(return_value={"latitude": 28.6, "longitude": 77.2,
                                                 "country_name": "India"})
         key = guard._key(guard.LOCATION_PREFIX, self.user_id)
@@ -120,14 +135,16 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
             self.assertEqual(provider.await_count, 1)
             for expected in (2, 3):
                 state = await guard._get(self.db, key)
-                state["retry_at"] = self.now
-                await guard._set(self.db, key, state)
+                self.now = int(state["retry_at"]) + 1
                 result = await self.location()
                 state = await guard._get(self.db, key)
                 self.assertEqual(state["mismatch_count"], expected)
-        self.assertTrue(result["banned"])
+        self.assertFalse(result["allowed"])
+        self.assertEqual(
+            state["retry_at"], self.now + const.CLAIM_FIRST_LOCATION_SECOND_COOLDOWN_SECONDS
+        )
         user = await db_access.get_user_by_id(self.db, user_id=self.user_id)
-        self.assertEqual(user[schema.USER_STATUS], const.USER_STATUS_BANNED)
+        self.assertEqual(user[schema.USER_STATUS], const.USER_STATUS_ACTIVE)
 
     async def test_provider_failure_and_private_ip_are_unknown_not_strikes(self):
         provider = mock.AsyncMock(side_effect=TimeoutError())
@@ -153,3 +170,77 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
             self.db, user=self.user, ip=None, gps_lat=0, gps_long=0,
             gps_country=None, now=self.now)
         self.assertTrue(result["allowed"])
+
+    async def test_external_calls_run_before_immediate_write_transactions(self):
+        async def rpc(*_args, **_kwargs):
+            self.assertFalse(self.db.in_transaction)
+            return {"data": [self.tx(40 * 86400)]}
+
+        async def provider(_ip):
+            self.assertFalse(self.db.in_transaction)
+            return {"latitude": 43.65, "longitude": -79.38,
+                    "country_name": "Canada"}
+
+        with (mock.patch.object(guard.trans_updater, "get_chain_transactions_by_address", rpc),
+              mock.patch.object(guard, "lookup_ip_location", provider)):
+            result = await guard.public_claim_decision(
+                self.db, user_id=self.user_id, signer_address=self.address,
+                spot={schema.SPOT_USE_PASSWORD: 0, schema.SPOT_COUNTRY: "Canada"},
+                ip="8.8.8.8", lat=43.65, long=-79.38)
+        self.assertTrue(result["allowed"])
+
+    async def test_active_immediate_transaction_never_launches_external_io(self):
+        rpc = mock.AsyncMock()
+        provider = mock.AsyncMock()
+        with (mock.patch.object(guard.trans_updater, "get_chain_transactions_by_address", rpc),
+              mock.patch.object(guard, "lookup_ip_location", provider),
+              self.assertRaisesRegex(RuntimeError, "no active transaction")):
+            async with db_access.transaction(self.db, immediate=True):
+                await guard.public_claim_decision(
+                    self.db, user_id=self.user_id, signer_address=self.address,
+                    spot={schema.SPOT_USE_PASSWORD: 0, schema.SPOT_COUNTRY: "Canada"},
+                    ip="8.8.8.8", lat=43.65, long=-79.38)
+        rpc.assert_not_awaited()
+        provider.assert_not_awaited()
+
+    async def test_find_spots_style_results_survive_reopen_and_avoid_repeat_io(self):
+        rpc = mock.AsyncMock(return_value={"data": [self.tx(40 * 86400)]})
+        provider = mock.AsyncMock(return_value={"latitude": 43.65, "longitude": -79.38,
+                                                "country_name": "Canada"})
+        spot = {schema.SPOT_USE_PASSWORD: 0, schema.SPOT_COUNTRY: "Canada"}
+        with (mock.patch.object(guard.trans_updater, "get_chain_transactions_by_address", rpc),
+              mock.patch.object(guard, "lookup_ip_location", provider)):
+            first = await guard.public_claim_decision(
+                self.db, user_id=self.user_id, signer_address=self.address,
+                spot=spot, ip="8.8.8.8", lat=43.65, long=-79.38)
+            await self.db_context.__aexit__(None, None, None)
+            self.db_context = schema.get_db()
+            self.db = await self.db_context.__aenter__()
+            second = await guard.public_claim_decision(
+                self.db, user_id=self.user_id, signer_address=self.address,
+                spot=spot, ip="8.8.8.8", lat=43.65, long=-79.38)
+        self.assertTrue(first["allowed"] and second["allowed"])
+        rpc.assert_awaited_once()
+        provider.assert_awaited_once()
+
+    async def test_stale_mismatch_cannot_overwrite_concurrent_verification(self):
+        key = guard._key(guard.LOCATION_PREFIX, self.user_id)
+
+        async def provider(_ip):
+            async with schema.get_db() as other:
+                async with db_access.transaction(other, immediate=True):
+                    await guard._set(other, key, {
+                        "verified_at": self.now,
+                        "decision_at": self.now,
+                        "last_result": "match",
+                        "mismatch_count": 0,
+                    })
+            return {"latitude": 28.6, "longitude": 77.2,
+                    "country_name": "India"}
+
+        with mock.patch.object(guard, "lookup_ip_location", provider):
+            result = await self.location()
+        self.assertTrue(result["allowed"])
+        state = await guard._get(self.db, key)
+        self.assertIsNotNone(state["verified_at"])
+        self.assertEqual(state["mismatch_count"], 0)

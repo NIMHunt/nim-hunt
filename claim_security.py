@@ -1623,21 +1623,20 @@ async def guard_http_request(
         # a manually crafted POST cannot bypass Find Spots presentation.
         import fresh_claim_guard
         async with get_db() as db:
-            async with db_access.transaction(db, immediate=True):
-                spot = await db_access.get_spot(db, spot_id=spot_id)
-                fresh_decision = (
-                    {"allowed": False, "reason": "spot_missing"}
-                    if spot is None
-                    else await fresh_claim_guard.public_claim_decision(
-                        db,
-                        user_id=int(session["user_id"]),
-                        signer_address=signer,
-                        spot=spot,
-                        ip=fresh_claim_guard.genuine_client_ip(scope),
-                        lat=float(request_body.get("lat")),
-                        long=float(request_body.get("long")),
-                    )
+            spot = await db_access.get_spot(db, spot_id=spot_id)
+            fresh_decision = (
+                {"allowed": False, "reason": "spot_missing"}
+                if spot is None
+                else await fresh_claim_guard.public_claim_decision(
+                    db,
+                    user_id=int(session["user_id"]),
+                    signer_address=signer,
+                    spot=spot,
+                    ip=fresh_claim_guard.genuine_client_ip(scope),
+                    lat=float(request_body.get("lat")),
+                    long=float(request_body.get("long")),
                 )
+            )
         if not fresh_decision.get("allowed"):
             await _retire_claim_authorization(auth_key)
             response = _security_error_response(

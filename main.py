@@ -18,6 +18,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import cache
 import constants as const
 import database
+import fresh_claim_guard
 import settlement_updater
 import social_preview
 import trans_updater
@@ -101,6 +102,8 @@ def validate_deployment_safety() -> None:
 
     if not public_deployment:
         return
+
+    fresh_claim_guard.validate_ip_geolocation_configuration()
 
     unsafe: list[str] = []
     for name in (

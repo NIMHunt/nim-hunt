@@ -674,10 +674,24 @@ sent to the provider.
 | `NIMHUNT_IP_GEOLOCATION_TIMEOUT_SECONDS` | `4` | provider and signer-history request timeout |
 | `NIMHUNT_CLAIM_IDENTITY_TRUST_AGE_SECONDS` | `2592000` | required account or oldest confirmed signer-activity age |
 | `NIMHUNT_CLAIM_SIGNER_HISTORY_NEGATIVE_CACHE_SECONDS` | `86400` | maximum negative signer-history cache lifetime |
+| `NIMHUNT_CLAIM_SIGNER_HISTORY_FAILURE_RETRY_SECONDS` | `600` | transient RPC-failure retry cache; distinct from a negative history result |
 | `NIMHUNT_CLAIM_FIRST_LOCATION_MISMATCH_METRES` | `1500000` | minimum uncertainty-adjusted, cross-country mismatch distance |
 | `NIMHUNT_CLAIM_FIRST_LOCATION_COOLDOWN_SECONDS` | `86400` | retry delay after the first independent mismatch |
 | `NIMHUNT_CLAIM_FIRST_LOCATION_SECOND_COOLDOWN_SECONDS` | `604800` | retry delay after later independent mismatches |
-| `NIMHUNT_CLAIM_FIRST_LOCATION_BAN_STRIKES` | `3` | independent mismatch events before the existing banned status is used |
+
+The first independent blatant mismatch starts the short restriction. Any later
+post-cooldown mismatch starts the longer restriction, and further mismatches
+continue that restriction while preserving the event count. IP geolocation is
+only a weak heuristic and never permanently bans an account by itself. Existing
+impossible-travel, claim-security, and administrator ban paths remain unchanged.
+
+Railway does not publish a stable ingress CIDR suitable for Uvicorn's
+`forwarded_allow_ips`, so the deployment retains `*`. This is safe only under
+the existing deployment boundary: the container port is not directly exposed
+to public clients and Railway's edge is the sole public ingress responsible for
+setting the forwarded chain. A deployment that exposes the container directly
+must instead configure a concrete trusted-proxy allowlist; otherwise forwarded
+client identity is forgeable and the first-location signal must not be enabled.
 
 `NIMHUNT_NIMIQ_TRANSACTION_FEE` is measured in **Luna**, unlike the platform-fee
 variables. The current funding model does not reserve an extra network-fee budget

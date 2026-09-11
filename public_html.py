@@ -1787,6 +1787,10 @@ async def spots_claim_status_api(payload: ClaimStatusRequest, request: Request) 
             )
             if isinstance(session, dict):
                 signer_address = session.get("wallet_address")
+        # Identification updates last_seen (and may create the account). Commit
+        # that small caller-owned unit before any guard can perform network I/O;
+        # the guard then uses only its own short post-I/O write transactions.
+        await db.commit()
         statuses: dict[str, Any] = {}
         for spot_id in ids:
             spot = await db_access.get_spot_owner_summary(db, spot_id=spot_id)

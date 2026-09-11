@@ -1624,19 +1624,35 @@ async def guard_http_request(
         import fresh_claim_guard
         async with get_db() as db:
             spot = await db_access.get_spot(db, spot_id=spot_id)
-            fresh_decision = (
-                {"allowed": False, "reason": "spot_missing"}
-                if spot is None
-                else await fresh_claim_guard.public_claim_decision(
+            if spot is None:
+                fresh_decision = {"allowed": False, "reason": "spot_missing"}
+            else:
+                public_ip = fresh_claim_guard.genuine_client_ip(scope)
+                await fresh_claim_guard.record_gps_observation(
+                    db,
+                    user_id=int(session["user_id"]),
+                    ip=public_ip,
+                    lat=float(request_body.get("lat")),
+                    long=float(request_body.get("long")),
+                    now=now,
+                )
+                if (int(spot.get(schema.SPOT_USE_PASSWORD) or 0) != 1
+                        and int(spot[schema.SPOT_CREATED_BY]) != int(session["user_id"])
+                        and await db_access.is_spot_currently_claimable(
+                            db, spot_id=spot_id
+                        )):
+                    await fresh_claim_guard.record_first_public_claim_attempt(
+                        db, user_id=int(session["user_id"]), now=now
+                    )
+                fresh_decision = await fresh_claim_guard.public_claim_decision(
                     db,
                     user_id=int(session["user_id"]),
                     signer_address=signer,
                     spot=spot,
-                    ip=fresh_claim_guard.genuine_client_ip(scope),
+                    ip=public_ip,
                     lat=float(request_body.get("lat")),
                     long=float(request_body.get("long")),
                 )
-            )
         if not fresh_decision.get("allowed"):
             await _retire_claim_authorization(auth_key)
             response = _security_error_response(

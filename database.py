@@ -1757,6 +1757,7 @@ async def init_db():
         if bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
             import fresh_claim_guard
             await fresh_claim_guard.ensure_rollout_marker(db)
+            await fresh_claim_guard.ensure_activity_rollout_marker(db)
 
         await db.execute(f"PRAGMA user_version = {SCHEMA_VERSION};")
         await db.commit()

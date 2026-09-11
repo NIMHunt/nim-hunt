@@ -170,16 +170,20 @@ async def _inside_active_public_spot(
 ) -> bool:
     """Return whether the user is inside another creator's public reward."""
     rows = await db.execute_fetchall(
-        f"SELECT {schema.SPOT_LAT}, {schema.SPOT_LONG}, {schema.SPOT_RADIUS} "
-        f"FROM {schema.SPOT_TABLE_NAME} WHERE {schema.SPOT_STATUS}=? "
+        f"SELECT * FROM {schema.SPOT_VIEW_PUBLIC_LIST} "
+        f"WHERE {schema.SPOT_STATUS}=? "
         f"AND {schema.SPOT_CREATED_BY}<>? "
         f"AND {schema.SPOT_USE_PASSWORD}=0 AND {schema.SPOT_LAT} IS NOT NULL "
-        f"AND ({schema.SPOT_STARTS_AT} IS NULL OR {schema.SPOT_STARTS_AT}<=?) "
-        f"AND ({schema.SPOT_STARTS_AT} IS NULL OR "
-        f"{schema.SPOT_STARTS_AT}+{schema.SPOT_ENDS_AT}>?)",
-        (const.SPOT_STATUS_PUBLISHED, int(user_id), now, now),
+        f"AND availability_rank=0",
+        (const.SPOT_STATUS_PUBLISHED, int(user_id)),
     )
-    return any(db_access.distance_metres(lat, long, row[0], row[1]) <= float(row[2]) for row in rows)
+    return any(
+        db_access.spot_summary_has_public_claim_capacity(dict(row))
+        and db_access.distance_metres(
+            lat, long, row[schema.SPOT_LAT], row[schema.SPOT_LONG]
+        ) <= float(row[schema.SPOT_RADIUS])
+        for row in rows
+    )
 
 
 async def record_gps_observation(db, *, user_id: int, ip: str | None,

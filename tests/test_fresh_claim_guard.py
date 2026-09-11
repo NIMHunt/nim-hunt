@@ -41,13 +41,21 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
         return {"hash": "ab" * 32, "blockNumber": 10, "executionResult": True,
                 "timestamp": (self.now - age) * 1000}
 
-    async def create_public_spot(self, *, owner_id: int, lat: float, long: float) -> int:
+    async def create_public_spot(
+        self, *, owner_id: int, lat: float, long: float,
+        starts_at: int | None = None, ends_at: int = 3600,
+        max_total_claims: int = 10,
+    ) -> int:
         spot_id = await db_access.create_spot(
             self.db, created_by=owner_id, title=f"Owner {owner_id} Spot",
             lat=lat, long=long, radius=500, claim_duration=0,
-            max_claims_per_user=2, max_total_claims=10,
-            total_value=10 * const.MIN_STANDARD_CLAIM_PAYOUT,
-            starts_at=int(time.time()) - 60, ends_at=3600,
+            max_claims_per_user=2, max_total_claims=max_total_claims,
+            total_value=max(
+                const.MIN_SPOT_TOTAL_VALUE,
+                max_total_claims * const.MIN_STANDARD_CLAIM_PAYOUT,
+            ),
+            starts_at=(int(time.time()) - 60 if starts_at is None else starts_at),
+            ends_at=ends_at,
             auto_reverse_geocode=False,
         )
         await self.db.execute(
@@ -56,6 +64,13 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
         )
         await self.db.commit()
         return spot_id
+
+    async def new_observer(self, label: bytes) -> int:
+        user_id = await db_access.create_user(
+            self.db, device_id_hash=hashlib.sha256(label).hexdigest()
+        )
+        await self.db.commit()
+        return user_id
 
     async def test_first_presence_ignores_owned_spot_but_not_overlapping_other_spot(self):
         await self.create_public_spot(owner_id=self.user_id, lat=10, long=10)
@@ -96,6 +111,61 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
             self.db, guard._key(guard.GPS_PREFIX, overlap_user)
         )
         self.assertTrue(overlap_state["first_inside_public_spot"])
+
+    async def test_first_presence_ignores_cancelling_full_expired_and_upcoming_spots(self):
+        owner = await self.new_observer(b"availability-owner")
+        now = int(time.time())
+        cancelling = await self.create_public_spot(owner_id=owner, lat=30, long=30)
+        await self.db.execute(
+            f"UPDATE {schema.SPOT_TABLE_NAME} SET {schema.SPOT_CANCELLATION_STARTED_AT}=? "
+            f"WHERE {schema.SPOT_ID}=?", (now, cancelling),
+        )
+        full = await self.create_public_spot(
+            owner_id=owner, lat=31, long=31, max_total_claims=1
+        )
+        claimant = await self.new_observer(b"capacity-claimant")
+        claim_id = await db_access.create_claim(
+            self.db, spot_id=full, user_id=claimant, lat=31, long=31,
+            accuracy=1, payout_address=None,
+        )
+        await db_access.set_claim_status_to_success(self.db, claim_id=claim_id)
+        await self.create_public_spot(
+            owner_id=owner, lat=32, long=32,
+            starts_at=now - 7200, ends_at=3600,
+        )
+        await self.create_public_spot(
+            owner_id=owner, lat=33, long=33, starts_at=now + 3600,
+        )
+        await self.db.commit()
+
+        for index, (lat, long) in enumerate(((30, 30), (31, 31), (32, 32), (33, 33))):
+            observer = await self.new_observer(f"unavailable-{index}".encode())
+            await guard.record_gps_observation(
+                self.db, user_id=observer, ip="8.8.8.8",
+                lat=lat, long=long, now=now,
+            )
+            state = await guard._get(
+                self.db, guard._key(guard.GPS_PREFIX, observer)
+            )
+            self.assertFalse(state["first_inside_public_spot"])
+            self.assertTrue(state["ordinary_presence_before_reward"])
+
+    async def test_available_overlap_wins_over_unavailable_spot(self):
+        owner = await self.new_observer(b"overlap-availability-owner")
+        observer = await self.new_observer(b"overlap-availability-observer")
+        unavailable = await self.create_public_spot(owner_id=owner, lat=35, long=35)
+        await self.db.execute(
+            f"UPDATE {schema.SPOT_TABLE_NAME} SET {schema.SPOT_CANCELLATION_STARTED_AT}=? "
+            f"WHERE {schema.SPOT_ID}=?", (int(time.time()), unavailable),
+        )
+        await self.create_public_spot(owner_id=owner, lat=35, long=35)
+        await self.db.commit()
+        await guard.record_gps_observation(
+            self.db, user_id=observer, ip="8.8.8.8",
+            lat=35, long=35, now=int(time.time()),
+        )
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, observer))
+        self.assertTrue(state["first_inside_public_spot"])
 
     async def test_owned_first_presence_does_not_amplify_first_contradiction(self):
         await self.create_public_spot(owner_id=self.user_id, lat=10, long=10)

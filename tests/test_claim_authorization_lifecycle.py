@@ -291,6 +291,68 @@ class ClaimAuthorizationLifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(activity is None or "first_public_claim_attempt_at" not in activity)
         self.assertFalse(gps["first_inside_public_spot"])
 
+    async def test_unavailable_other_spots_do_not_freeze_public_claim_cutoff(self):
+        now = int(time.time())
+        async with schema.get_db() as db:
+            owner = await db_access.create_user(
+                db, device_id_hash=hashlib.sha256(b"unavailable-owner").hexdigest()
+            )
+            spot_ids = {}
+            for label, starts_at in (
+                ("draft", now - 60),
+                ("expired", now - 7200),
+                ("upcoming", now + 3600),
+                ("cancelling", now - 60),
+                ("full", now - 60),
+            ):
+                spot_ids[label] = await db_access.create_spot(
+                    db, created_by=owner, title=f"Unavailable {label}",
+                    lat=20, long=20, radius=100, claim_duration=0,
+                    max_claims_per_user=2, max_total_claims=1,
+                    total_value=const.MIN_SPOT_TOTAL_VALUE,
+                    starts_at=starts_at, ends_at=3600,
+                    auto_reverse_geocode=False,
+                )
+                if label != "draft":
+                    await db.execute(
+                        f"UPDATE {schema.SPOT_TABLE_NAME} SET {schema.SPOT_STATUS}=? "
+                        f"WHERE {schema.SPOT_ID}=?",
+                        (const.SPOT_STATUS_PUBLISHED, spot_ids[label]),
+                    )
+            await db.execute(
+                f"UPDATE {schema.SPOT_TABLE_NAME} SET {schema.SPOT_CANCELLATION_STARTED_AT}=? "
+                f"WHERE {schema.SPOT_ID}=?", (now, spot_ids["cancelling"]),
+            )
+            full_claim = await db_access.create_claim(
+                db, spot_id=spot_ids["full"], user_id=self.user_id,
+                lat=20, long=20, accuracy=1, payout_address=WALLET_A,
+            )
+            await db_access.set_claim_status_to_success(db, claim_id=full_claim)
+            await db.commit()
+
+        for index, (label, spot_id) in enumerate(spot_ids.items()):
+            with self.subTest(label=label):
+                challenge, _ = await self._authorization(
+                    now=1000 + index, spot_id=spot_id, lat=20, long=20
+                )
+                with mock.patch.object(
+                    fresh_claim_guard, "public_claim_decision",
+                    mock.AsyncMock(return_value={"allowed": False, "reason": "test_stop"}),
+                ):
+                    called, status, _ = await self._submit(
+                        challenge, spot_id=spot_id, lat=20, long=20
+                    )
+                self.assertEqual((called, status), (0, 429))
+                async with schema.get_db() as db:
+                    activity = await fresh_claim_guard._get(
+                        db, fresh_claim_guard._key(
+                            fresh_claim_guard.ACTIVITY_PREFIX, self.user_id
+                        ),
+                    )
+                self.assertTrue(
+                    activity is None or "first_public_claim_attempt_at" not in activity
+                )
+
     async def test_wallet_change_rejects_before_claim(self):
         challenge, _ = await self._authorization()
         called, status, _ = await self._submit(challenge, signer=WALLET_B)

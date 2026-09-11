@@ -364,24 +364,17 @@ def _spot_has_public_claim_capacity(item: dict[str, Any]) -> bool:
     """Return False once a public Spot has no remaining claim/entry capacity."""
     spot = _normalise_cached_spot_item(item)
     counts = item.get("counts") if isinstance(item.get("counts"), dict) else {}
-    is_prizedraw = _spot_has_prizedraw(item)
-    max_total = int(
-        spot.get(schema.SPOT_MAX_TOTAL_CLAIMS)
-        if spot.get(schema.SPOT_MAX_TOTAL_CLAIMS) is not None
-        else 1
-    )
-    if max_total > 0:
-        successful = int(counts.get("success_claim_count", spot.get("success_claim_count") or 0) or 0)
-        pending = int(counts.get("pending_claim_count", spot.get("pending_claim_count") or 0) or 0)
-        used = successful + (pending if is_prizedraw else 0)
-        if used >= max_total:
-            return False
-
-    claim_code_count = int(counts.get("claim_code_count", spot.get("claim_code_count") or 0) or 0)
-    unused_code_count = int(counts.get("unused_code_count", spot.get("unused_code_count") or 0) or 0)
-    if claim_code_count > 0 and unused_code_count <= 0:
-        return False
-    return True
+    summary = dict(spot)
+    for field in (
+        "success_claim_count", "pending_claim_count",
+        "claim_code_count", "unused_code_count",
+    ):
+        summary[field] = int(counts.get(field, spot.get(field) or 0) or 0)
+    if _spot_has_prizedraw(item):
+        summary[schema.PRIZEDRAW_PRIZE_COUNT] = int(
+            spot.get(schema.PRIZEDRAW_PRIZE_COUNT) or 1
+        )
+    return db_access.spot_summary_has_public_claim_capacity(summary)
 
 
 def _spot_matches_filters(

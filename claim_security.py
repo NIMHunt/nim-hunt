@@ -1637,7 +1637,10 @@ async def guard_http_request(
                     now=now,
                 )
                 if (int(spot.get(schema.SPOT_USE_PASSWORD) or 0) != 1
-                        and int(spot[schema.SPOT_CREATED_BY]) != int(session["user_id"])):
+                        and int(spot[schema.SPOT_CREATED_BY]) != int(session["user_id"])
+                        and await db_access.is_spot_currently_claimable(
+                            db, spot_id=spot_id
+                        )):
                     await fresh_claim_guard.record_first_public_claim_attempt(
                         db, user_id=int(session["user_id"]), now=now
                     )

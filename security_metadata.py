@@ -18,12 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 async def get_json(db, key: str, *, delete_malformed: bool = True) -> Any | None:
-    """Read a JSON value, failing closed on malformed state.
+    """Decode one JSON value and optionally delete an undecodable row.
 
-    When ``delete_malformed`` is true the corrupt row is removed within the
-    caller's transaction. This is appropriate for fail-closed ephemeral state;
-    callers handling durable financial accounting should use a relational table
-    or request the raw value rather than treating deletion as recovery.
+    An absent row and an undecodable value both return ``None``. When
+    ``delete_malformed`` is true, an undecodable row is also removed within the
+    caller's transaction; otherwise it is retained. The caller owns the policy
+    consequence of treating malformed state as absent or deleting it.
     """
     cur = await db.execute(
         f"SELECT {schema.APP_METADATA_VALUE} AS value "
@@ -37,9 +37,11 @@ async def get_json(db, key: str, *, delete_malformed: bool = True) -> Any | None
     try:
         return json.loads(str(row["value"]))
     except (TypeError, ValueError, json.JSONDecodeError):
-        logger.warning("Discarding malformed JSON metadata key=%s", key)
         if delete_malformed:
+            logger.warning("Deleting malformed JSON metadata key=%s", key)
             await delete(db, key)
+        else:
+            logger.warning("Retaining malformed JSON metadata key=%s", key)
         return None
 
 
@@ -75,7 +77,7 @@ async def admit_timestamp(
     window_seconds: int,
     limit: int,
 ) -> tuple[bool, int]:
-    """Append to a bounded fixed-window timestamp bucket.
+    """Append to a bounded rolling-window timestamp bucket.
 
     This is a rate-admission primitive, not a concurrency or financial
     reservation. The caller must serialize competing updates when that matters.

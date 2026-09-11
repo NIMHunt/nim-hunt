@@ -141,6 +141,62 @@ class ClaimLocationGuardTest(unittest.IsolatedAsyncioTestCase):
             user_id=user_id,
         )
 
+    async def test_suspicion_marker_malformed_lifecycle_is_preserved(self):
+        user_id = 731
+        key = f"{claim_location_guard.SUSPICION_METADATA_KEY_PREFIX}{user_id}"
+
+        async with schema.get_db() as db:
+            # An absent marker remains a harmless absence.
+            self.assertIsNone(await self._marker(db, user_id=user_id))
+
+            await db.execute(
+                f"INSERT INTO {schema.APP_METADATA_TABLE_NAME} VALUES (?, ?)",
+                (key, "{"),
+            )
+            self.assertIsNone(await self._marker(db, user_id=user_id))
+            self.assertIsNone(
+                await (await db.execute(
+                    f"SELECT 1 FROM {schema.APP_METADATA_TABLE_NAME} "
+                    f"WHERE {schema.APP_METADATA_KEY} = ?",
+                    (key,),
+                )).fetchone()
+            )
+
+            await db.execute(
+                f"INSERT INTO {schema.APP_METADATA_TABLE_NAME} VALUES (?, ?)",
+                (key, json.dumps({"retry_at": 123})),
+            )
+            self.assertIsNone(await self._marker(db, user_id=user_id))
+            self.assertIsNone(
+                await (await db.execute(
+                    f"SELECT 1 FROM {schema.APP_METADATA_TABLE_NAME} "
+                    f"WHERE {schema.APP_METADATA_KEY} = ?",
+                    (key,),
+                )).fetchone()
+            )
+
+            valid = {
+                "trusted_claim_id": 1,
+                "suspicious_spot_id": 2,
+                "attempted_at": 3,
+                "retry_at": 4,
+                "last_attempted_spot_id": 5,
+                "last_attempted_at": 6,
+            }
+            await db.execute(
+                f"INSERT INTO {schema.APP_METADATA_TABLE_NAME} VALUES (?, ?)",
+                (key, json.dumps(valid)),
+            )
+            self.assertEqual(await self._marker(db, user_id=user_id), valid)
+            stored = await (await db.execute(
+                f"SELECT {schema.APP_METADATA_VALUE} AS value "
+                f"FROM {schema.APP_METADATA_TABLE_NAME} "
+                f"WHERE {schema.APP_METADATA_KEY} = ?",
+                (key,),
+            )).fetchone()
+            self.assertIsNotNone(stored)
+            self.assertEqual(json.loads(stored["value"]), valid)
+
     async def _replace_marker_times(
         self,
         db,

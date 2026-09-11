@@ -78,9 +78,10 @@ def _suspicion_key(user_id: int) -> str:
 
 
 async def _load_suspicion(db, *, user_id: int) -> RowDict | None:
-    value = await security_metadata.get_json(
-        db, _suspicion_key(user_id), delete_malformed=False
-    )
+    # This keyspace historically removed both undecodable and structurally
+    # invalid markers. Preserve that lifecycle: absence is harmless, while a
+    # corrupt durable row is reclaimed rather than revisited on every request.
+    value = await security_metadata.get_json(db, _suspicion_key(user_id))
     required = {
         "trusted_claim_id", "suspicious_spot_id", "attempted_at", "retry_at",
         "last_attempted_spot_id", "last_attempted_at",

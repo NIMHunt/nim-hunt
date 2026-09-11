@@ -4,1167 +4,209 @@
 [![Live site](https://img.shields.io/badge/live-nimhunt.app-21bca5)](https://nimhunt.app)
 [![License: MIT](https://img.shields.io/badge/license-MIT-5c5ce0)](LICENSE)
 
-**[Open NimHunt](https://nimhunt.app)** · **[Open Nimiq Pay](https://nimpay.app)** · [Admin](ADMIN.md) · [Architecture](#architecture) · [Testing](#testing-and-quality-checks) · [Deployment](#public-deployment)
+**[Try NimHunt](https://nimhunt.app)** · **[Get Nimiq Pay](https://nimpay.app)** ·
+[Security](SECURITY.md) · [Administration](ADMIN.md) ·
+[Contributing](CONTRIBUTING.md) · [Configuration](docs/configuration.md)
 
 [![NimHunt map preview](static/images/nimhunt-default-social-card.png)](https://nimhunt.app)
 
-NimHunt is a mobile-first geofaucet and Prizedraw mini-app for Nimiq Pay.
-Creators fund real-world geographic **Spots** with NIM; other users discover them
-on a map and can claim a reward or enter a draw only from inside the configured
-area.
+NimHunt is a mobile-first geofaucet and Prizedraw mini-app for
+[Nimiq Pay](https://nimpay.app). Creators fund geographic **Spots** with NIM;
+participants discover them on a map and, from inside the configured area, claim
+a Standard Spot reward or enter a Prizedraw.
 
-The project is live on MainAlbatross and was built for a coding competition and
-modest community use. It deliberately favours transparent rules, conservative
-financial safeguards and a small, understandable stack over high-volume
-infrastructure.
-
-## At a glance
-
-- **Real Nimiq integration** — Nimiq Pay handles creator funding and participant
-  addresses; NimHunt independently verifies transactions through Nimiq RPC.
-- **Two reward formats** — immediate Standard Spot rewards and randomly selected
-  Prizedraw winners.
-- **Location-aware participation** — radius checks, optional stay durations,
-  scheduling, participant limits and one-time claim codes.
-- **Durable financial workflows** — outgoing intents are recorded before
-  broadcast, ambiguous sends are not blindly retried, and winner sets are stored
-  before payouts begin.
-- **Private operator administration** — an unlinked password-protected panel
-  provides reports, lightweight analytics, user moderation and deliberately
-  constrained severe Spot banning.
-- **Production separation** — development, public TestAlbatross and MainAlbatross
-  modes have explicit safety boundaries and network-identity checks.
-- **Automated quality gates** — Python and Node tests, linting, syntax checks,
-  template compilation, fresh database seeding and dependency audits run in CI.
+The public deployment runs on Nimiq MainAlbatross. NimHunt was built for modest
+community use and deliberately favours understandable rules, durable financial
+state and conservative failure handling over high-volume infrastructure.
 
 ## Features
 
-- **Geographic Spots** — choose a real-world location and claim radius.
-- **Standard rewards** — divide a funded pool across a finite number of claims.
-- **Prizedraws** — collect entries and pay one or more randomly selected winners.
-- **Password-protected Spots** — generate one claim code per available participant.
-- **Stay durations** — require a claimant to remain inside the radius for a set time.
-- **Scheduling** — configure a future start and a fixed active duration.
-- **Participation limits** — set total participants and per-user limits.
-- **Platform fees** — charge configurable creation fees and a separate cancellation fee; cancelling a funded Spot does not refund fees already owed.
-- **Creator tools** — inspect drafts, deposits, publishing state, claim codes and history.
-- **Claim history** — users can review pending, successful and failed claims.
-- **Admin moderation** — review reports, inspect activity, limit or ban users and, when necessary, ban a Spot through a guarded server-side sweep workflow.
-- **On-chain descriptions** — NimHunt-generated transactions include short Spot labels.
-- **Optional X announcements** — automatically announce newly-active Spots through a configured account.
-- **Deployment/network separation** — desktop shortcuts remain available locally,
-  while public TestAlbatross and MainAlbatross deployments both use production-grade guards.
-- **Localisation-ready UI** — interface copy is centralised and selected from
-  `window.nimiqPay.language`; English is currently the only bundled language.
-
-## How NimHunt identifies users
-
-Inside Nimiq Pay, the mini-app SDK provides a stable device identifier. NimHunt
-hashes and stores that identifier as the account identity. It does not use a
-traditional username/password login.
-
-For local development outside Nimiq Pay, NimHunt can fall back to the seeded
-**Desktop User**. This and the Find Spots **Test Location** control are development
-features only. They are not rendered or accepted in either `public-testnet` or
-`production` deployment mode.
-
-Display names and all Spot titles/descriptions are user-generated content. The
-localisation framework translates only NimHunt's own marked interface text; it
-never attempts to translate user-generated information.
-
-## Architecture
-
-NimHunt intentionally uses a small stack:
-
-- **FastAPI** serves pages and JSON APIs.
-- **Jinja** renders the page shells.
-- **Static JavaScript and CSS** provide maps, forms and Nimiq Pay interactions.
-- **Leaflet/OpenStreetMap** display Spot locations.
-- **SQLite/aiosqlite** store users, Spots, claims, reports and transaction state.
-- **A private admin layer** in `admin_panel.py`, `admin_auth.py`, `admin_store.py`
-  and `admin_moderation.py` provides operator authentication, moderation, audit
-  state and the final financial guard for banned Spots.
-- **`helpers/nimiq_helper.mjs`** uses the official pinned `@nimiq/core` package
-  to derive addresses and sign outgoing transactions, then broadcasts their
-  serialized form through the configured Nimiq JSON-RPC endpoint.
-- **Background services** refresh caches, settle completed Prizedraws, reconcile
-  pending blockchain transactions and optionally announce newly-active Spots on X.
-
-The important chain-facing modules are:
-
-- `wallet.py` — validates addresses and calls the configured address/signing helper.
-- `trans_updater.py` — records payment intent, broadcasts outgoing payments and
-  verifies transaction finality through Nimiq RPC.
-- `settlement_updater.py` — decides application-level Prizedraw outcomes.
-- `admin_moderation.py` — blocks new payouts for banned Spots and coordinates the
-  durable server-side remainder sweep through the existing transaction machinery.
-- `helpers/nimiq_helper.mjs` — holds the bundled Nimiq key derivation and signing code.
-
-Only `wallet.py` and `trans_updater.py` should initiate or verify chain-facing work.
-
-## Nimiq transaction flow
-
-### Funding a Spot
-
-1. NimHunt derives a unique deposit address for the draft Spot.
-2. The draft snapshots the configured creation-fee amount and fee destination.
-   Later configuration changes therefore affect only newly-created Spots.
-3. The creator opens a Nimiq Pay request for **Spot funding + creation fee** from
-   the My Spots page. The card shows both components and the total being sent.
-4. Nimiq Pay signs and broadcasts the creator's funding transaction.
-5. NimHunt records the returned hash and verifies it independently through RPC.
-6. Deposits may be made in parts. The first confirmed sender becomes that Spot's
-   funding wallet, and every later top-up must come from the same wallet.
-7. Only after confirmed deposits cover the full Spot value plus its snapshotted
-   fee does NimHunt create a durable creation-fee transaction intent.
-8. The fee is sent from the Spot deposit address to the snapshotted platform-fee
-   address. The draft cannot be published until that transaction confirms.
-9. Once the fee confirms, the deposit address retains the intended Spot reward
-   pool and the draft may be published if its other rules are satisfied.
-
-A creation fee of `0` skips the fee transaction entirely. A failed fee transaction
-may be retried only after the chain has proved failure; an ambiguous local intent
-remains pending to prevent an accidental duplicate charge.
-
-A wrong-wallet top-up is retained in the transaction record but excluded from
-usable Spot funds. It requires manual recovery; NimHunt does not silently assign
-it to claimants or refund it automatically.
-
-### Standard claims
-
-A successful standard claim creates a durable payout intent before broadcasting.
-The transaction updater sends the reward from the Spot deposit address and marks
-the claim complete only after the outgoing transaction confirms.
-
-### Prizedraws
-
-Entries are collected until the Spot ends or reaches capacity. Settlement chooses
-and stores the winners, marks non-winners complete, then creates winner payout
-transactions. Winners are not considered paid until their transactions confirm.
-
-For finite Prizedraws:
-
-- Total Participants must be at least `2`.
-- finite Claims Per User must be less than Total Participants;
-- Prize Count must be less than Total Participants.
-
-A Total Participants value of `0` means **Unlimited** and therefore does not impose
-those finite comparisons.
-
-### Expiry and remainder refunds
-
-When a Spot reaches the end of its active period, NimHunt stops accepting new
-claims or entries and settles the Spot's remaining financial obligations. This is
-**not a cancellation**: the cancellation fee is not charged merely because a Spot
-finishes normally.
-
-For a Standard Spot, NimHunt first waits for any in-progress duration claim that
-began while the Spot was active to finish. It also waits until every successful
-claim payout and the creation fee have confirmed. The Spot is then completed and
-the safely-accounted funds still left at its deposit address are returned to the
-original funding wallet. This remainder includes unused reward funds and any
-confirmed overfunding, after confirmed claim payouts and the creation fee have
-been deducted.
-
-For example, if a `1,000 NIM` Standard Spot is divided into ten `100 NIM` claims
-and only four claims succeed before the Spot ends, `400 NIM` is paid to claimants
-and the unused `600 NIM` reward remainder is returned to the creator. The creation
-fee remains paid, but no cancellation fee is applied.
-
-Prizedraws settle the draw before any remainder is returned. Winner payouts and
-the creation fee must confirm first; any balance left afterwards is refunded to
-the original funding wallet. Normally the configured prize pool is distributed
-to the selected winners, but if there are no eligible entries the entire unused
-prize pool can be returned. Confirmed overfunding is also returned once settlement
-is complete.
-
-### Cancellation
-
-A funded draft may be cancelled instead of deleted. Published Standard Spots may
-also be cancelled; published Prizedraws retain their existing no-cancellation rule.
-
-**Cancellation is not free, and cancelling a Spot does not restore the creator to
-their pre-creation balance.** Any creation fee that is already owed is retained.
-NimHunt then deducts the configured cancellation fee from the Spot funds that
-remain after confirmed claim payouts and the creation fee. Only the balance left
-after those deductions, if any, is refunded to the original funding wallet.
-
-In other words:
-
-- creation fees already owed are **not refunded**;
-- the cancellation fee is taken from the remaining cancellable Spot balance;
-- the creator receives only whatever remains after that cancellation fee;
-- if the remaining balance is less than or equal to the cancellation fee, the
-  cancellation fee consumes the whole balance and **no refund transaction is sent**.
-
-With the documented defaults, the cancellation fee is `500 NIM`, which is also the
-minimum Spot reward pool. Therefore, cancelling an otherwise untouched minimum-size
-`500 NIM` Spot can leave `0 NIM` to refund after its creation fee has already been
-retained.
-
-Cancellation creates up to two outgoing transactions:
-
-- the refundable remainder, if any, to the original funding wallet;
-- the cancellation fee, capped at the remaining cancellable balance, to the
-  platform fee address.
-
-If a draft is only partly funded, no creation fee is charged; the ordinary
-cancellation fee is applied to the confirmed deposit. Once deposits reach the full
-Spot-plus-fee target, the creation fee is owed: cancellation waits until that fee
-confirms, so a timing race cannot be used to avoid it. Cancellation also waits while
-a deposit, payout, refund or cancellation-fee transaction is pending.
-
-A draft with no deposit history can still be deleted normally. Once any deposit
-transaction has been recorded, deletion is disabled so the Spot address and audit
-trail cannot disappear. A draft containing only failed deposit records can instead
-be archived as cancelled without an automatic refund; those records remain attached
-for manual review because a failed row may represent an abandoned hash or an
-on-chain wrong-wallet payment that NimHunt deliberately excluded from usable funds.
-
-Already-confirmed claim payouts are also deducted before the refundable balance is
-calculated. The Spot is marked cancelled only after every required outgoing leg
-has reached a final state.
-
-### On-chain transaction descriptions
-
-NimHunt includes short public transaction data:
-
-- `Funding: [Spot name]`
-- `Creation Fee: [Spot name]`
-- `Claim: [Spot name]`
-- `Prizedraw: [Spot name]`
-- `Cancelled Spot: [Spot name]`
-- `Refund Fee: [Spot name]`
-
-Descriptions are limited to 30 UTF-8 bytes and safely truncated. Because this
-information is written to the blockchain, only the already-public Spot title is
-included—never claim codes, device identifiers or private account information.
-
-## Administrator panel
-
-NimHunt includes an unlinked private administrator area at `/admin`. It is
-separate from Nimiq Pay device identity and from every Nimiq seed or signing
-secret. There is no public navigation link to the route.
-
-The dashboard provides:
-
-- active and total user, Spot and report counts;
-- a 30-day new-user graph and all-time Spot-creation leaderboard;
-- pending report review with moderator notes;
-- ACTIVE, LIMITED and BANNED user moderation; and
-- a persistent moderation audit log.
-
-`LIMITED` users can still claim but cannot create new Spots. `BANNED` users can
-neither create Spots nor make new claims.
-
-Administrator login is enabled by setting a scrypt password hash in:
-
-```text
-NIMHUNT_ADMIN_PASSWORD_HASH
-```
-
-Generate the value locally with:
-
-```bash
-python scripts/hash_admin_password.py
-```
-
-The script requires a password of at least 16 characters. Store the plaintext
-password in a password manager and place only the generated `scrypt$...` value in
-the deployment secret manager. If the variable is absent or malformed, admin
-login fails closed. Admin sessions expire after 30 minutes, use protected cookies
-and CSRF tokens, and are invalidated by a restart or redeployment.
-
-Severe **Spot Ban** is deliberately different from creator cancellation. It
-immediately makes the Spot unavailable, blocks new payout creation, waits for any
-already-pending transaction to reach a final state, calculates the confirmed
-unspent remainder server-side and sweeps that full remainder only to the fixed
-operator address in `NIMHUNT_SPOT_FEE_ADDRESS`. The browser cannot choose the
-amount or recipient. The action additionally requires password reauthentication
-and the exact confirmation text `BAN <spot-id>`.
-
-The panel creates `ADMIN_AUDIT_LOG` and `ADMIN_SPOT_BAN` additively when needed;
-no separate database migration or schema-version change is required. Pending ban
-sweeps are revisited by the normal transaction reconciler after restarts.
-
-See **[`ADMIN.md`](ADMIN.md)** for the full operator setup, moderation semantics,
-Spot-ban safety behaviour and production checklist.
-
-## Automatic X posting
-
-NimHunt can announce a published Spot when it first becomes active. This feature
-is **disabled by default** and makes no X API requests while disabled. It is also
-hard-gated to the real blockchain: the worker can run only when NimHunt is in
-`production` mode on `MainAlbatross` with network ID `24`. Development,
-DevAlbatross and public TestAlbatross deployments remain inert even if the master
-flag is accidentally set to `true`. When first enabled on production MainAlbatross,
-the worker starts from that moment rather than posting a backlog of older active
-Spots.
-
-Each generated Post contains a short announcement, the Spot title and its public
-`nimhunt.app` link. NimHunt generates and caches the Spot's existing map card
-before creating the Post, so X can fetch a warm preview image.
-
-The worker uses OAuth 1.0a user-context credentials. Create an approved X developer
-App with posting/Read and Write permission, then configure these server variables:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `NIMHUNT_X_AUTO_POST_ENABLED` | `false` | Master switch; accepts the same strict boolean values as other NimHunt flags |
-| `NIMHUNT_X_ACCOUNT_HANDLE` | empty | Expected account username, with or without `@` |
-| `NIMHUNT_X_API_KEY` | empty | X developer App API/consumer key |
-| `NIMHUNT_X_API_SECRET` | empty | X developer App API/consumer secret |
-| `NIMHUNT_X_ACCESS_TOKEN` | empty | User Access Token for the posting account |
-| `NIMHUNT_X_ACCESS_TOKEN_SECRET` | empty | User Access Token Secret for the posting account |
-| `NIMHUNT_X_POST_INTERVAL_SECONDS` | `30` | How often to check for newly-active Spots |
-| `NIMHUNT_X_HTTP_TIMEOUT_SECONDS` | `10` | Per-request X API timeout |
-| `NIMHUNT_X_RETRY_AFTER_SECONDS` | `900` | Default delay after an authoritative retryable rejection |
-| `NIMHUNT_X_MAX_SPOTS_PER_RUN` | `10` | Maximum Posts/retries considered in one worker pass |
-
-There are six required deployment variables for eventual activation: the master
-flag, account handle and four OAuth credentials. The interval, timeout, retry and
-batch-size variables are optional and may be omitted to use their defaults.
-
-The credentials—not the handle setting—determine the account that can post.
-Before sending anything, NimHunt calls X's authenticated-user endpoint and refuses
-to post unless its returned username matches `NIMHUNT_X_ACCOUNT_HANDLE`.
-Credentials stay in environment variables and are never written to SQLite,
-health output or logs.
-
-Successful Post IDs and per-Spot delivery states are stored in the existing
-`app_metadata` table, so restarts do not duplicate confirmed announcements and no
-schema reset is required. Rate limits and explicit authentication rejections can
-be retried safely. A timeout, lost connection or X server error is recorded as
-**uncertain** and is not retried automatically, because the Post may already have
-been created and a blind retry could publish it twice.
-
-Example disabled configuration:
-
-```bash
-export NIMHUNT_X_AUTO_POST_ENABLED=0
-export NIMHUNT_X_ACCOUNT_HANDLE='NimHunt'
-```
-
-Only set the flag to `1` after all four private credential variables have been
-added to the deployment, the intended account has authorised the App, and the
-service is running in production on MainAlbatross. The worker independently
-checks all three conditions before making any X request.
-
-## Nimiq networks
-
-NimHunt recognises the official Albatross network names and protocol IDs:
-
-| Network | ID | Intended use |
-|---|---:|---|
-| `TestAlbatross` | `5` | development and public testing with test NIM |
-| `MainAlbatross` | `24` | production with real NIM |
-| `DevAlbatross` | `6` | advanced local/custom-network development |
-
-Network-specific RPC and Hub defaults are selected automatically:
-
-| Network | Default RPC | Default Hub |
-|---|---|---|
-| TestAlbatross | `https://rpc.testnet.nimiqwatch.com/` | `https://hub.nimiq-testnet.com` |
-| MainAlbatross | `https://rpc.nimiqwatch.com` | `https://hub.nimiq.com` |
-| DevAlbatross | none; configure explicitly | testnet Hub default |
-
-A deployment may replace the public RPC with its own node or trusted provider.
-The listed public RPCs are convenient community infrastructure rather than a
-service-level guarantee; use a provider you trust for real funds. Public startup
-checks the RPC's reported network ID, not merely the hostname.
-The selected network ID and deployment mode are also stored durably in the SQLite
-database so changing environment variables cannot reinterpret old chain data or
-expose a development/mock database as a public service.
-
-## Deployment modes
-
-`NIMHUNT_DEPLOYMENT_MODE` separates public safety from blockchain choice:
-
-| Mode | Required network | Test features | Intended use |
-|---|---|---|---|
-| `development` | normally TestAlbatross | enabled | local desktop and phone development |
-| `public-testnet` | TestAlbatross, ID `5` | disabled | public internet deployment using test NIM |
-| `production` | MainAlbatross, ID `24` | disabled | final real-NIM deployment |
-
-If no mode is set, NimHunt retains its existing `development` behaviour. For
-backwards compatibility, `NIMHUNT_PRODUCTION=1` maps to `production` when the new
-variable is absent. `NIMHUNT_DEPLOYMENT_MODE` is preferred. Contradictory old and
-new settings are rejected rather than silently resolved.
-
-Both public modes disable Desktop User, Test Location, mock data, placeholder
-addresses, fake sends and development seeds. They also require explicit signer
-commands, private signing material, HTTPS chain endpoints and a valid
-operator-controlled cancellation-fee address.
-
-## Requirements
+- **Two reward formats:** immediate Standard Spot rewards and randomly selected
+  Prizedraw winners.
+- **Location-aware participation:** configurable radii, schedules, stay
+  durations, participant limits and optional single-use claim codes.
+- **Nimiq payments:** Nimiq Pay handles participant interaction; the server
+  independently verifies deposits through Nimiq RPC and signs payouts from
+  per-Spot deposit addresses.
+- **Creator workflow:** drafts, deposit progress, publishing, claim-code access,
+  duplication, cancellation and Spot history.
+- **Durable settlement:** outgoing intents and Prizedraw winners are persisted
+  before broadcast; ambiguous transactions are reconciled instead of retried
+  blindly.
+- **Operator tools:** an unlinked administrator panel supports reports, user
+  moderation, audit history and a guarded severe Spot-ban workflow.
+- **Deployment separation:** development, public TestAlbatross and production
+  MainAlbatross modes have explicit startup checks.
+- **Optional announcements:** a production-only worker can announce newly active
+  Spots through a configured X account. It remains off unless
+  `NIMHUNT_X_AUTO_POST_ENABLED`, `NIMHUNT_X_ACCOUNT_HANDLE` and the required
+  credentials (including `NIMHUNT_X_ACCESS_TOKEN_SECRET`) are set.
+
+## How NimHunt works
+
+1. A creator makes a draft and chooses its location, rules and NIM reward pool.
+2. NimHunt assigns the draft a unique deposit address. The creator funds the
+   reward pool and snapshotted creation fee with Nimiq Pay.
+3. The server verifies the transfer through its configured RPC. After the
+   creation fee confirms, a complete draft can be published.
+4. Participants find the Spot on the map. Standard Spots pay eligible claims;
+   Prizedraws record eligible entries and persist their winners when the draw
+   settles.
+5. Normal expiry returns safely accounted unused funds to the original funding
+   wallet after all obligations settle. Creator cancellation follows a separate
+   fee and refund workflow.
+
+Transaction intent, finality, cancellation and settlement rules are deliberately
+more detailed than this overview. See [Security](SECURITY.md), the
+[security architecture map](docs/security-architecture.md), and the source
+owners listed under [Project map](#project-map) before changing those paths.
+
+## Identity, location and trust
+
+NimHunt uses several facts and signals for different purposes; none should be
+described as stronger than it is:
+
+- The **Nimiq Pay device identifier** is hashed and used to find a durable USER.
+  It provides browser/device continuity for limits and for existing creator/self
+  routes. It does **not** cryptographically authenticate a wallet, a person or a
+  unique human.
+- New public Standard claims and Prizedraw entries use an **authenticated wallet
+  session**. A valid Nimiq signature proves control of the corresponding key,
+  not personhood.
+- Each initial public claim path also uses a short-lived, single-use,
+  **claim-specific signed authorization**. It binds the action, Spot, device,
+  wallet, submitted location, deployment/network and server nonce.
+- The server derives the canonical signer address and stores it as the claim's
+  immutable **payout address**. A browser-supplied payout destination has no
+  financial authority.
+- Browser GPS and accuracy are user-controlled assertions used for radius rules
+  and limited behavioural evidence. Signing those coordinates proves that the
+  wallet approved the assertion; it does **not** prove physical presence.
+- Creator and self-service routes have not yet migrated to wallet sessions and
+  continue to use the device-continuity ownership model documented in the
+  [security architecture](docs/security-architecture.md#creatorprivate-route-session-migration-design-deferred).
+
+NimHunt combines these boundaries with durable capacity checks, temporary
+restrictions, explicit manual-review holds and automatic payout exposure limits.
+It cannot prevent sophisticated GPS spoofing, independent-wallet creation,
+VPN/network rotation, device farms, relays or collusion. It has not received an
+independent security audit; use appropriately modest values.
+
+## Local development
+
+### Requirements
 
 - Python 3.11 or newer
-- Node.js 20 or newer
-- npm
-- A browser for desktop testing
-- Nimiq Pay for real mini-app/device and payment testing
+- Node.js 20 or newer and npm
+- a dedicated **TestAlbatross** mnemonic for the bundled Nimiq helper
 
-## Local installation
+Never use production signing material for local development.
 
-Clone the repository, then enter it:
+### Setup
 
 ```bash
 git clone https://github.com/NIMHunt/nim-hunt.git
 cd nim-hunt
-```
-
-Create and activate a Python virtual environment:
-
-```bash
-python3 -m venv venv
+python -m venv venv
 source venv/bin/activate
-```
-
-Install the runtime, development and Nimiq helper dependencies:
-
-```bash
-pip install -r requirements.txt -r requirements-dev.txt
+python -m pip install -r requirements.txt -r requirements-dev.txt
 npm ci --prefix helpers
 ```
 
-`requirements.txt` contains only runtime packages; `requirements-dev.txt` adds
-the pinned test, lint and dependency-audit tools used by contributors and CI.
-`npm ci` uses `helpers/package-lock.json` and installs the exact pinned
-`@nimiq/core` version rather than a moving latest release.
-
-## Run locally
-
-The development launcher configures TestAlbatross and the bundled helper.
-Supply a dedicated TestAlbatross mnemonic explicitly before starting:
+Export a private TestAlbatross mnemonic, then use the development launcher:
 
 ```bash
 export NIMHUNT_NIMIQ_MNEMONIC='your private TestAlbatross mnemonic'
 ./nimhunt_start_dev.sh
 ```
 
-Use a development-only mnemonic and never commit it. The launcher stops with a
-clear error if `NIMHUNT_NIMIQ_MNEMONIC` is missing.
-
-Open:
-
-```text
-http://127.0.0.1:8000/
-```
-
-The launcher may be invoked from another directory because it resolves the
-project relative to its own script:
-
-```bash
-~/nim-hunt/nimhunt_start_dev.sh
-```
-
-Development launcher settings:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `NIMHUNT_PROJECT_DIR` | launcher directory | alternate project directory |
-| `NIMHUNT_NIMIQ_MNEMONIC` | none; required | development-only TestAlbatross signing mnemonic |
-| `NIMHUNT_HOST` | `0.0.0.0` | Uvicorn bind host |
-| `NIMHUNT_PORT` | `8000` | Uvicorn port |
-
-## Reset development data
-
-Stop the server first, then run:
-
-```bash
-./nimhunt_reset_mock_data.sh
-```
-
-This deletes the selected development database and its SQLite sidecars, creates
-the current schema and inserts mock users, Spots, claims and transactions. The
-script and `spoof.py` refuse to run in either public deployment mode.
-
-NimHunt currently follows a fresh-development-database policy rather than
-maintaining a general migration framework. The current release uses schema
-version `3`, so after pulling a change that updates the schema, stop the server
-and run this reset before ordinary local testing. Never use the reset script on
-a public deployment database; public TestAlbatross and MainAlbatross must use
-fresh persistent databases for this release.
-
-## Phone testing
-
-Run NimHunt, then expose the local server through HTTPS in another terminal:
-
-```bash
-npx localtunnel --port 8000
-```
-
-Open the HTTPS address inside Nimiq Pay. A public deployment should use a normal
-HTTPS reverse proxy or hosting platform rather than localtunnel.
-
-## Wallet and seed configuration
-
-### Bundled helper: recommended setup
-
-The bundled `helpers/nimiq_helper.mjs` reads a BIP39 mnemonic from:
-
-```bash
-export NIMHUNT_NIMIQ_MNEMONIC='word1 word2 ... word24'
-```
-
-An optional BIP39 passphrase can be provided separately:
-
-```bash
-export NIMHUNT_NIMIQ_MNEMONIC_PASSWORD='optional passphrase'
-```
-
-The mnemonic is used to derive each Spot's deposit key at a path shaped like:
-
-```text
-m/44'/242'/{spot-key-index}'/0'
-```
-
-One mnemonic therefore controls all derived Spot deposit addresses. Back it up
-securely. Losing it makes remaining Spot funds unrecoverable; exposing it allows
-an attacker to spend those funds.
-
-Supply secrets through the host's secret manager or protected environment—not a
-committed file, shell history or the repository. The bundled sender uses
-`NIMHUNT_NIMIQ_RPC_URL` for `getLatestBlock` and `sendRawTransaction`; this is
-more suitable for hosted backends than requiring the Railway container to form
-its own peer-to-peer Nimiq consensus connection.
-
-### Derive and send commands
-
-Python communicates with a signer through JSON on standard input/output. To use
-the bundled helper:
-
-```bash
-export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND='node /absolute/path/to/nim-hunt/helpers/nimiq_helper.mjs'
-export NIMHUNT_NIMIQ_SEND_COMMAND='node /absolute/path/to/nim-hunt/helpers/nimiq_helper.mjs'
-```
-
-A custom local signer may replace either command as long as it honours the JSON
-contract documented in `wallet.py`. In public modes, **both** configured commands
-must support the non-broadcast `validate_signer_configuration` action and return
-the same derived address for the supplied key path. NimHunt performs that check at
-startup, so a missing or inconsistent send-side key fails before a payout is due.
-This allows a deployment to keep key access inside a separate process or
-hardware-backed service without giving NimHunt the private key itself.
-
-In `development`, `trans_updater.py` may find the bundled helper automatically when
-`NIMHUNT_NIMIQ_MNEMONIC` is supplied. Both public modes require explicit derive
-and send commands so the operator's intent is unambiguous.
-
-A custom signer that manages its own keys may omit `NIMHUNT_NIMIQ_MNEMONIC`, but
-then it must use custom commands and set `NIMHUNT_NIMIQ_EXTERNAL_SIGNER=1`. The
-bundled helper always requires a private mnemonic in either public mode.
-
-Optional helper discovery variables:
-
-| Variable | Purpose |
-|---|---|
-| `NIMHUNT_NIMIQ_HELPER_PATH` | override the bundled helper file path |
-| `NIMHUNT_NIMIQ_NODE_BINARY` | override the Node executable, default `node` |
-
-### Legacy/development seed variables
-
-`wallet.py` also contains encrypted master-seed helpers:
-
-- `NIMHUNT_MASTER_SEED_ENC`
-- `NIMHUNT_MASTER_SEED_SECRET`
-- `NIMHUNT_DEV_MASTER_SEED`
-
-These support deterministic development placeholders and custom integrations;
-they are **not** the mnemonic consumed by the bundled official Nimiq helper.
-`NIMHUNT_DEV_MASTER_SEED` and placeholder-address behaviour are disabled in every
-public deployment. These Python seed helpers do not provide signing material to
-the bundled JavaScript helper. For that helper, use `NIMHUNT_NIMIQ_MNEMONIC`.
-
-## Platform fee configuration
-
-Creation and cancellation fees use human-readable NIM amounts and one shared
-operator-controlled destination address. One NIM contains 100,000 Luna, so values
-may use up to five decimal places. `0` is valid and disables that particular fee;
-negative values or fractions smaller than one Luna are rejected at startup.
-
-### Creation fee amounts
-
-Standard Spots and Prizedraws have independent settings:
-
-```bash
-export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=200
-export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
-```
-
-Standard Spots and Prizedraws both default to `200 NIM`. Each new draft snapshots the appropriate amount. Changing
-an environment variable later does not retroactively change an existing draft's
-deposit target or fee transaction.
-
-### Cancellation fee amount
-
-```bash
-export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
-```
-
-The default is `500 NIM`. A value of `0` preserves the refund flow without charging
-a cancellation fee. The cancellation fee is deducted from the remaining cancellable
-Spot balance and is capped at that balance, so the refund may be smaller than the
-original Spot value or may be `0 NIM`. The amount and destination are snapshotted
-when cancellation first starts, so later environment changes cannot alter a
-cancellation already in progress.
-
-### Shared fee destination
-
-Set the checksummed Nimiq address that receives both creation and cancellation fees:
-
-```bash
-export NIMHUNT_SPOT_FEE_ADDRESS='NQ45 ... real address ...'
-```
-
-`NIMHUNT_SPOT_FEE_ADDRESS` is the preferred name. The former
-`NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS` remains a compatibility alias for an
-existing deployment. If both variables are set, they must identify the same
-address; conflicting values stop startup rather than risking a misdirected fee.
-Update the hosting variable to the new name, then remove the old one.
-
-The development default is a real TestAlbatross address belonging to a public
-test wallet, so it is not operator-controlled. Both public modes explicitly
-reject that address and require a different checksum-valid address controlled by
-the operator. The destination is also snapshotted onto each new Spot for its
-creation fee. The administrator panel's severe Spot-ban workflow also uses the
-current configured `NIMHUNT_SPOT_FEE_ADDRESS` as its fixed server-side sweep
-destination, so verify this value before performing a production Spot ban.
-
-## Environment variable reference
-
-### Application and storage
-
-| Variable | Default | Description |
-|---|---|---|
-| `NIMHUNT_DEPLOYMENT_MODE` | `development` | preferred: `development`, `public-testnet`, or `production` |
-| `NIMHUNT_PRODUCTION` | unset | legacy compatibility flag; `1` maps to `production` only |
-| `NIMHUNT_DB_PATH` | `records.db` | SQLite file; public modes require a separate absolute persistent path |
-| `NIMHUNT_ADMIN_PASSWORD_HASH` | none | scrypt administrator-password hash; absent or malformed disables admin login |
-| `NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM` | `200` | one-time creation fee for Standard Spots, in NIM |
-| `NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM` | `200` | one-time creation fee for Prizedraws, in NIM |
-| `NIMHUNT_SPOT_CANCELLATION_FEE_NIM` | `500` | cancellation fee amount in NIM; snapshotted when cancellation starts |
-| `NIMHUNT_SPOT_FEE_ADDRESS` | public TestAlbatross development address | shared creation/cancellation fee recipient and severe Spot-ban sweep destination; public modes require an operator address |
-
-### Nimiq network and RPC
-
-| Variable | Default | Description |
-|---|---|---|
-| `NIMHUNT_NIMIQ_NETWORK` | `TestAlbatross` | `TestAlbatross`, `MainAlbatross` or `DevAlbatross` |
-| `NIMHUNT_NIMIQ_NETWORK_ID` | selected by network | optional explicit protocol ID; must match the network |
-| `NIMHUNT_NIMIQ_RPC_URL` | selected by network | RPC used to verify transactions |
-| `NIMHUNT_NIMIQ_HUB_URL` | selected by network | Hub used for creator funding requests |
-| `NIMHUNT_NIMIQ_RPC_TIMEOUT_SECONDS` | `12` | RPC/helper timeout base |
-| `NIMHUNT_NIMIQ_ADDRESS_TX_LOOKUP_LIMIT` | `500` | recent address transactions inspected during fallback verification |
-| `NIMHUNT_NIMIQ_TRANSACTION_FEE` | `0` | outgoing network fee in Luna; public deployments currently require `0` |
-
-### Fresh-account claim safeguards
-
-Public deployments must configure an HTTPS IP-geolocation JSON endpoint. The
-URL is a template containing `{ip}`; responses must provide `latitude`,
-`longitude`, and `country_name` (the aliases `lat`, `lon`, and `country` are
-also accepted). An optional bearer token stays in the environment. Requests
-for private, loopback, reserved, or otherwise non-public addresses are never
-sent to the provider.
-
-| Variable | Default | Description |
-|---|---:|---|
-| `NIMHUNT_IP_GEOLOCATION_URL` | unset | HTTPS provider URL template, for example `https://provider.example/ip/{ip}` |
-| `NIMHUNT_IP_GEOLOCATION_API_KEY` | unset | optional provider bearer token |
-| `NIMHUNT_IP_GEOLOCATION_TIMEOUT_SECONDS` | `4` | provider and signer-history request timeout |
-| `NIMHUNT_CLAIM_IDENTITY_TRUST_AGE_SECONDS` | `2592000` | required account or oldest confirmed signer-activity age |
-| `NIMHUNT_CLAIM_SIGNER_HISTORY_NEGATIVE_CACHE_SECONDS` | `86400` | maximum negative signer-history cache lifetime |
-| `NIMHUNT_CLAIM_FUNDING_HISTORY_PAGE_SIZE` | `100` | transactions per bounded claimant funding-origin page |
-| `NIMHUNT_CLAIM_FUNDING_HISTORY_MAX_PAGES` | `4` | maximum one-hop claimant history pages before the result is UNKNOWN |
-| `NIMHUNT_CLAIM_FUNDING_SOURCE_SAMPLE_SIZE` | `100` | direct source transactions sampled for service-like suppression |
-| `NIMHUNT_CLAIM_FUNDING_SOURCE_SERVICE_DEGREE` | `50` | sampled distinct-recipient threshold for service-like suppression |
-| `NIMHUNT_CLAIM_FUNDING_CLUSTER_MIN_CLAIMANTS` | `5` | minimum claimant signers for small-source evidence |
-| `NIMHUNT_CLAIM_FUNDING_CLUSTER_WINDOW_SECONDS` | `604800` | maximum first-funding time span for cluster evidence |
-| `NIMHUNT_CLAIM_FUNDING_CLUSTER_MEMBER_LIMIT` | `16` | maximum exact signer-hash members retained per source |
-| `NIMHUNT_CLAIM_FUNDING_CACHE_SECONDS` | `2592000` | stable funding-origin and source-sample cache lifetime |
-| `NIMHUNT_CLAIM_SIGNER_HISTORY_FAILURE_RETRY_SECONDS` | `600` | transient RPC-failure retry cache; distinct from a negative history result |
-| `NIMHUNT_CLAIM_FIRST_LOCATION_MISMATCH_METRES` | `1500000` | minimum uncertainty-adjusted, cross-country mismatch distance |
-| `NIMHUNT_CLAIM_FIRST_LOCATION_COOLDOWN_SECONDS` | `86400` | retry delay after the first independent mismatch |
-| `NIMHUNT_CLAIM_FIRST_LOCATION_SECOND_COOLDOWN_SECONDS` | `604800` | retry delay after later independent mismatches |
-
-The first independent blatant mismatch starts the short restriction. Any later
-post-cooldown mismatch starts the longer restriction, and further mismatches
-continue that restriction while preserving the event count. IP geolocation is
-only a weak heuristic and never permanently bans an account by itself. Existing
-impossible-travel, claim-security, and administrator ban paths remain unchanged.
-
-Funding-origin observation uses only the configured Nimiq RPC. For a claimant
-signer, NimHunt exhausts at most four one-hundred-transaction pages and selects
-the sender of the oldest confirmed, successful, positive-value transfer into a
-basic account. Self-transfers and explicitly contract-originated transfers are
-excluded. If that bounded walk cannot be exhausted, the result is UNKNOWN rather
-than an asserted origin. NimHunt then samples only the candidate source's first
-page; at least fifty distinct successful outgoing recipients makes it
-service-like and suppresses cluster evidence. A full page with narrower
-recipient breadth remains explicitly inconclusive rather than being called a
-service. This is meant to conservatively cover exchanges, faucets, custodians,
-distributions, creator wallets, and other high-degree senders without maintaining
-an address list. Inconclusive breadth retains bounded observations for a later
-classification but cannot contribute to a public-claim restriction.
-
-For a non-service source, at least five claimant signers whose first funding
-falls within seven days creates cluster evidence. Amounts all within ten percent
-create the stronger similar-pattern flag. Neither result bans a user, changes a
-user status, exposes related wallets, nor affects Password Spots. Only the
-stronger flag combined with a recent independent same-IP/GPS contradiction can
-temporarily withhold a public claim. Established signer history still proves
-age; a separate aged-wallet-farming qualification is intentionally deferred
-because the ordinary first-location step is not independent cluster evidence.
-False
-positives remain possible for a small family, migration, or community giveaway,
-which is why a shared funder alone never restricts and service-like membership
-details are bounded to sixteen exact signer hashes. Evidence is monotonic as
-members are added, so creating more claimant wallets cannot make a suspicious
-source appear service-like. If a signer changes sources after exact membership
-has saturated, the old source is marked uncertain and punitive evidence is
-disabled rather than retaining a potentially false ghost member.
-
-New claimant members preserve already-established evidence monotonically, but
-an authoritative timestamp or amount correction for an existing exact member
-replaces the old aggregate with a complete recomputation. A material correction
-after membership saturation instead marks the source uncertain and disables its
-punitive evidence because the exact aggregate can no longer be reconstructed.
-
-The durable observation contains SHA-256 address keys, the first-funding time
-and amount, cache timestamps, bounded hashed claimant membership, and the source
-classification—never raw source/signer addresses or full transaction history.
-Stable observations cache for thirty days; RPC failures and incomplete history
-are a distinct, neutral UNKNOWN state retried after ten minutes. UNKNOWN never
-creates safe or cluster evidence and does not block by itself. All RPC calls
-happen before a short immediate SQLite reconciliation transaction, so
-concurrent misses may duplicate network I/O but merge membership idempotently.
-
-The [Railway public-networking documentation](https://docs.railway.com/guides/public-networking)
-documents its HTTP proxy source range as `100.0.0.0/8`. The Railway launcher
-passes that CIDR to Uvicorn's
-[`forwarded_allow_ips`](https://www.uvicorn.org/settings/#http), so forwarded
-headers are accepted only when the immediate connection is from Railway's HTTP
-proxy range. Uvicorn then walks the forwarded chain from the trusted proxy side
-and exposes the first untrusted address as `request.client`. Railway must remain
-the sole public ingress; deployments using another proxy must configure that
-proxy's authoritative range rather than widening this value to `*`.
-
-`NIMHUNT_NIMIQ_TRANSACTION_FEE` is measured in **Luna**, unlike the platform-fee
-variables. The current funding model does not reserve an extra network-fee budget
-for every creation fee, claim, refund and Prizedraw payout, so both public modes
-reject non-zero values rather than silently underfunding Spots. Development may
-still use the setting for controlled experiments.
-
-### Signer and mnemonic
-
-| Variable | Default | Description |
-|---|---|---|
-| `NIMHUNT_NIMIQ_MNEMONIC` | none | mnemonic used by bundled helper |
-| `NIMHUNT_NIMIQ_MNEMONIC_PASSWORD` | none | optional BIP39 passphrase |
-| `NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND` | auto only in development | JSON address-derivation command |
-| `NIMHUNT_NIMIQ_SEND_COMMAND` | auto only in development | JSON signing/broadcast command |
-| `NIMHUNT_NIMIQ_EXTERNAL_SIGNER` | `0` | assert that custom signer commands manage private keys themselves |
-| `NIMHUNT_NIMIQ_HELPER_PATH` | bundled helper | override automatic helper path |
-| `NIMHUNT_NIMIQ_NODE_BINARY` | `node` | Node executable for automatic helper use |
-
-### Transaction reconciliation
-
-| Variable | Default | Description |
-|---|---:|---|
-| `NIMHUNT_TRANSACTION_CHECK_INTERVAL_SECONDS` | `60` | delay between transaction checks |
-| `NIMHUNT_TRANS_FAIL_AFTER_SECONDS` | `5400` | age before an unseen hash can be treated as failed |
-| `NIMHUNT_TRANS_MAX_CHECKS_PER_RUN` | `100` | pending transactions checked per pass |
-
-The failure timeout is deliberately conservative. Do not shorten it casually: an
-unseen-but-broadcast payout must not be retried while it could still confirm,
-because that could pay twice.
-
-### Product rules
-
-Most product limits are intentionally ordinary constants in `constants.py`, not
-deployment secrets. This includes:
-
-- radius and duration ranges;
-- total and per-user participant maxima;
-- allowed Prizedraw prize-count options;
-- minimum Spot reward pool (currently `500 NIM`);
-- minimum standard and Prizedraw payout amounts;
-- report and display-name limits;
-- background settlement and cache batch sizes.
-
-Change these in `constants.py` only when intentionally changing product behaviour,
-then run the complete test suite. Environment variables are reserved for values
-that genuinely differ between deployments, secrets or operational tuning. Creation
-fees are environment-backed operator policy and are snapshotted when a Spot is created.
-
-NimHunt does not automatically parse a `.env` file. Export variables in the
-shell, configure them in the process manager/hosting platform, or deliberately
-add a deployment tool that loads `.env`. The file is ignored by Git so local
-secrets are not committed accidentally.
-
-## Public deployment
-
-The development scripts refuse to run in either public mode. Configure the
-environment, then start FastAPI through Uvicorn or a process manager. Public
-startup performs strict initial cache, settlement and transaction-reconciliation
-passes before traffic is accepted.
-
-### Public TestAlbatross environment
-
-Use a newly generated **private testnet mnemonic** and do not plan to reuse this
-seed on mainnet.
-
-```bash
-export NIMHUNT_DEPLOYMENT_MODE=public-testnet
-export NIMHUNT_DB_PATH=/srv/nimhunt-testnet/records.db
-
-export NIMHUNT_NIMIQ_NETWORK=TestAlbatross
-export NIMHUNT_NIMIQ_NETWORK_ID=5
-export NIMHUNT_NIMIQ_RPC_URL=https://rpc.testnet.nimiqwatch.com/
-export NIMHUNT_NIMIQ_HUB_URL=https://hub.nimiq-testnet.com
-export NIMHUNT_NIMIQ_MNEMONIC='private testnet mnemonic -- supply as a secret'
-export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
-export NIMHUNT_NIMIQ_SEND_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
-
-export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=200
-export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
-export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
-export NIMHUNT_SPOT_FEE_ADDRESS='NQ... operator testnet fee address ...'
-```
-
-To enable administrator login on the public test deployment, also generate a hash
-with `python scripts/hash_admin_password.py` and set
-`NIMHUNT_ADMIN_PASSWORD_HASH` through the deployment secret manager. Omitting it
-leaves admin login disabled.
-
-This mode is public software using test NIM: it has production-style safety and
-background-service strictness, but it deliberately remains on TestAlbatross. On
-every public startup NimHunt also calls the configured RPC's `getNetworkId` method
-and requires the live response to be `5`; a custom hostname cannot bypass the
-network check merely because its URL looks plausible.
-
-### MainAlbatross production environment
-
-Use a separate newly generated private mainnet mnemonic or signing service.
-
-```bash
-export NIMHUNT_DEPLOYMENT_MODE=production
-export NIMHUNT_DB_PATH=/srv/nimhunt-mainnet/records.db
-
-export NIMHUNT_NIMIQ_NETWORK=MainAlbatross
-export NIMHUNT_NIMIQ_NETWORK_ID=24
-export NIMHUNT_NIMIQ_RPC_URL=https://rpc.nimiqwatch.com
-export NIMHUNT_NIMIQ_HUB_URL=https://hub.nimiq.com
-export NIMHUNT_NIMIQ_MNEMONIC='private mainnet mnemonic -- supply as a secret'
-export NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
-export NIMHUNT_NIMIQ_SEND_COMMAND='node /srv/nimhunt/helpers/nimiq_helper.mjs'
-
-export NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=200
-export NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
-export NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
-export NIMHUNT_SPOT_FEE_ADDRESS='NQ... operator mainnet fee address ...'
-```
-
-To enable the production administrator panel, set a generated
-`NIMHUNT_ADMIN_PASSWORD_HASH` in the production secret manager. Keep the plaintext
-password in a password manager and never reuse the Nimiq mnemonic as an admin
-credential.
-
-Start outside Railway with one worker:
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
-```
-
-Place HTTPS in front of Uvicorn. The app itself does not manage TLS certificates.
-Public startup validates both signer commands and asks the configured RPC for its
-actual network ID before opening the database or starting background services.
-
-### Database network and deployment identity
-
-Every database records `nimiq_network`, `nimiq_network_id` and `deployment_mode`
-in an additive `app_metadata` table. Once bound, it refuses another network or mode.
-
-- A fresh database is bound during first startup.
-- An existing local database without metadata is bound when opened in `development`
-  under the deliberately selected network.
-- A development database cannot later be exposed as `public-testnet`, even though both
-  normally use TestAlbatross; this prevents seeded mock users and Spots reaching the
-  public service.
-- An existing unbound database is rejected in either public mode; use a fresh public
-  database rather than guessing which chain or safety context its records belong to.
-- A public database is also protected from `spoof.py` resets if the process is
-  accidentally launched with development settings.
-- Network/deployment metadata remains additive, but the creation-fee release also
-  adds immutable Spot columns and uses schema version `3`. There is deliberately no
-  `ALTER` migration: existing development databases must be recreated, and public
-  deployments must start with a fresh volume/database for this release.
-
-The administrator panel's `ADMIN_AUDIT_LOG` and `ADMIN_SPOT_BAN` tables are
-separate additive operator tables created on demand and do not change that core
-schema version.
-
-### Testnet-to-mainnet cutover
-
-Mainnet is an environment and data-volume change, not a code rewrite:
-
-1. Stop accepting new public TestAlbatross activity.
-2. Allow pending testnet claims, settlements and transactions to finish, or resolve
-   them manually before shutdown.
-3. Back up the complete TestAlbatross SQLite database and sidecars consistently.
-4. Retain that database as a read-only testnet archive.
-5. Create a fresh database or fresh persistent volume for MainAlbatross.
-6. Do not copy testnet Spots, claims, transaction hashes, deposits or balances into
-   the mainnet database.
-7. Configure a separate private mainnet mnemonic or external signing setup.
-8. Configure the real mainnet fee address and both desired creation-fee amounts.
-9. Set `NIMHUNT_DEPLOYMENT_MODE=production`, MainAlbatross, ID `24`, mainnet RPC
-   and mainnet Hub.
-10. Start the new service, allow validation to complete, then perform deliberately
-    small funding, claim, Prizedraw and cancellation smoke tests before advertising it.
-
-The database network and deployment markers are additional guards: merely changing
-environment variables while retaining the testnet or development database fails startup.
-
-### Railway deployment
-
-The repository includes `railway.json` and `mise.toml`. They configure Railpack,
-Python 3.11, Node.js 20, installation of both dependency sets, Railway's `$PORT`,
-exactly one Uvicorn worker, restart-on-failure, `/healthz`, and 30 seconds for
-graceful shutdown after Railway sends `SIGTERM`. Keep Railway's deployment overlap
-at zero: two live NimHunt processes must not share one SQLite volume.
-
-Railway builds the repository under `/app`, while a volume mounted at `/data` is
-available only when the service runs. Create one service, attach one `/data` volume,
-set the service to exactly one replica, and never run database work in a build or
-pre-deploy command.
-
-#### Railway variables: public TestAlbatross
-
-Use these service variables. Values marked `SECRET` must be supplied by the operator:
-
-```text
-NIMHUNT_DEPLOYMENT_MODE=public-testnet
-NIMHUNT_DB_PATH=/data/records.db
-NIMHUNT_ADMIN_PASSWORD_HASH=SECRET_SCRYPT_ADMIN_HASH
-NIMHUNT_NIMIQ_NETWORK=TestAlbatross
-NIMHUNT_NIMIQ_NETWORK_ID=5
-NIMHUNT_NIMIQ_RPC_URL=https://rpc.testnet.nimiqwatch.com/
-NIMHUNT_NIMIQ_HUB_URL=https://hub.nimiq-testnet.com
-NIMHUNT_NIMIQ_MNEMONIC=SECRET_PRIVATE_TESTNET_MNEMONIC
-NIMHUNT_NIMIQ_MNEMONIC_PASSWORD=SECRET_OPTIONAL_PASSPHRASE
-NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND=node /app/helpers/nimiq_helper.mjs
-NIMHUNT_NIMIQ_SEND_COMMAND=node /app/helpers/nimiq_helper.mjs
-NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=200
-NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
-NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
-NIMHUNT_SPOT_FEE_ADDRESS=OPERATOR_TESTNET_NQ_ADDRESS
-```
-
-`NIMHUNT_ADMIN_PASSWORD_HASH` is required only if administrator login is wanted;
-omit it to keep the panel authentication disabled. Do not set `NIMHUNT_PRODUCTION`
-or `NIMHUNT_DEV_MASTER_SEED`. `NIMHUNT_NIMIQ_EXTERNAL_SIGNER` is unnecessary when
-using the bundled helper.
-
-#### Railway variables: MainAlbatross production
-
-Use a fresh volume or a different `/data/records.db` on a separate Railway service
-and a separately generated mainnet signer:
-
-```text
-NIMHUNT_DEPLOYMENT_MODE=production
-NIMHUNT_DB_PATH=/data/records.db
-NIMHUNT_ADMIN_PASSWORD_HASH=SECRET_SCRYPT_ADMIN_HASH
-NIMHUNT_NIMIQ_NETWORK=MainAlbatross
-NIMHUNT_NIMIQ_NETWORK_ID=24
-NIMHUNT_NIMIQ_RPC_URL=https://rpc.nimiqwatch.com
-NIMHUNT_NIMIQ_HUB_URL=https://hub.nimiq.com
-NIMHUNT_NIMIQ_MNEMONIC=SECRET_PRIVATE_MAINNET_MNEMONIC
-NIMHUNT_NIMIQ_MNEMONIC_PASSWORD=SECRET_OPTIONAL_PASSPHRASE
-NIMHUNT_NIMIQ_DERIVE_ADDRESS_COMMAND=node /app/helpers/nimiq_helper.mjs
-NIMHUNT_NIMIQ_SEND_COMMAND=node /app/helpers/nimiq_helper.mjs
-NIMHUNT_STANDARD_SPOT_CREATION_FEE_NIM=200
-NIMHUNT_PRIZEDRAW_SPOT_CREATION_FEE_NIM=200
-NIMHUNT_SPOT_CANCELLATION_FEE_NIM=500
-NIMHUNT_SPOT_FEE_ADDRESS=OPERATOR_MAINNET_NQ_ADDRESS
-```
-
-Generate the admin hash with `python scripts/hash_admin_password.py`; do not place
-the plaintext admin password in Railway. If administrator login is intentionally
-disabled, omit `NIMHUNT_ADMIN_PASSWORD_HASH`.
-
-Generate a public Railway domain and keep the service continuously running. Do not
-enable serverless sleeping: settlement and transaction reconciliation must continue
-when no visitor is making requests. `/healthz` is used by Railway while a deployment
-starts; it is not continuous monitoring. Add an external uptime check if continuous
-monitoring is wanted.
-
-A Railway service with an attached volume may have brief redeployment downtime.
-The configured drain period gives FastAPI time to stop its transaction, settlement
-and cache loops cleanly before the process is force-killed. Configure and test
-Railway volume backups before accepting meaningful funds.
-
-### Public storage and launch checklist
-
-SQLite is appropriate for NimHunt's intended small audience, but the database is
-the durable record of derived addresses, submitted payments, claims, winners and
-payout/cancellation intent. Use persistent storage, restrict permissions, back up
-the database and its active sidecars consistently, and test restoration.
-
-Before public launch:
-
-1. Install from the lock files.
-2. Store the private mnemonic and optional passphrase in the host's secret manager.
-3. Back up the mnemonic separately and verify recovery.
-4. Configure the correct deployment mode, network, ID, RPC and Hub.
-5. Configure a real fee address, both creation fees and the cancellation fee.
-6. If admin access is wanted, generate and store `NIMHUNT_ADMIN_PASSWORD_HASH` and keep the plaintext password separately in a password manager.
-7. Use a fresh schema-version-3 network-specific persistent database.
-8. Serve over HTTPS with one application replica and worker.
-9. Confirm strict startup and `/healthz`, then confirm `/admin` behaves as intended for the configured admin state.
-10. Complete a deliberately small-value end-to-end cycle without using a funded Spot ban as a routine smoke test.
-11. Restart without replacing the database and verify state remains correct; expect existing admin sessions to be invalidated.
-
-NimHunt has substantial automated coverage but no independent security audit.
-Use modest values appropriate to the competition.
-
-## Localisation
-
-Nimiq Pay injects a read-only ISO 639-1 language code at:
-
-```javascript
-window.nimiqPay.language
-```
-
-NimHunt reads that value before falling back to English. It deliberately does not
-fall back to the desktop browser language: outside Nimiq Pay, English is the
-predictable default.
-
-Localisation is organised in:
-
-- `static/localisation.js` — language normalisation, fallback and DOM helpers;
-- `static/interface_text.js` — central English interface catalogues and future
-  per-language overrides;
-- `static/localise_page.js` — applies translations to marked static elements.
-
-Static HTML is translated only when explicitly marked with attributes such as:
-
-```html
-<span data-i18n="common.cancel">Cancel</span>
-<input data-i18n-placeholder="findSpots.answerPlaceholder" placeholder="Answer">
-```
-
-To add a language, add a partial override to `INTERFACE_TRANSLATIONS`:
-
-```javascript
-export const INTERFACE_TRANSLATIONS = {
-    en: {},
-    de: {
-        static: {
-            common: {
-                cancel: 'Abbrechen',
-            },
-        },
-        common: {
-            notice: {
-                ok: 'OK',
-            },
-        },
-    },
-};
-```
-
-Missing keys inherit the English catalogue automatically, so a translation can
-be introduced gradually. Keep functions where English copy is parameterised
-(for example counts or Spot amounts). Never mark user-generated titles,
-descriptions, locations or display names with `data-i18n`.
+Open <http://127.0.0.1:8000>. After the sample data is seeded, development mode
+supplies its Desktop User outside Nimiq Pay and exposes the Find Spots **Test
+Location** control. Neither shortcut is rendered or accepted in a public
+deployment.
+
+The app creates `records.db` and the current schema on first start. To add the
+development sample data, stop the server and run `python spoof.py`. The
+interactive `./nimhunt_reset_mock_data.sh` helper deletes the selected local
+database before reseeding it; it refuses to run in either public mode.
+
+NimHunt does not automatically load `.env` files. Export settings in the shell or
+configure them in the process manager. See the complete
+[configuration reference](docs/configuration.md).
 
 ## Testing and quality checks
 
-Activate the virtual environment, then run:
+Run the deterministic suite used by CI:
 
 ```bash
 python -m pytest -q
 npm test --prefix helpers
 ruff check .
 python -m compileall -q *.py tests
-```
-
-`pyproject.toml` keeps the Python test path, warning policy and Ruff rules in one
-place. GitHub Actions runs the same deterministic checks for every pull request
-and every update to `main`.
-
-Check every browser/helper module and shell script:
-
-```bash
 for file in static/*.js; do node --check --input-type=module < "$file"; done
 for file in helpers/*.mjs; do node --check "$file"; done
 for file in *.sh; do bash -n "$file"; done
-```
-
-Optional dependency checks:
-
-```bash
 python -m pip check
-python -m pip_audit
-npm audit --omit=dev --prefix helpers
 ```
 
-## Main files
+CI also compiles every Jinja template, seeds a fresh development database and
+runs Python and production Node dependency audits. The exact workflow is in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml). Contributor expectations
+and review guidance are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-| File/directory | Responsibility |
+## Deployment overview
+
+Public deployments must use exactly one application worker/replica with a
+persistent SQLite database. Startup validates the deployment mode, Nimiq network,
+live RPC network identity, signer access, fee destination and other public-safety
+requirements. Chain-dependent actions fail closed when the RPC is unavailable;
+the Railway entry point can start in a degraded mode and verifies the network
+before chain work resumes.
+
+The repository includes `railway.json`, `railway_start.py` and `mise.toml` for a
+single-worker Railway deployment. Attach persistent storage, keep Railway as the
+only public ingress for the supplied trusted-proxy setting, configure and test
+backups, and do not enable sleeping while background settlement and reconciliation
+must continue.
+
+Use the [configuration and deployment reference](docs/configuration.md) for
+mode-specific variables, Railway examples, network cutover and launch checks.
+Use [`ADMIN.md`](ADMIN.md) for administrator setup and moderation operations.
+
+## Project map
+
+NimHunt intentionally retains a flat Python layout. The main groups are:
+
+| Area | Primary files |
 |---|---|
-| `main.py` | FastAPI app, deployment validation, health endpoint and service lifecycle |
-| `public_html.py` | page routes and JSON API endpoints |
-| `admin_panel.py` | private administrator routes and dashboard actions |
-| `admin_auth.py` | administrator password verification, sessions, CSRF and login rate limiting |
-| `admin_store.py` | admin audit, moderation and Spot-ban persistence |
-| `admin_moderation.py` | runtime moderation enforcement and severe Spot-ban financial guard |
-| `ADMIN.md` | administrator setup, moderation and Spot-ban operations |
-| `constants.py` | product and deployment configuration |
-| `database.py` | schema creation and database connections |
-| `db_access.py` | validated database reads and writes |
-| `cache.py` | in-memory public/owner cache |
-| `wallet.py` | address validation and signer command boundary |
-| `trans_updater.py` | blockchain verification, creation-fee recovery and outgoing payments |
-| `settlement_updater.py` | duration-claim and Prizedraw settlement |
-| `helpers/` | official Nimiq JS helper and tests |
-| `templates/` | Jinja page shells |
-| `static/` | browser JavaScript, localisation, CSS and icons |
-| `tests/` | Python regression and integration tests |
-| `.github/workflows/ci.yml` | permanent pull-request and `main` verification |
-| `pyproject.toml` | shared pytest and Ruff configuration |
-| `requirements-dev.txt` | pinned test, lint and audit tooling |
-| `spoof.py` | destructive development-only mock-data seed |
+| Application and routes | `main.py`, `public_html.py`, `templates/`, `static/` |
+| Persistence and public cache | `database.py`, `db_access.py`, `cache.py` |
+| Draft creation and funding | `draft_creation.py`, `funding_flow.py`, `funding_monitor.py`, `funding_fee_worker.py` |
+| Wallet and transaction lifecycle | `wallet.py`, `trans_updater.py`, `transaction_descriptions.py`, `refund_address_safety.py`, `cancellation_safety.py` |
+| Claim identity and authorization | `claim_identity.py`, `claim_authorization.py`, `claim_security.py`, `claim_http.py` |
+| Claim evidence and exposure guards | `fresh_claim_guard.py`, `claim_location_guard.py`, `location_behavior_guard.py`, `wallet_cluster_guard.py`, `claim_payout_throttle.py` |
+| Settlement | `settlement_updater.py`, `claim_settlement_security.py` |
+| Administration | `admin_panel.py`, `admin_auth.py`, `admin_store.py`, `admin_moderation.py` |
+| Nimiq helper | `helpers/nimiq_helper.mjs` and its Node tests |
+| Verification | `tests/`, `helpers/*.test.mjs`, `static/*.test.mjs` |
 
-## Operational limitations
+The security modules are composed in a deliberate order; consult the
+[security architecture and audit map](docs/security-architecture.md) before
+changing their wrappers or transaction boundaries.
 
-- User identity is device-based; there is no password recovery account system.
-- Administrator access is one operator credential rather than a multi-staff account system, and all admin sessions are deliberately invalidated when the service restarts.
-- A wrong-wallet Spot top-up requires manual recovery.
-- SQLite and the in-process background loops assume one modest deployment rather
-  than a horizontally scaled fleet of workers.
-- Public RPC and map-tile services have no NimHunt-specific availability guarantee.
-- Location evidence reduces casual misuse but cannot make phone GPS impossible to spoof.
-- On-chain transfers are irreversible; use TestAlbatross and small values first.
-- Severe Spot banning can move the confirmed unspent Spot balance to the configured operator fee address and should not be used as a routine test action.
-- An ambiguous creation-fee send remains pending instead of being retried automatically;
-  this may require manual reconciliation, but prevents charging the same Spot twice.
+## Documentation
 
-These trade-offs are intentional and proportionate to the project's competition
-scope. They should be revisited before substantially increasing user counts or
-funding values.
+- [`SECURITY.md`](SECURITY.md) — disclosure process, trust model, claim controls
+  and operational security assumptions.
+- [`docs/security-architecture.md`](docs/security-architecture.md) — detailed
+  security ownership, end-to-end flows, persistence and concurrency boundaries.
+- [`docs/configuration.md`](docs/configuration.md) — environment variables,
+  deployment modes, Railway setup and launch checks.
+- [`ADMIN.md`](ADMIN.md) — administrator authentication, moderation and Spot-ban
+  safety.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — development workflow and required checks.
+- [`AGENTS.md`](AGENTS.md) — repository-specific guidance for coding agents.
 
-## Files not committed
+## License
 
-The repository ignores local, generated and private files including:
-
-- `venv/`
-- `records.db` and SQLite sidecars
-- `.env`
-- `x-dob.txt`
-- caches and logs
-- installed `node_modules/`
-
-Never commit mnemonics, passphrases, administrator passwords or password hashes,
-encrypted seed secrets, session cookies, or production database copies.
+NimHunt is available under the [MIT License](LICENSE).

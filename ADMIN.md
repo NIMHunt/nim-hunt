@@ -97,4 +97,6 @@ Before enabling administrator access on a public deployment:
 5. visit `/admin`, sign in, and verify the dashboard loads; and
 6. keep the plaintext admin password in a password manager rather than a shell script, `.env` file committed to Git, issue, pull request, or log.
 
-See `README.md` for the broader NimHunt deployment and backup requirements and `SECURITY.md` for vulnerability-reporting guidance.
+See [`docs/configuration.md`](docs/configuration.md) for deployment and backup
+requirements, [`README.md`](README.md) for the project overview, and
+[`SECURITY.md`](SECURITY.md) for vulnerability-reporting guidance.

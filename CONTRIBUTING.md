@@ -10,7 +10,7 @@ conservative: clear changes with focused tests are preferred to broad rewrites.
 3. Install the pinned dependencies:
 
 ```bash
-pip install -r requirements.txt -r requirements-dev.txt
+python -m pip install -r requirements.txt -r requirements-dev.txt
 npm ci --prefix helpers
 ```
 

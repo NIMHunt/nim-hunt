@@ -704,7 +704,8 @@ service-like and suppresses cluster evidence. A full page with narrower
 recipient breadth remains explicitly inconclusive rather than being called a
 service. This is meant to conservatively cover exchanges, faucets, custodians,
 distributions, creator wallets, and other high-degree senders without maintaining
-an address list.
+an address list. Inconclusive breadth retains bounded observations for a later
+classification but cannot contribute to a public-claim restriction.
 
 For a non-service source, at least five claimant signers whose first funding
 falls within seven days creates cluster evidence. Amounts all within ten percent
@@ -722,6 +723,12 @@ members are added, so creating more claimant wallets cannot make a suspicious
 source appear service-like. If a signer changes sources after exact membership
 has saturated, the old source is marked uncertain and punitive evidence is
 disabled rather than retaining a potentially false ghost member.
+
+New claimant members preserve already-established evidence monotonically, but
+an authoritative timestamp or amount correction for an existing exact member
+replaces the old aggregate with a complete recomputation. A material correction
+after membership saturation instead marks the source uncertain and disables its
+punitive evidence because the exact aggregate can no longer be reconstructed.
 
 The durable observation contains SHA-256 address keys, the first-funding time
 and amount, cache timestamps, bounded hashed claimant membership, and the source

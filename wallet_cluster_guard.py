@@ -113,7 +113,12 @@ def _cluster_state(source: Any) -> dict[str, Any]:
         return {"evidence": False, "member_count": 0, "similar_pattern": False}
     members = dict(source.get("members") or {})
     count = int(source.get("member_count") or len(members))
-    if source.get("service_like") is True or source.get("membership_uncertain") is True:
+    # Only demonstrated ordinary breadth may become punitive. An inconclusive
+    # full source sample retains latent observations for a later refresh but is
+    # not evidence that this is a small ordinary wallet.
+    if (source.get("breadth") != "ordinary"
+            or source.get("service_like") is True
+            or source.get("membership_uncertain") is True):
         return {"evidence": False, "member_count": count, "similar_pattern": False}
     return {"evidence": source.get("cluster_evidence") is True,
             "member_count": count,
@@ -134,21 +139,44 @@ def _pattern(members: dict[str, Any]) -> tuple[bool, bool]:
 
 
 def _add_member(state: dict[str, Any], *, signer_hash: str,
-                timestamp: int, amount: int) -> None:
+                timestamp: int, amount: int,
+                authoritative_correction: bool = False) -> None:
     if state.get("membership_uncertain") is True:
         return
     members = dict(state.get("members") or {})
+    existing = members.get(signer_hash)
+    replacement = {"timestamp": int(timestamp), "amount": int(amount)}
+    if existing is not None:
+        if existing == replacement:
+            return
+        if state.get("members_saturated") is True:
+            state.update({"membership_uncertain": True,
+                          "cluster_evidence": False, "similar_pattern": False})
+            return
+        # This is an authoritative correction, not a new observation. Replace
+        # stale aggregate flags with a complete recomputation so superseded
+        # timestamps or amounts cannot remain punitive.
+        members[signer_hash] = replacement
+        state["members"] = members
+        evidence, similar = _pattern(members)
+        state.update({"cluster_evidence": evidence, "similar_pattern": similar})
+        return
+    if authoritative_correction and state.get("members_saturated") is True:
+        # This signer was outside the retained exact set. Its old origin record
+        # proves a material correction occurred, but the aggregate cannot be
+        # reconstructed exactly.
+        state.update({"membership_uncertain": True,
+                      "cluster_evidence": False, "similar_pattern": False})
+        return
     if signer_hash not in members:
         limit = max(int(const.CLAIM_FUNDING_CLUSTER_MIN_CLAIMANTS),
                     int(const.CLAIM_FUNDING_CLUSTER_MEMBER_LIMIT))
         if len(members) < limit:
-            members[signer_hash] = {"timestamp": int(timestamp), "amount": int(amount)}
+            members[signer_hash] = replacement
         else:
             state["members_saturated"] = True
         state["member_count"] = min(limit + 1,
                                     int(state.get("member_count") or len(members) - 1) + 1)
-    else:
-        members[signer_hash] = {"timestamp": int(timestamp), "amount": int(amount)}
     state["members"] = members
     evidence, similar = _pattern(members)
     # Additions are monotonic. More claimant wallets can never erase evidence.
@@ -234,6 +262,15 @@ async def observe(db, *, signer_address: str, now: int) -> dict[str, Any]:
             wrote_origin = True
             old_source_hash = current.get("source_hash") if isinstance(current, dict) else None
             new_source_hash = authoritative.get("source_hash")
+            authoritative_correction = bool(
+                old_source_hash == new_source_hash
+                and isinstance(current, dict)
+                and current.get("result") == "observed"
+                and (current.get("first_funding_at")
+                     != authoritative.get("first_funding_at")
+                     or current.get("first_funding_amount")
+                     != authoritative.get("first_funding_amount"))
+            )
             if old_source_hash and old_source_hash != new_source_hash:
                 old_key = f"{SOURCE_PREFIX}{old_source_hash}"
                 old_state = await fresh_claim_guard._get(db, old_key)
@@ -252,6 +289,7 @@ async def observe(db, *, signer_address: str, now: int) -> dict[str, Any]:
                 state, signer_hash=signer_hash,
                 timestamp=int(authoritative["first_funding_at"]),
                 amount=int(authoritative["first_funding_amount"]),
+                authoritative_correction=authoritative_correction,
             )
             state.update({"result": "observed",
                           "breadth": breadth,

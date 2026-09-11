@@ -134,6 +134,53 @@ class WalletClusterGuardTests(IsolatedAsyncioTestCase):
             breadth = await guard._source_breadth(source)
         self.assertEqual(breadth, "unknown")
 
+    async def test_unknown_breadth_retains_latent_cluster_but_is_non_punitive(self):
+        source = "busy-small-source"
+        origins = {f"signer-{i}": (source, self.now - i, 1000)
+                   for i in range(const.CLAIM_FUNDING_CLUSTER_MIN_CLAIMANTS)}
+
+        async def rpc(address, **_kwargs):
+            if address in origins:
+                funder, timestamp, amount = origins[address]
+                return {"data": [self.inbound(
+                    address, funder, age=self.now - timestamp, amount=amount,
+                    suffix=hashlib.sha256(address.encode()).hexdigest()[:2])],
+                    "metadata": None}
+            return {"data": [self.inbound(
+                f"recipient-{index % 2}", source, suffix=f"{index:02x}")
+                for index in range(const.CLAIM_FUNDING_SOURCE_SAMPLE_SIZE)],
+                "metadata": None}
+
+        with mock.patch.object(
+                guard.trans_updater, "get_chain_transactions_by_address",
+                mock.AsyncMock(side_effect=rpc)):
+            results = [await guard.observe(
+                self.db, signer_address=signer, now=self.now) for signer in origins]
+        state = await fresh_claim_guard._get(
+            self.db, f"{guard.SOURCE_PREFIX}{guard._hash(source)}")
+        self.assertEqual(state["breadth"], "unknown")
+        self.assertTrue(state["cluster_evidence"] and state["similar_pattern"])
+        self.assertTrue(all(not result["evidence"] for result in results))
+
+        # A later bounded sample can authoritatively demonstrate ordinary
+        # breadth and expose the still-current exact cluster observations.
+        signer = next(iter(origins))
+        origin_key = f"{guard.ORIGIN_PREFIX}{guard._hash(signer)}"
+        origin = await fresh_claim_guard._get(self.db, origin_key)
+        origin["refresh_at"] = self.now
+        await fresh_claim_guard._set(self.db, origin_key, origin)
+        state["source_refresh_at"] = self.now
+        await fresh_claim_guard._set(
+            self.db, f"{guard.SOURCE_PREFIX}{guard._hash(source)}", state)
+        await self.db.commit()
+        self.now += 1
+        ordinary_rpc = self.rpc(origins)
+        with mock.patch.object(
+                guard.trans_updater, "get_chain_transactions_by_address", ordinary_rpc):
+            refreshed = await guard.observe(
+                self.db, signer_address=signer, now=self.now)
+        self.assertTrue(refreshed["evidence"] and refreshed["similar_pattern"])
+
     async def test_fiftieth_claimant_does_not_make_cluster_safe_and_storage_is_bounded(self):
         origins = {f"signer-{i}": ("small-source", self.now - i, 1000)
                    for i in range(50)}
@@ -249,6 +296,61 @@ class WalletClusterGuardTests(IsolatedAsyncioTestCase):
         self.assertNotIn(guard._hash("a"), old_source["members"])
         self.assertIsNone(authoritative["source_hash"])
 
+    async def test_same_source_timestamp_correction_clears_stale_cluster(self):
+        origins = {name: ("source-a", self.now - index, 1000)
+                   for index, name in enumerate(("a", "b", "c", "d", "e"))}
+        await self.observe_many(origins)
+        origin_key = f"{guard.ORIGIN_PREFIX}{guard._hash('a')}"
+        origin = await fresh_claim_guard._get(self.db, origin_key)
+        origin["refresh_at"] = self.now
+        await fresh_claim_guard._set(self.db, origin_key, origin)
+        await self.db.commit()
+        self.now += 1
+        origins["a"] = (
+            "source-a", self.now - const.CLAIM_FUNDING_CLUSTER_WINDOW_SECONDS - 10, 1000)
+        await self.observe_many(origins)
+        source = await fresh_claim_guard._get(
+            self.db, f"{guard.SOURCE_PREFIX}{guard._hash('source-a')}")
+        self.assertFalse(source["cluster_evidence"])
+        self.assertFalse(source["similar_pattern"])
+
+    async def test_same_source_amount_correction_clears_only_similarity(self):
+        origins = {name: ("source-a", self.now - index, 1000)
+                   for index, name in enumerate(("a", "b", "c", "d", "e"))}
+        await self.observe_many(origins)
+        origin_key = f"{guard.ORIGIN_PREFIX}{guard._hash('a')}"
+        origin = await fresh_claim_guard._get(self.db, origin_key)
+        origin["refresh_at"] = self.now
+        await fresh_claim_guard._set(self.db, origin_key, origin)
+        await self.db.commit()
+        self.now += 1
+        origins["a"] = ("source-a", self.now - 1, 500)
+        await self.observe_many(origins)
+        source = await fresh_claim_guard._get(
+            self.db, f"{guard.SOURCE_PREFIX}{guard._hash('source-a')}")
+        self.assertTrue(source["cluster_evidence"])
+        self.assertFalse(source["similar_pattern"])
+
+    async def test_same_source_unchanged_refresh_is_idempotent(self):
+        origins = {name: ("source-a", self.now - index, 1000)
+                   for index, name in enumerate(("a", "b", "c", "d", "e"))}
+        await self.observe_many(origins)
+        origin_key = f"{guard.ORIGIN_PREFIX}{guard._hash('a')}"
+        origin = await fresh_claim_guard._get(self.db, origin_key)
+        origin["refresh_at"] = self.now
+        await fresh_claim_guard._set(self.db, origin_key, origin)
+        await self.db.commit()
+        before = await fresh_claim_guard._get(
+            self.db, f"{guard.SOURCE_PREFIX}{guard._hash('source-a')}")
+        self.now += 1
+        origins["a"] = ("source-a", origin["first_funding_at"],
+                        origin["first_funding_amount"])
+        await self.observe_many(origins)
+        after = await fresh_claim_guard._get(
+            self.db, f"{guard.SOURCE_PREFIX}{guard._hash('source-a')}")
+        for field in ("members", "member_count", "cluster_evidence", "similar_pattern"):
+            self.assertEqual(after[field], before[field])
+
     async def test_saturated_source_change_downgrades_ghost_evidence(self):
         origins = {f"signer-{i}": ("source-a", self.now - i, 1000)
                    for i in range(const.CLAIM_FUNDING_CLUSTER_MEMBER_LIMIT + 1)}
@@ -265,6 +367,24 @@ class WalletClusterGuardTests(IsolatedAsyncioTestCase):
             self.db, f"{guard.SOURCE_PREFIX}{guard._hash('source-a')}")
         self.assertTrue(old_source["membership_uncertain"])
         self.assertFalse(guard._cluster_state(old_source)["evidence"])
+
+    async def test_saturated_same_source_correction_is_non_punitive(self):
+        origins = {f"signer-{i}": ("source-a", self.now - i, 1000)
+                   for i in range(const.CLAIM_FUNDING_CLUSTER_MEMBER_LIMIT + 1)}
+        await self.observe_many(origins)
+        signer = "signer-0"
+        origin_key = f"{guard.ORIGIN_PREFIX}{guard._hash(signer)}"
+        origin = await fresh_claim_guard._get(self.db, origin_key)
+        origin["refresh_at"] = self.now
+        await fresh_claim_guard._set(self.db, origin_key, origin)
+        await self.db.commit()
+        self.now += 1
+        origins[signer] = ("source-a", self.now, 2000)
+        await self.observe_many({signer: origins[signer]})
+        source = await fresh_claim_guard._get(
+            self.db, f"{guard.SOURCE_PREFIX}{guard._hash('source-a')}")
+        self.assertTrue(source["membership_uncertain"])
+        self.assertFalse(guard._cluster_state(source)["evidence"])
 
     async def test_concurrent_different_origins_keep_winner_metadata_consistent(self):
         release_a = asyncio.Event()

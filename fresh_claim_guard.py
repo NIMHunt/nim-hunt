@@ -27,8 +27,11 @@ import trans_updater
 
 logger = logging.getLogger(__name__)
 ROLLOUT_KEY = "fresh_claim_guard:activated_at"
+ACTIVITY_ROLLOUT_KEY = "fresh_claim_guard:activity_rollout"
 SIGNER_PREFIX = "fresh_claim_guard:signer:"
 LOCATION_PREFIX = "fresh_claim_guard:location:"
+ACTIVITY_PREFIX = "fresh_claim_guard:activity:"
+GPS_PREFIX = "fresh_claim_guard:gps:"
 GENERIC_MESSAGE = "Public Spots are temporarily unavailable for this account. Please try again later."
 
 
@@ -95,6 +98,110 @@ async def ensure_rollout_marker(db) -> dict[str, int]:
     return {"activated_at": int(value or now), "legacy_max_user_id": 0}
 
 
+async def ensure_activity_rollout_marker(db) -> dict[str, int]:
+    """Grandfather accounts present when the active-day rule is deployed."""
+    now = await db_access.get_unixepoch(db)
+    cur = await db.execute(f"SELECT COALESCE(MAX({schema.USER_ID}), 0) FROM {schema.USER_TABLE_NAME}")
+    marker = {"activated_at": int(now), "legacy_max_user_id": int((await cur.fetchone())[0])}
+    await db.execute(
+        f"INSERT OR IGNORE INTO {schema.APP_METADATA_TABLE_NAME} "
+        f"({schema.APP_METADATA_KEY}, {schema.APP_METADATA_VALUE}) VALUES (?, ?)",
+        (ACTIVITY_ROLLOUT_KEY, json.dumps(marker, separators=(",", ":"), sort_keys=True)),
+    )
+    value = await _get(db, ACTIVITY_ROLLOUT_KEY)
+    return value if isinstance(value, dict) else marker
+
+
+async def record_meaningful_activity(db, *, user_id: int, now: int | None = None) -> None:
+    """Record at most the first two authenticated app-session calendar days."""
+    now = int(now if now is not None else await db_access.get_unixepoch(db))
+    day = now // 86_400
+    key = _key(ACTIVITY_PREFIX, user_id)
+    async with db_access.transaction(db, immediate=True):
+        state = await _get(db, key)
+        days = list(state.get("days", [])) if isinstance(state, dict) else []
+        if day not in days and len(days) < 2:
+            days.append(day)
+            await _set(db, key, {"days": sorted(days), "updated_at": now})
+
+
+async def _account_age_trusted(db, *, user: dict[str, Any], now: int) -> bool:
+    if int(now) - int(user[schema.USER_CREATED_AT]) < const.CLAIM_IDENTITY_TRUST_AGE_SECONDS:
+        return False
+    rollout = await _get(db, ACTIVITY_ROLLOUT_KEY)
+    if not isinstance(rollout, dict):
+        if db.in_transaction:
+            rollout = await ensure_activity_rollout_marker(db)
+        else:
+            async with db_access.transaction(db, immediate=True):
+                rollout = await ensure_activity_rollout_marker(db)
+    if int(user[schema.USER_ID]) <= int(rollout.get("legacy_max_user_id") or 0):
+        return True
+    state = await _get(db, _key(ACTIVITY_PREFIX, int(user[schema.USER_ID])))
+    days = state.get("days", []) if isinstance(state, dict) else []
+    return len(set(int(day) for day in days if int(day) < int(now) // 86_400)) >= 2
+
+
+async def _inside_active_public_spot(db, *, lat: float, long: float, now: int) -> bool:
+    rows = await db.execute_fetchall(
+        f"SELECT {schema.SPOT_LAT}, {schema.SPOT_LONG}, {schema.SPOT_RADIUS} "
+        f"FROM {schema.SPOT_TABLE_NAME} WHERE {schema.SPOT_STATUS}=? "
+        f"AND {schema.SPOT_USE_PASSWORD}=0 AND {schema.SPOT_LAT} IS NOT NULL "
+        f"AND ({schema.SPOT_STARTS_AT} IS NULL OR {schema.SPOT_STARTS_AT}<=?) "
+        f"AND ({schema.SPOT_STARTS_AT} IS NULL OR "
+        f"{schema.SPOT_STARTS_AT}+{schema.SPOT_ENDS_AT}>?)",
+        (const.SPOT_STATUS_PUBLISHED, now, now),
+    )
+    return any(db_access.distance_metres(lat, long, row[0], row[1]) <= float(row[2]) for row in rows)
+
+
+async def record_gps_observation(db, *, user_id: int, ip: str | None,
+                                 lat: float, long: float, now: int | None = None) -> dict[str, Any]:
+    """Keep one bounded Find-Spots GPS anchor and explicit weak evidence."""
+    now = int(now if now is not None else await db_access.get_unixepoch(db))
+    key = _key(GPS_PREFIX, user_id)
+    ip_hash = hashlib.sha256(ip.encode()).hexdigest() if ip else None
+    inside = await _inside_active_public_spot(db, lat=lat, long=long, now=now)
+    async with db_access.transaction(db, immediate=True):
+        state = await _get(db, key)
+        state = dict(state) if isinstance(state, dict) else {}
+        if "first_observed_at" not in state:
+            state.update({"first_observed_at": now, "first_inside_public_spot": inside,
+                          "ordinary_presence_before_reward": not inside})
+        previous_at = int(state.get("last_observed_at") or 0)
+        contradiction = False
+        if (ip_hash and state.get("last_ip_hash") == ip_hash and previous_at
+                and now >= previous_at):
+            distance = db_access.distance_metres(
+                float(state["last_lat"]), float(state["last_long"]), lat, long)
+            speed = distance / max(1, now - previous_at)
+            contradiction = (
+                distance >= const.CLAIM_SAME_IP_GPS_MIN_DISTANCE_METRES
+                and speed > const.CLAIM_SAME_IP_GPS_MAX_SPEED_METRES_PER_SECOND
+            )
+            if contradiction:
+                # Updating the anchor makes an identical retry harmless and the
+                # immediate transaction prevents concurrent double counting.
+                state["same_ip_contradiction_count"] = int(
+                    state.get("same_ip_contradiction_count") or 0
+                ) + 1
+                state["last_contradiction_at"] = now
+                state["restricted_until"] = max(
+                    int(state.get("restricted_until") or 0),
+                    now + const.CLAIM_BEHAVIOURAL_RESTRICTION_SECONDS,
+                )
+        if now >= previous_at:
+            state.update({"last_observed_at": now, "last_lat": round(float(lat), 5),
+                          "last_long": round(float(long), 5), "last_ip_hash": ip_hash})
+        await _set(db, key, state)
+    return {"contradiction": contradiction, "first_inside_public_spot": bool(state["first_inside_public_spot"])}
+
+
+async def _behaviour_allows_public_claim(db, *, user_id: int, now: int) -> bool:
+    state = await _get(db, _key(GPS_PREFIX, user_id))
+    return not isinstance(state, dict) or int(state.get("restricted_until") or 0) <= now
+
+
 def _transaction_timestamp(tx: dict[str, Any]) -> int | None:
     value = trans_updater._first_chain_scalar_for_keys(tx, {"timestamp", "time"})
     millis = trans_updater._normalise_chain_timestamp_milliseconds(value)
@@ -158,7 +265,7 @@ def _cached_signer_decision(cached: Any, *, address: str, now: int) -> dict[str,
 async def signer_or_account_trusted(db, *, user: dict[str, Any], signer_address: str, now: int) -> dict[str, Any]:
     """Resolve signer trust without holding a SQLite write lock over RPC I/O."""
     age = max(0, int(now) - int(user[schema.USER_CREATED_AT]))
-    if age >= const.CLAIM_IDENTITY_TRUST_AGE_SECONDS:
+    if age >= const.CLAIM_IDENTITY_TRUST_AGE_SECONDS and await _account_age_trusted(db, user=user, now=now):
         return {"trusted": True, "reason": "account_established"}
     address = trans_updater._validate_nimiq_address(
         signer_address, field_name="claim signer address"
@@ -309,6 +416,9 @@ async def first_location_decision(db, *, user: dict[str, Any], ip: str | None,
             )
             outcome = {
                 "kind": "mismatch" if blatant else "match",
+                "ip_hash": hashlib.sha256(ip.encode()).hexdigest(),
+                "provider_lat": round(ip_lat, 3),
+                "provider_long": round(ip_long, 3),
                 "ip_country": ip_country,
                 "gps_country": _country(gps_country),
                 "distance_km": round(distance / 1000),
@@ -337,6 +447,24 @@ async def first_location_decision(db, *, user: dict[str, Any], ip: str | None,
                 "reason": str(current.get("restriction_reason") or "first_location_provider_unavailable"),
             }
         state = dict(current) if isinstance(current, dict) else {"mismatch_count": 0}
+        if (outcome["kind"] in {"match", "mismatch"}
+                and state.get("provider_ip_hash") == outcome.get("ip_hash")
+                and state.get("provider_lat") is not None):
+            provider_shift = db_access.distance_metres(
+                float(state["provider_lat"]), float(state["provider_long"]),
+                float(outcome["provider_lat"]), float(outcome["provider_long"]),
+            )
+            if provider_shift >= const.CLAIM_FIRST_LOCATION_MISMATCH_METRES:
+                state.update({"decision_at": now, "last_result": "provider_unreliable",
+                              "provider_unreliable_at": now})
+                state.pop("retry_at", None)
+                state.pop("restriction_reason", None)
+                await _set(db, key, state)
+                return {"allowed": True, "reason": "ip_geolocation_unreliable"}
+        if outcome["kind"] in {"match", "mismatch"}:
+            state.update({"provider_ip_hash": outcome["ip_hash"],
+                          "provider_lat": outcome["provider_lat"],
+                          "provider_long": outcome["provider_long"]})
         if outcome["kind"] == "match":
             state.update({"verified_at": now, "decision_at": now, "last_result": "match",
                           "ip_country": outcome["ip_country"],
@@ -380,6 +508,8 @@ async def public_claim_decision(db, *, user_id: int, signer_address: str,
     if user is None or int(user[schema.USER_STATUS]) == const.USER_STATUS_BANNED:
         return {"allowed": False, "reason": "user_not_allowed"}
     now = await db_access.get_unixepoch(db)
+    if not await _behaviour_allows_public_claim(db, user_id=user_id, now=now):
+        return {"allowed": False, "reason": "behavioural_temporary_restriction"}
     trust = await signer_or_account_trusted(db, user=user, signer_address=signer_address, now=now)
     if not trust["trusted"]:
         return {"allowed": False, **trust}

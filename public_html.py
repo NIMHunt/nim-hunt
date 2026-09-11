@@ -1791,6 +1791,13 @@ async def spots_claim_status_api(payload: ClaimStatusRequest, request: Request) 
         # that small caller-owned unit before any guard can perform network I/O;
         # the guard then uses only its own short post-I/O write transactions.
         await db.commit()
+        if payload.lat is not None and payload.long is not None:
+            import fresh_claim_guard
+            await fresh_claim_guard.record_gps_observation(
+                db, user_id=int(user[schema.USER_ID]),
+                ip=fresh_claim_guard.genuine_client_ip(request),
+                lat=float(payload.lat), long=float(payload.long), now=now,
+            )
         statuses: dict[str, Any] = {}
         for spot_id in ids:
             spot = await db_access.get_spot_owner_summary(db, spot_id=spot_id)
@@ -3346,6 +3353,10 @@ async def home_session(payload: HomeSessionRequest, request: Request) -> JSONRes
                 )
             await db_access.touch_user_last_seen(db, user_id=user_id)
             user = await db_access.get_user_by_id(db, user_id=user_id)
+
+        if bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
+            import fresh_claim_guard
+            await fresh_claim_guard.record_meaningful_activity(db, user_id=user_id)
 
         if user is not None:
             await _notify_user_cache(db, user_id=int(user_id))

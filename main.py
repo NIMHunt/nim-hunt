@@ -19,6 +19,7 @@ import cache
 import constants as const
 import database
 import fresh_claim_guard
+import request_body_limit
 import settlement_updater
 import social_preview
 import trans_updater
@@ -455,6 +456,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title=const.APP_NAME, lifespan=lifespan)
 app.add_middleware(social_preview.SocialPreviewMiddleware)
+app.add_middleware(
+    request_body_limit.RequestBodyLimitMiddleware,
+    max_body_bytes=const.MAX_HTTP_REQUEST_BODY_BYTES,
+)
 app.mount("/static", StaticFiles(directory=str(const.STATIC_DIR)), name="static")
 app.include_router(public_router)
 app.include_router(social_preview.router)
@@ -503,13 +508,7 @@ async def transaction_healthz() -> JSONResponse:
         and settlement.get("healthy")
         and int(diagnostics.get("local_intent_count") or 0) == 0
     )
-    return JSONResponse(
-        {
-            "ok": ok,
-            "transactions": diagnostics,
-        },
-        status_code=200 if ok else 503,
-    )
+    return JSONResponse({"ok": ok}, status_code=200 if ok else 503)
 
 
 @app.exception_handler(StarletteHTTPException)

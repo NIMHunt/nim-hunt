@@ -21,6 +21,8 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
@@ -2400,6 +2402,32 @@ _FALLBACK_PLACES = (
     ("Newcastle upon Tyne", "United Kingdom", 54.9783, -1.6178),
 )
 
+# Rounded coordinates (roughly 110 m latitude) avoid redundant map-pan work.
+# Both retained cache state and outstanding unique keys have hard bounds.
+REVERSE_GEOCODE_COORDINATE_DECIMALS = 3
+REVERSE_GEOCODE_CACHE_TTL_SECONDS = 15 * 60
+REVERSE_GEOCODE_CACHE_MAX_ENTRIES = 256
+REVERSE_GEOCODE_MAX_CONCURRENCY = 4
+REVERSE_GEOCODE_MAX_PENDING_KEYS = 32
+REVERSE_GEOCODE_PROVIDER_TIMEOUT_SECONDS = 4
+REVERSE_GEOCODE_CALLER_TIMEOUT_SECONDS = 5
+REVERSE_GEOCODE_CIRCUIT_FAILURE_THRESHOLD = 3
+REVERSE_GEOCODE_CIRCUIT_BACKOFF_SECONDS = 30
+
+_reverse_geocode_cache: OrderedDict[
+    tuple[float, float], tuple[float, tuple[str | None, str | None]]
+] = OrderedDict()
+_reverse_geocode_inflight: dict[
+    tuple[float, float], asyncio.Task[tuple[str | None, str | None] | None]
+] = {}
+_reverse_geocode_semaphore = asyncio.Semaphore(REVERSE_GEOCODE_MAX_CONCURRENCY)
+_reverse_geocode_executor = ThreadPoolExecutor(
+    max_workers=REVERSE_GEOCODE_MAX_CONCURRENCY,
+    thread_name_prefix="reverse-geocode",
+)
+_reverse_geocode_failures = 0
+_reverse_geocode_circuit_open_until = 0.0
+
 
 def _fallback_place_for_coordinates(lat: float, long: float) -> tuple[str | None, str | None]:
     best: tuple[float, str, str] | None = None
@@ -2432,7 +2460,9 @@ def _reverse_geocode_sync(lat: float, long: float) -> tuple[str | None, str | No
         method="GET",
     )
 
-    with urllib.request.urlopen(request, timeout=6) as response:
+    with urllib.request.urlopen(
+        request, timeout=REVERSE_GEOCODE_PROVIDER_TIMEOUT_SECONDS
+    ) as response:
         data = json.loads(response.read().decode("utf-8"))
 
     address = data.get("address") if isinstance(data, dict) else None
@@ -2451,14 +2481,75 @@ def _reverse_geocode_sync(lat: float, long: float) -> tuple[str | None, str | No
     return city, country
 
 
-async def _derive_place_for_create_map(lat: float, long: float) -> tuple[str | None, str | None]:
+async def _reverse_geocode_worker(
+    key: tuple[float, float],
+) -> tuple[str | None, str | None] | None:
+    global _reverse_geocode_circuit_open_until, _reverse_geocode_failures
     try:
-        city, country = await asyncio.to_thread(_reverse_geocode_sync, float(lat), float(long))
-    except (TimeoutError, urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
-        city, country = None, None
+        async with _reverse_geocode_semaphore:
+            if asyncio.get_running_loop().time() < _reverse_geocode_circuit_open_until:
+                return None
+            try:
+                result = await asyncio.get_running_loop().run_in_executor(
+                    _reverse_geocode_executor, _reverse_geocode_sync, *key
+                )
+            except (TimeoutError, urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+                _reverse_geocode_failures += 1
+                if _reverse_geocode_failures >= REVERSE_GEOCODE_CIRCUIT_FAILURE_THRESHOLD:
+                    _reverse_geocode_circuit_open_until = (
+                        asyncio.get_running_loop().time()
+                        + REVERSE_GEOCODE_CIRCUIT_BACKOFF_SECONDS
+                    )
+                return None
 
-    if city or country:
-        return city, country
+            _reverse_geocode_failures = 0
+            _reverse_geocode_circuit_open_until = 0.0
+            if not any(result):
+                return None
+            expires_at = (
+                asyncio.get_running_loop().time() + REVERSE_GEOCODE_CACHE_TTL_SECONDS
+            )
+            _reverse_geocode_cache[key] = (expires_at, result)
+            _reverse_geocode_cache.move_to_end(key)
+            while len(_reverse_geocode_cache) > REVERSE_GEOCODE_CACHE_MAX_ENTRIES:
+                _reverse_geocode_cache.popitem(last=False)
+            return result
+    finally:
+        _reverse_geocode_inflight.pop(key, None)
+
+
+async def _derive_place_for_create_map(lat: float, long: float) -> tuple[str | None, str | None]:
+    key = (
+        round(float(lat), REVERSE_GEOCODE_COORDINATE_DECIMALS),
+        round(float(long), REVERSE_GEOCODE_COORDINATE_DECIMALS),
+    )
+    now = asyncio.get_running_loop().time()
+    cached = _reverse_geocode_cache.get(key)
+    if cached is not None:
+        if cached[0] > now:
+            _reverse_geocode_cache.move_to_end(key)
+            return cached[1]
+        _reverse_geocode_cache.pop(key, None)
+
+    if now < _reverse_geocode_circuit_open_until:
+        return _fallback_place_for_coordinates(float(lat), float(long))
+
+    task = _reverse_geocode_inflight.get(key)
+    if task is None:
+        if len(_reverse_geocode_inflight) >= REVERSE_GEOCODE_MAX_PENDING_KEYS:
+            return _fallback_place_for_coordinates(float(lat), float(long))
+        task = asyncio.create_task(_reverse_geocode_worker(key))
+        _reverse_geocode_inflight[key] = task
+
+    try:
+        result = await asyncio.wait_for(
+            asyncio.shield(task), timeout=REVERSE_GEOCODE_CALLER_TIMEOUT_SECONDS
+        )
+    except asyncio.TimeoutError:
+        result = None
+
+    if result is not None:
+        return result
     return _fallback_place_for_coordinates(float(lat), float(long))
 
 

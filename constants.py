@@ -123,6 +123,10 @@ TEMPLATES_DIR = PROJECT_ROOT / "templates"
 # Change this once if the app is ever renamed.
 APP_NAME = "NimHunt"
 
+# One outer ASGI boundary protects all small JSON/form routes before parsing,
+# authentication, database access, or signature/RPC work.
+MAX_HTTP_REQUEST_BODY_BYTES = _env_int("NIMHUNT_MAX_HTTP_REQUEST_BODY_BYTES", 64 * 1024)
+
 # Browser/tab icon. The actual SVG lives in static/favicon.svg.
 APP_ICON_PATH = "/favicon.ico"
 

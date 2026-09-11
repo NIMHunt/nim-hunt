@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import tempfile
+import time
 from unittest import IsolatedAsyncioTestCase, mock
 
 import cache
@@ -39,6 +40,79 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
     def tx(self, age: int) -> dict:
         return {"hash": "ab" * 32, "blockNumber": 10, "executionResult": True,
                 "timestamp": (self.now - age) * 1000}
+
+    async def create_public_spot(self, *, owner_id: int, lat: float, long: float) -> int:
+        spot_id = await db_access.create_spot(
+            self.db, created_by=owner_id, title=f"Owner {owner_id} Spot",
+            lat=lat, long=long, radius=500, claim_duration=0,
+            max_claims_per_user=2, max_total_claims=10,
+            total_value=10 * const.MIN_STANDARD_CLAIM_PAYOUT,
+            starts_at=int(time.time()) - 60, ends_at=3600,
+            auto_reverse_geocode=False,
+        )
+        await self.db.execute(
+            f"UPDATE {schema.SPOT_TABLE_NAME} SET {schema.SPOT_STATUS}=? "
+            f"WHERE {schema.SPOT_ID}=?", (const.SPOT_STATUS_PUBLISHED, spot_id),
+        )
+        await self.db.commit()
+        return spot_id
+
+    async def test_first_presence_ignores_owned_spot_but_not_overlapping_other_spot(self):
+        await self.create_public_spot(owner_id=self.user_id, lat=10, long=10)
+        await guard.record_gps_observation(
+            self.db, user_id=self.user_id, ip="8.8.8.8",
+            lat=10, long=10, now=self.now,
+        )
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertFalse(state["first_inside_public_spot"])
+        self.assertTrue(state["ordinary_presence_before_reward"])
+        self.assertNotIn("restricted_until", state)
+
+        other_user = await db_access.create_user(
+            self.db, device_id_hash=hashlib.sha256(b"overlap-user").hexdigest()
+        )
+        await self.db.commit()
+        await self.create_public_spot(owner_id=self.user_id, lat=20, long=20)
+        await self.create_public_spot(owner_id=other_user, lat=20, long=20)
+        await guard.record_gps_observation(
+            self.db, user_id=other_user, ip="1.1.1.1",
+            lat=10, long=10, now=self.now,
+        )
+        other_state = await guard._get(
+            self.db, guard._key(guard.GPS_PREFIX, other_user)
+        )
+        self.assertTrue(other_state["first_inside_public_spot"])
+
+        overlap_user = await db_access.create_user(
+            self.db, device_id_hash=hashlib.sha256(b"third-user").hexdigest()
+        )
+        await self.db.commit()
+        await self.create_public_spot(owner_id=overlap_user, lat=20, long=20)
+        await guard.record_gps_observation(
+            self.db, user_id=overlap_user, ip="9.9.9.9",
+            lat=20, long=20, now=self.now,
+        )
+        overlap_state = await guard._get(
+            self.db, guard._key(guard.GPS_PREFIX, overlap_user)
+        )
+        self.assertTrue(overlap_state["first_inside_public_spot"])
+
+    async def test_owned_first_presence_does_not_amplify_first_contradiction(self):
+        await self.create_public_spot(owner_id=self.user_id, lat=10, long=10)
+        await guard.record_gps_observation(
+            self.db, user_id=self.user_id, ip="8.8.8.8",
+            lat=10, long=10, now=self.now,
+        )
+        with mock.patch.object(guard, "_inside_active_public_spot") as scan:
+            contradiction = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8",
+                lat=-40, long=-40, now=self.now + 1,
+            )
+        scan.assert_not_called()
+        self.assertTrue(contradiction["contradiction"])
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertEqual(state["same_ip_contradiction_count"], 1)
+        self.assertNotIn("restricted_until", state)
 
     async def test_new_signer_requires_old_not_merely_recent_activity(self):
         with mock.patch.object(guard.trans_updater, "get_chain_transactions_by_address",

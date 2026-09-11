@@ -252,6 +252,45 @@ class ClaimAuthorizationLifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(int(gps.get("same_ip_contradiction_count") or 0), 0)
         self.assertEqual(gps["last_observed_at"], 995)
 
+    async def test_signed_own_spot_attempt_does_not_freeze_public_claim_cutoff(self):
+        async with schema.get_db() as db:
+            own_spot_id = await db_access.create_spot(
+                db, created_by=self.user_id, title="Own authorization Spot",
+                lat=20, long=20, radius=100, claim_duration=0,
+                max_claims_per_user=2, max_total_claims=10,
+                total_value=10 * const.MIN_STANDARD_CLAIM_PAYOUT,
+                starts_at=int(time.time()) - 60, ends_at=3600,
+                auto_reverse_geocode=False,
+            )
+            await db.execute(
+                f"UPDATE {schema.SPOT_TABLE_NAME} SET {schema.SPOT_STATUS}=? "
+                f"WHERE {schema.SPOT_ID}=?",
+                (const.SPOT_STATUS_PUBLISHED, own_spot_id),
+            )
+            await db.commit()
+        challenge, _ = await self._authorization(
+            spot_id=own_spot_id, lat=20, long=20
+        )
+        with mock.patch.object(
+            fresh_claim_guard, "public_claim_decision",
+            mock.AsyncMock(return_value={"allowed": False, "reason": "test_stop"}),
+        ):
+            called, status, _ = await self._submit(
+                challenge, spot_id=own_spot_id, lat=20, long=20
+            )
+        self.assertEqual((called, status), (0, 429))
+        async with schema.get_db() as db:
+            activity = await fresh_claim_guard._get(
+                db, fresh_claim_guard._key(
+                    fresh_claim_guard.ACTIVITY_PREFIX, self.user_id
+                ),
+            )
+            gps = await fresh_claim_guard._get(
+                db, fresh_claim_guard._key(fresh_claim_guard.GPS_PREFIX, self.user_id)
+            )
+        self.assertTrue(activity is None or "first_public_claim_attempt_at" not in activity)
+        self.assertFalse(gps["first_inside_public_spot"])
+
     async def test_wallet_change_rejects_before_claim(self):
         challenge, _ = await self._authorization()
         called, status, _ = await self._submit(challenge, signer=WALLET_B)

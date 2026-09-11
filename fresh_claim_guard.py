@@ -165,15 +165,19 @@ async def _account_age_trusted(db, *, user: dict[str, Any], now: int) -> bool:
     return len(set(int(day) for day in days if int(day) < cutoff)) >= 2
 
 
-async def _inside_active_public_spot(db, *, lat: float, long: float, now: int) -> bool:
+async def _inside_active_public_spot(
+    db, *, user_id: int, lat: float, long: float, now: int
+) -> bool:
+    """Return whether the user is inside another creator's public reward."""
     rows = await db.execute_fetchall(
         f"SELECT {schema.SPOT_LAT}, {schema.SPOT_LONG}, {schema.SPOT_RADIUS} "
         f"FROM {schema.SPOT_TABLE_NAME} WHERE {schema.SPOT_STATUS}=? "
+        f"AND {schema.SPOT_CREATED_BY}<>? "
         f"AND {schema.SPOT_USE_PASSWORD}=0 AND {schema.SPOT_LAT} IS NOT NULL "
         f"AND ({schema.SPOT_STARTS_AT} IS NULL OR {schema.SPOT_STARTS_AT}<=?) "
         f"AND ({schema.SPOT_STARTS_AT} IS NULL OR "
         f"{schema.SPOT_STARTS_AT}+{schema.SPOT_ENDS_AT}>?)",
-        (const.SPOT_STATUS_PUBLISHED, now, now),
+        (const.SPOT_STATUS_PUBLISHED, int(user_id), now, now),
     )
     return any(db_access.distance_metres(lat, long, row[0], row[1]) <= float(row[2]) for row in rows)
 
@@ -184,11 +188,16 @@ async def record_gps_observation(db, *, user_id: int, ip: str | None,
     now = int(now if now is not None else await db_access.get_unixepoch(db))
     key = _key(GPS_PREFIX, user_id)
     ip_hash = hashlib.sha256(ip.encode()).hexdigest() if ip else None
-    inside = await _inside_active_public_spot(db, lat=lat, long=long, now=now)
     async with db_access.transaction(db, immediate=True):
         state = await _get(db, key)
         state = dict(state) if isinstance(state, dict) else {}
         if "first_observed_at" not in state:
+            # This local query runs only for the first observation and under the
+            # same short transaction that freezes its classification. Owned
+            # Spots are excluded without making overlapping third-party Spots safe.
+            inside = await _inside_active_public_spot(
+                db, user_id=user_id, lat=lat, long=long, now=now
+            )
             state.update({"first_observed_at": now, "first_inside_public_spot": inside,
                           "ordinary_presence_before_reward": not inside})
         previous_at = int(state.get("last_observed_at") or 0)

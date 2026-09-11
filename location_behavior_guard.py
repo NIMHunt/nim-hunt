@@ -169,10 +169,10 @@ def _currently_restricted(state: dict[str, Any], *, now: int) -> bool:
     return int(state.get("restricted_until") or 0) > int(now)
 
 
-def _new_evidence_matured(state: dict[str, Any], *, corroborated: bool) -> bool:
+def _new_evidence_matured(state: dict[str, Any]) -> bool:
     centre = len(state["centre_location_spot_ids"]) >= CENTRE_DISTINCT_LOCATIONS_REQUIRED
     inside = len(state["inside_streak_spot_ids"]) >= INSIDE_STREAK_LOCATIONS_REQUIRED
-    return (centre and inside) or (corroborated and (centre or inside))
+    return centre and inside
 
 
 def _consume_episode(state: dict[str, Any], *, now: int) -> None:
@@ -210,6 +210,11 @@ async def observe_find_location(
         )
         state["outside_since_last_inside"] = True
         state["inside_streak_spot_ids"] = []
+        # A proven outside transition ends the prior physical event. Returning
+        # to the same Spot is therefore not a retry, even within 30 minutes.
+        if transition:
+            state.pop("last_signed_spot_id", None)
+            state.pop("last_signed_observed_at", None)
         state["last_outside_observed_at"] = checked_at
         await _save(db, user_id=user_id, state=state)
         return state
@@ -218,7 +223,6 @@ async def observe_find_location(
 async def observe_signed_claim(
     db, *, user_id: int, spot: dict[str, Any], lat: float, long: float,
     location_accuracy_metres: float | None = None, now: int | None = None,
-    corroborated: bool = False,
 ) -> dict[str, Any]:
     """Record one signed public claim event and return its restriction decision."""
     if not db.in_transaction:
@@ -226,7 +230,6 @@ async def observe_signed_claim(
             return await observe_signed_claim(
                 db, user_id=user_id, spot=spot, lat=lat, long=long,
                 location_accuracy_metres=location_accuracy_metres, now=now,
-                corroborated=corroborated,
             )
     del location_accuracy_metres  # forged poor accuracy must not erase exact evidence
     if int(spot.get(schema.SPOT_CREATED_BY) or -1) == int(user_id):
@@ -270,7 +273,7 @@ async def observe_signed_claim(
         state["last_signed_spot_id"] = spot_id
         state["last_signed_observed_at"] = checked_at
 
-    if _new_evidence_matured(state, corroborated=corroborated):
+    if _new_evidence_matured(state):
         _consume_episode(state, now=checked_at)
     await _save(db, user_id=user_id, state=state)
     return {"restricted": _currently_restricted(state, now=checked_at), "state": state}

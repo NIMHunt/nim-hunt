@@ -7,11 +7,14 @@ import tempfile
 import unittest
 from unittest import mock
 
+from starlette.requests import Request
+
 import cache
 import constants as const
 import database as schema
 import db_access
 import location_behavior_guard as guard
+import public_html
 
 
 class LocationBehaviorGuardTests(unittest.IsolatedAsyncioTestCase):
@@ -50,7 +53,7 @@ class LocationBehaviorGuardTests(unittest.IsolatedAsyncioTestCase):
 
     async def claim(self, spot_id: int, *, metres: float | None = None,
                     noise_metres: float = 0, now: int | None = None,
-                    password: int = 0, owner: int = 999, corroborated: bool = False):
+                    password: int = 0, owner: int = 999):
         centre = float((spot_id - 1) * 100 if metres is None else metres)
         spot = self.spot(spot_id, metres=centre, password=password, owner=owner)
 
@@ -63,7 +66,7 @@ class LocationBehaviorGuardTests(unittest.IsolatedAsyncioTestCase):
                 self.db, user_id=self.user_id, spot=spot,
                 lat=float(spot[schema.SPOT_LAT]) + noise_metres / 111_195,
                 long=float(spot[schema.SPOT_LONG]), location_accuracy_metres=999_999,
-                now=self.now if now is None else now, corroborated=corroborated,
+                now=self.now if now is None else now,
             )
         await self.db.commit()
         return result
@@ -127,11 +130,46 @@ class LocationBehaviorGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["browser_outside_observations"], 1)
         self.assertEqual(state["inside_streak_spot_ids"], [2])
 
+    async def test_outside_transition_ends_retry_event_before_return_to_same_spot(self):
+        await self.claim(1)
+        await self.find([], lat=0, long=0, now=self.now + 60)
+        returned = await self.claim(1, now=self.now + 2 * 60)
+        self.assertFalse(returned["state"]["outside_since_last_inside"])
+        self.assertEqual(returned["state"]["inside_streak_spot_ids"], [1])
+        self.assertEqual(returned["state"]["signed_inside_observations"], 2)
+        followed = await self.claim(2, now=self.now + 3 * 60)
+        self.assertEqual(followed["state"]["inside_streak_spot_ids"], [1, 2])
+        self.assertEqual(followed["state"]["centre_location_spot_ids"], [1, 2])
+
     async def test_repeated_outside_polling_is_heavily_deduplicated(self):
         for second in range(20):
             await self.find([], lat=0, long=0, now=self.now + second)
         state = await guard.get_state(self.db, user_id=self.user_id)
         self.assertEqual(state["meaningful_observations"], 1)
+        self.assertEqual(state["browser_outside_observations"], 1)
+
+    async def test_authenticated_zero_visible_spots_records_outside_presence(self):
+        device = hashlib.sha256(b"zero-visible-spots").hexdigest()
+        payload = public_html.ClaimStatusRequest(
+            device_id_hash=device,
+            wallet_available=True,
+            location_available=True,
+            lat=0,
+            long=0,
+            accuracy=5,
+            spot_ids=[],
+        )
+        request = Request({
+            "type": "http", "method": "POST", "path": "/api/spots/claim-status",
+            "headers": [], "client": ("127.0.0.1", 1),
+        })
+        response = await public_html.spots_claim_status_api(payload, request)
+        body = json.loads(response.body)
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["statuses"], {})
+        async with schema.get_db() as db:
+            user = await db_access.get_user(db, device_id_hash=device)
+            state = await guard.get_state(db, user_id=int(user[schema.USER_ID]))
         self.assertEqual(state["browser_outside_observations"], 1)
 
     async def test_restriction_does_not_slide_and_consumed_evidence_does_not_rearm(self):

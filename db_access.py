@@ -3169,7 +3169,6 @@ async def create_claim_attempt(
     if not use_password:
         # This runs under the caller's IMMEDIATE claim transaction, so the
         # bounded evidence update and restriction decision are race-safe.
-        import fresh_claim_guard
         import location_behavior_guard
 
         now = await get_unixepoch(db)
@@ -3181,9 +3180,6 @@ async def create_claim_attempt(
             long=float(long),
             location_accuracy_metres=location_accuracy_metres,
             now=now,
-            corroborated=await fresh_claim_guard.has_active_location_anomaly(
-                db, user_id=int(user_id), now=now
-            ),
         )
         if behaviour["restricted"]:
             raise location_behavior_guard.PublicClaimBehaviorRestrictionError()

@@ -236,7 +236,7 @@ class RailwayDegradedRpcStartupTest(unittest.TestCase):
                 "1",
                 "--proxy-headers",
                 "--forwarded-allow-ips",
-                "*",
+                railway_start.RAILWAY_HTTP_PROXY_CIDR,
             ],
         ):
             railway_start.main(app_module=module, uvicorn_module=uvicorn)
@@ -247,7 +247,7 @@ class RailwayDegradedRpcStartupTest(unittest.TestCase):
             port=1234,
             workers=1,
             proxy_headers=True,
-            forwarded_allow_ips="*",
+            forwarded_allow_ips=railway_start.RAILWAY_HTTP_PROXY_CIDR,
         )
 
 

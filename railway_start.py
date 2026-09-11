@@ -24,6 +24,8 @@ import urllib.error
 from types import SimpleNamespace
 from typing import Any
 
+RAILWAY_HTTP_PROXY_CIDR = "100.0.0.0/8"
+
 
 def _temporary_rpc_validation_failure(exc: BaseException) -> bool:
     """Return True only for failures that mean the RPC could not be used.
@@ -183,7 +185,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--proxy-headers", action="store_true")
-    parser.add_argument("--forwarded-allow-ips", default="*")
+    parser.add_argument("--forwarded-allow-ips", default=RAILWAY_HTTP_PROXY_CIDR)
     return parser.parse_args(argv)
 
 

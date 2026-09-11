@@ -38,6 +38,7 @@ def clean_environment() -> dict[str, str]:
         "NIMHUNT_SPOT_FEE_ADDRESS",
         "NIMHUNT_SPOT_CANCELLATION_FEE_ADDRESS",
         "NIMHUNT_DB_PATH",
+        "NIMHUNT_IP_GEOLOCATION_URL",
     ):
         environment.pop(name, None)
     environment["PYTHONPATH"] = str(PROJECT_ROOT)
@@ -68,6 +69,7 @@ def valid_public_environment(mode: str) -> dict[str, str]:
             "NIMHUNT_NIMIQ_MNEMONIC": "private operator mnemonic words",
             "NIMHUNT_SPOT_FEE_ADDRESS": VALID_FEE_ADDRESS,
             "NIMHUNT_DB_PATH": "/srv/nimhunt/records.db",
+            "NIMHUNT_IP_GEOLOCATION_URL": "https://geo.example/{ip}",
         }
     )
     return environment
@@ -242,6 +244,7 @@ class PublicDeploymentValidationTest(unittest.TestCase):
                     "NIMHUNT_NIMIQ_SEND_COMMAND": "node /app/helpers/nimiq_helper.mjs",
                     "NIMHUNT_NIMIQ_MNEMONIC": "private operator mnemonic words",
                     "NIMHUNT_DEV_MASTER_SEED": "",
+                    "NIMHUNT_IP_GEOLOCATION_URL": "https://geo.example/{ip}",
                 },
                 clear=False,
             ),
@@ -306,6 +309,7 @@ class PublicDeploymentValidationTest(unittest.TestCase):
                     "NIMHUNT_NIMIQ_SEND_COMMAND": "node /app/helpers/nimiq_helper.mjs",
                     "NIMHUNT_NIMIQ_MNEMONIC": "private operator mnemonic words",
                     "NIMHUNT_DEV_MASTER_SEED": "",
+                    "NIMHUNT_IP_GEOLOCATION_URL": "https://geo.example/{ip}",
                 },
                 clear=False,
             ),

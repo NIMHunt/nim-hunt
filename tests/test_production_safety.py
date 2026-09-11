@@ -57,6 +57,7 @@ def patched_settings(**overrides):
                     send_command_env: "configured-send-helper",
                     "NIMHUNT_NIMIQ_MNEMONIC": "private operator mnemonic words",
                     "NIMHUNT_NIMIQ_EXTERNAL_SIGNER": "",
+                    "NIMHUNT_IP_GEOLOCATION_URL": "https://geo.example/{ip}",
                 },
                 clear=False,
             )
@@ -70,6 +71,13 @@ def patched_settings(**overrides):
 
 
 class ProductionSafetyValidationTest(unittest.TestCase):
+    def test_public_deployment_requires_valid_ip_geolocation_url(self):
+        with patched_settings(), mock.patch.dict(
+            os.environ, {"NIMHUNT_IP_GEOLOCATION_URL": "http://geo.example/{ip}"}
+        ):
+            with self.assertRaisesRegex(RuntimeError, "valid HTTPS URL"):
+                main.validate_deployment_safety()
+
     def test_local_development_settings_are_allowed_when_not_in_production(self):
         with patched_settings(
             DEPLOYMENT_MODE="development",
@@ -478,6 +486,7 @@ class ApplicationLifespanTest(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(main, "validate_deployment_safety"),
             mock.patch.object(main, "verify_public_signing_access"),
             mock.patch.object(main, "verify_public_rpc_network", mock.AsyncMock()),
+            mock.patch.object(main.trans_updater, "refresh_chain_head_height", mock.AsyncMock()),
             mock.patch.object(main.database, "init_db", mock.AsyncMock()),
             mock.patch.object(main.cache, "start_cache_refresher", mock.AsyncMock()),
             mock.patch.object(
@@ -547,6 +556,7 @@ class ApplicationLifespanTest(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(main, "validate_deployment_safety"),
             mock.patch.object(main, "verify_public_signing_access"),
             mock.patch.object(main, "verify_public_rpc_network", mock.AsyncMock()),
+            mock.patch.object(main.trans_updater, "refresh_chain_head_height", mock.AsyncMock()),
             mock.patch.object(main.database, "init_db", mock.AsyncMock()),
             mock.patch.object(main.cache, "start_cache_refresher", mock.AsyncMock()),
             mock.patch.object(

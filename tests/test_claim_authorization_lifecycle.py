@@ -133,6 +133,7 @@ class ClaimAuthorizationLifecycleTest(unittest.IsolatedAsyncioTestCase):
         accuracy=5,
         verifier=None,
         patch_runtime=True,
+        use_claim_attempt=False,
     ):
         body = json.dumps(
             {
@@ -154,15 +155,27 @@ class ClaimAuthorizationLifecycleTest(unittest.IsolatedAsyncioTestCase):
             nonlocal called
             called += 1
             async with schema.get_db() as db:
-                claim_id = await db_access.create_claim(
-                    db,
-                    spot_id=spot_id or self.spot_id,
-                    user_id=self.user_id,
-                    lat=lat,
-                    long=long,
-                    accuracy=1,
-                    payout_address=WALLET_A,
-                )
+                if use_claim_attempt:
+                    claim = await db_access.create_claim_attempt(
+                        db,
+                        spot_id=spot_id or self.spot_id,
+                        user_id=self.user_id,
+                        lat=lat,
+                        long=long,
+                        location_accuracy_metres=accuracy,
+                        payout_address=WALLET_A,
+                    )
+                    claim_id = int(claim[schema.CLAIM_ID])
+                else:
+                    claim_id = await db_access.create_claim(
+                        db,
+                        spot_id=spot_id or self.spot_id,
+                        user_id=self.user_id,
+                        lat=lat,
+                        long=long,
+                        accuracy=1,
+                        payout_address=WALLET_A,
+                    )
                 await db.commit()
             response = json.dumps({"ok": True, "claim": {"id": claim_id}}).encode()
             await send({"type": "http.response.start", "status": 200, "headers": []})
@@ -352,6 +365,22 @@ class ClaimAuthorizationLifecycleTest(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(
                     activity is None or "first_public_claim_attempt_at" not in activity
                 )
+
+    async def test_signed_authorization_precedes_behavioral_observation(self):
+        import location_behavior_guard
+
+        challenge, _ = await self._authorization()
+        called, status, verify = await self._submit(
+            challenge, use_claim_attempt=True
+        )
+        self.assertEqual((called, status), (1, 200))
+        verify.assert_awaited_once()
+        async with schema.get_db() as db:
+            state = await location_behavior_guard.get_state(
+                db, user_id=self.user_id
+            )
+            self.assertEqual(state["signed_inside_observations"], 1)
+            self.assertEqual(state["centre_location_spot_ids"], [self.spot_id])
 
     async def test_wallet_change_rejects_before_claim(self):
         challenge, _ = await self._authorization()

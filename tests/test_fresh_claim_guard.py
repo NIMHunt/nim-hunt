@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import tempfile
+import time
 from unittest import IsolatedAsyncioTestCase, mock
 
 import cache
@@ -21,6 +23,7 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
         self.db_context = schema.get_db()
         self.db = await self.db_context.__aenter__()
         await guard.ensure_rollout_marker(self.db)
+        await guard.ensure_activity_rollout_marker(self.db)
         self.user_id = await db_access.create_user(
             self.db, device_id_hash=hashlib.sha256(b"new-user").hexdigest()
         )
@@ -37,6 +40,149 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
     def tx(self, age: int) -> dict:
         return {"hash": "ab" * 32, "blockNumber": 10, "executionResult": True,
                 "timestamp": (self.now - age) * 1000}
+
+    async def create_public_spot(
+        self, *, owner_id: int, lat: float, long: float,
+        starts_at: int | None = None, ends_at: int = 3600,
+        max_total_claims: int = 10,
+    ) -> int:
+        spot_id = await db_access.create_spot(
+            self.db, created_by=owner_id, title=f"Owner {owner_id} Spot",
+            lat=lat, long=long, radius=500, claim_duration=0,
+            max_claims_per_user=2, max_total_claims=max_total_claims,
+            total_value=max(
+                const.MIN_SPOT_TOTAL_VALUE,
+                max_total_claims * const.MIN_STANDARD_CLAIM_PAYOUT,
+            ),
+            starts_at=(int(time.time()) - 60 if starts_at is None else starts_at),
+            ends_at=ends_at,
+            auto_reverse_geocode=False,
+        )
+        await self.db.execute(
+            f"UPDATE {schema.SPOT_TABLE_NAME} SET {schema.SPOT_STATUS}=? "
+            f"WHERE {schema.SPOT_ID}=?", (const.SPOT_STATUS_PUBLISHED, spot_id),
+        )
+        await self.db.commit()
+        return spot_id
+
+    async def new_observer(self, label: bytes) -> int:
+        user_id = await db_access.create_user(
+            self.db, device_id_hash=hashlib.sha256(label).hexdigest()
+        )
+        await self.db.commit()
+        return user_id
+
+    async def test_first_presence_ignores_owned_spot_but_not_overlapping_other_spot(self):
+        await self.create_public_spot(owner_id=self.user_id, lat=10, long=10)
+        await guard.record_gps_observation(
+            self.db, user_id=self.user_id, ip="8.8.8.8",
+            lat=10, long=10, now=self.now,
+        )
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertFalse(state["first_inside_public_spot"])
+        self.assertTrue(state["ordinary_presence_before_reward"])
+        self.assertNotIn("restricted_until", state)
+
+        other_user = await db_access.create_user(
+            self.db, device_id_hash=hashlib.sha256(b"overlap-user").hexdigest()
+        )
+        await self.db.commit()
+        await self.create_public_spot(owner_id=self.user_id, lat=20, long=20)
+        await self.create_public_spot(owner_id=other_user, lat=20, long=20)
+        await guard.record_gps_observation(
+            self.db, user_id=other_user, ip="1.1.1.1",
+            lat=10, long=10, now=self.now,
+        )
+        other_state = await guard._get(
+            self.db, guard._key(guard.GPS_PREFIX, other_user)
+        )
+        self.assertTrue(other_state["first_inside_public_spot"])
+
+        overlap_user = await db_access.create_user(
+            self.db, device_id_hash=hashlib.sha256(b"third-user").hexdigest()
+        )
+        await self.db.commit()
+        await self.create_public_spot(owner_id=overlap_user, lat=20, long=20)
+        await guard.record_gps_observation(
+            self.db, user_id=overlap_user, ip="9.9.9.9",
+            lat=20, long=20, now=self.now,
+        )
+        overlap_state = await guard._get(
+            self.db, guard._key(guard.GPS_PREFIX, overlap_user)
+        )
+        self.assertTrue(overlap_state["first_inside_public_spot"])
+
+    async def test_first_presence_ignores_cancelling_full_expired_and_upcoming_spots(self):
+        owner = await self.new_observer(b"availability-owner")
+        now = int(time.time())
+        cancelling = await self.create_public_spot(owner_id=owner, lat=30, long=30)
+        await self.db.execute(
+            f"UPDATE {schema.SPOT_TABLE_NAME} SET {schema.SPOT_CANCELLATION_STARTED_AT}=? "
+            f"WHERE {schema.SPOT_ID}=?", (now, cancelling),
+        )
+        full = await self.create_public_spot(
+            owner_id=owner, lat=31, long=31, max_total_claims=1
+        )
+        claimant = await self.new_observer(b"capacity-claimant")
+        claim_id = await db_access.create_claim(
+            self.db, spot_id=full, user_id=claimant, lat=31, long=31,
+            accuracy=1, payout_address=None,
+        )
+        await db_access.set_claim_status_to_success(self.db, claim_id=claim_id)
+        await self.create_public_spot(
+            owner_id=owner, lat=32, long=32,
+            starts_at=now - 7200, ends_at=3600,
+        )
+        await self.create_public_spot(
+            owner_id=owner, lat=33, long=33, starts_at=now + 3600,
+        )
+        await self.db.commit()
+
+        for index, (lat, long) in enumerate(((30, 30), (31, 31), (32, 32), (33, 33))):
+            observer = await self.new_observer(f"unavailable-{index}".encode())
+            await guard.record_gps_observation(
+                self.db, user_id=observer, ip="8.8.8.8",
+                lat=lat, long=long, now=now,
+            )
+            state = await guard._get(
+                self.db, guard._key(guard.GPS_PREFIX, observer)
+            )
+            self.assertFalse(state["first_inside_public_spot"])
+            self.assertTrue(state["ordinary_presence_before_reward"])
+
+    async def test_available_overlap_wins_over_unavailable_spot(self):
+        owner = await self.new_observer(b"overlap-availability-owner")
+        observer = await self.new_observer(b"overlap-availability-observer")
+        unavailable = await self.create_public_spot(owner_id=owner, lat=35, long=35)
+        await self.db.execute(
+            f"UPDATE {schema.SPOT_TABLE_NAME} SET {schema.SPOT_CANCELLATION_STARTED_AT}=? "
+            f"WHERE {schema.SPOT_ID}=?", (int(time.time()), unavailable),
+        )
+        await self.create_public_spot(owner_id=owner, lat=35, long=35)
+        await self.db.commit()
+        await guard.record_gps_observation(
+            self.db, user_id=observer, ip="8.8.8.8",
+            lat=35, long=35, now=int(time.time()),
+        )
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, observer))
+        self.assertTrue(state["first_inside_public_spot"])
+
+    async def test_owned_first_presence_does_not_amplify_first_contradiction(self):
+        await self.create_public_spot(owner_id=self.user_id, lat=10, long=10)
+        await guard.record_gps_observation(
+            self.db, user_id=self.user_id, ip="8.8.8.8",
+            lat=10, long=10, now=self.now,
+        )
+        with mock.patch.object(guard, "_inside_active_public_spot") as scan:
+            contradiction = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8",
+                lat=-40, long=-40, now=self.now + 1,
+            )
+        scan.assert_not_called()
+        self.assertTrue(contradiction["contradiction"])
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertEqual(state["same_ip_contradiction_count"], 1)
+        self.assertNotIn("restricted_until", state)
 
     async def test_new_signer_requires_old_not_merely_recent_activity(self):
         with mock.patch.object(guard.trans_updater, "get_chain_transactions_by_address",
@@ -55,10 +201,164 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
         self.assertTrue(first["trusted"] and second["trusted"])
         self.assertEqual(rpc.await_count, 1)
 
-    async def test_old_account_bypasses_signer_lookup(self):
+    async def test_old_account_without_active_days_does_not_bypass_signer_lookup(self):
         await self.db.execute(
             f"UPDATE {schema.USER_TABLE_NAME} SET {schema.USER_CREATED_AT}=? WHERE {schema.USER_ID}=?",
             (self.now - 31 * 86400, self.user_id))
+        await self.db.commit()
+        user = await db_access.get_user_by_id(self.db, user_id=self.user_id)
+        rpc = mock.AsyncMock(return_value={"data": []})
+        with mock.patch.object(guard.trans_updater, "get_chain_transactions_by_address", rpc):
+            result = await guard.signer_or_account_trusted(
+                self.db, user=user, signer_address=self.address, now=self.now)
+        self.assertFalse(result["trusted"])
+        rpc.assert_awaited_once()
+
+    async def test_old_account_with_two_earlier_active_days_is_trusted(self):
+        await self.db.execute(
+            f"UPDATE {schema.USER_TABLE_NAME} SET {schema.USER_CREATED_AT}=? WHERE {schema.USER_ID}=?",
+            (self.now - 31 * 86400, self.user_id))
+        await self.db.commit()
+        await guard.record_meaningful_activity(self.db, user_id=self.user_id,
+                                               now=self.now - 2 * 86400)
+        await guard.record_meaningful_activity(self.db, user_id=self.user_id,
+                                               now=self.now - 86400)
+        # A second request on one of those dates cannot manufacture a third day.
+        await guard.record_meaningful_activity(self.db, user_id=self.user_id,
+                                               now=self.now - 86400 + 60)
+        user = await db_access.get_user_by_id(self.db, user_id=self.user_id)
+        rpc = mock.AsyncMock()
+        result = await guard.signer_or_account_trusted(
+            self.db, user=user, signer_address=self.address, now=self.now)
+        self.assertTrue(result["trusted"])
+        rpc.assert_not_awaited()
+
+    async def test_same_ip_gps_policy_and_bounded_first_presence(self):
+        outside = mock.AsyncMock(return_value=False)
+        with mock.patch.object(guard, "_inside_active_public_spot", outside):
+            first = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=0, long=0,
+                now=self.now)
+            consistent = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=0.001, long=0.001,
+                now=self.now + 60)
+            plausible = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=2, long=2,
+                now=self.now + 8 * 3600)
+            implausible = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=40, long=40,
+                now=self.now + 8 * 3600 + 1)
+            duplicate = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=40, long=40,
+                now=self.now + 8 * 3600 + 1)
+        self.assertFalse(first["first_inside_public_spot"])
+        self.assertFalse(consistent["contradiction"] or plausible["contradiction"])
+        self.assertTrue(implausible["contradiction"])
+        self.assertFalse(duplicate["contradiction"])
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertTrue(state["ordinary_presence_before_reward"])
+        self.assertEqual(state["same_ip_contradiction_count"], 1)
+        self.assertNotIn("restricted_until", state)
+        with mock.patch.object(guard, "_inside_active_public_spot",
+                               mock.AsyncMock(return_value=False)):
+            second = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=-40, long=-40,
+                now=self.now + 8 * 3600 + 2)
+        self.assertTrue(second["contradiction"])
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertGreater(state["restricted_until"], self.now)
+        self.assertEqual((state["last_lat"], state["last_long"]), (-40.0, -40.0))
+
+    async def test_first_inside_and_shared_ip_are_user_scoped(self):
+        other = await db_access.create_user(
+            self.db, device_id_hash=hashlib.sha256(b"other").hexdigest())
+        await self.db.commit()
+        with mock.patch.object(guard, "_inside_active_public_spot",
+                               mock.AsyncMock(return_value=True)):
+            first = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=40, long=40,
+                now=self.now)
+            other_first = await guard.record_gps_observation(
+                self.db, user_id=other, ip="8.8.8.8", lat=-40, long=-40,
+                now=self.now)
+        self.assertTrue(first["first_inside_public_spot"])
+        self.assertFalse(first["contradiction"] or other_first["contradiction"])
+        user = await db_access.get_user_by_id(self.db, user_id=self.user_id)
+        self.assertEqual(user[schema.USER_STATUS], const.USER_STATUS_ACTIVE)
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertNotIn("restricted_until", state)
+        with mock.patch.object(guard, "_inside_active_public_spot",
+                               mock.AsyncMock(return_value=False)):
+            contradiction = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=-40, long=-40,
+                now=self.now + 1)
+        self.assertTrue(contradiction["contradiction"])
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertGreater(state["restricted_until"], self.now)
+
+    async def test_concurrent_identical_jump_counts_once(self):
+        with mock.patch.object(guard, "_inside_active_public_spot",
+                               mock.AsyncMock(return_value=False)):
+            await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=0, long=0,
+                now=self.now)
+            async def jump():
+                async with schema.get_db() as connection:
+                    return await guard.record_gps_observation(
+                        connection, user_id=self.user_id, ip="8.8.8.8",
+                        lat=40, long=40, now=self.now + 1)
+            results = await asyncio.gather(jump(), jump())
+        self.assertEqual(sum(bool(item["contradiction"]) for item in results), 1)
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertEqual(state["same_ip_contradiction_count"], 1)
+
+    async def test_bad_gps_excursion_then_stable_recovery_is_not_second_strike(self):
+        london = (51.507, -0.128)
+        cairo = (30.044, 31.236)
+        with mock.patch.object(guard, "_inside_active_public_spot",
+                               mock.AsyncMock(return_value=False)):
+            await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8",
+                lat=london[0], long=london[1], now=self.now)
+            first = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8",
+                lat=cairo[0], long=cairo[1], now=self.now + 1)
+            recovered = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8",
+                lat=london[0], long=london[1], now=self.now + 2)
+        self.assertTrue(first["contradiction"])
+        self.assertFalse(recovered["contradiction"])
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertEqual(state["same_ip_contradiction_count"], 1)
+        self.assertNotIn("pending_suspicious_at", state)
+        self.assertNotIn("restricted_until", state)
+        self.assertEqual((state["last_lat"], state["last_long"]), london)
+
+    async def test_third_location_inconsistent_with_stable_and_excursion_is_distinct(self):
+        with mock.patch.object(guard, "_inside_active_public_spot",
+                               mock.AsyncMock(return_value=False)):
+            await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=51.507,
+                long=-0.128, now=self.now)
+            await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=30.044,
+                long=31.236, now=self.now + 1)
+            distinct = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=-33.869,
+                long=151.209, now=self.now + 2)
+        self.assertTrue(distinct["contradiction"])
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertEqual(state["same_ip_contradiction_count"], 2)
+        self.assertGreater(state["restricted_until"], self.now)
+
+    async def test_activity_rollout_grandfathers_existing_account(self):
+        await self.db.execute(
+            f"UPDATE {schema.USER_TABLE_NAME} SET {schema.USER_CREATED_AT}=? WHERE {schema.USER_ID}=?",
+            (self.now - 31 * 86400, self.user_id))
+        await guard._set(self.db, guard.ACTIVITY_ROLLOUT_KEY, {
+            "activated_at": self.now, "legacy_max_user_id": self.user_id,
+        })
+        await self.db.commit()
         user = await db_access.get_user_by_id(self.db, user_id=self.user_id)
         rpc = mock.AsyncMock()
         with mock.patch.object(guard.trans_updater, "get_chain_transactions_by_address", rpc):
@@ -66,6 +366,124 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
                 self.db, user=user, signer_address=self.address, now=self.now)
         self.assertTrue(result["trusted"])
         rpc.assert_not_awaited()
+
+    async def test_provider_opinion_shift_marks_ip_signal_unreliable(self):
+        provider = mock.AsyncMock(side_effect=[
+            {"latitude": 28.6, "longitude": 77.2, "country_name": "India"},
+            {"latitude": 40.4, "longitude": -3.7, "country_name": "Spain"},
+        ])
+        key = guard._key(guard.LOCATION_PREFIX, self.user_id)
+        with mock.patch.object(guard, "lookup_ip_location", provider):
+            first = await self.location()
+            state = await guard._get(self.db, key)
+            self.now = int(state["retry_at"]) + 1
+            shifted = await self.location()
+        self.assertFalse(first["allowed"])
+        self.assertTrue(shifted["allowed"])
+        state = await guard._get(self.db, key)
+        self.assertEqual(state["last_result"], "provider_unreliable")
+        self.assertEqual(state["mismatch_count"], 0)
+        self.now += 1
+        again = await self.location()
+        self.assertTrue(again["allowed"])
+        self.assertEqual(provider.await_count, 2)
+
+    async def test_unreliable_ip_does_not_bypass_independent_active_restriction(self):
+        key = guard._key(guard.LOCATION_PREFIX, self.user_id)
+        ip_hash = hashlib.sha256(b"8.8.8.8").hexdigest()
+        await guard._set(self.db, key, {
+            "unreliable_ip_hashes": [ip_hash], "mismatch_count": 1,
+            "retry_at": self.now + 600,
+            "restriction_reason": "first_location_mismatch_restriction",
+        })
+        await self.db.commit()
+        provider = mock.AsyncMock()
+        with mock.patch.object(guard, "lookup_ip_location", provider):
+            result = await self.location()
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["reason"], "first_location_mismatch_restriction")
+        provider.assert_not_awaited()
+
+    async def test_new_ip_starts_at_first_mismatch_after_unreliable_evidence_retired(self):
+        provider = mock.AsyncMock(side_effect=[
+            {"latitude": 28.6, "longitude": 77.2, "country_name": "India"},
+            {"latitude": 40.4, "longitude": -3.7, "country_name": "Spain"},
+            {"latitude": 28.6, "longitude": 77.2, "country_name": "India"},
+        ])
+        key = guard._key(guard.LOCATION_PREFIX, self.user_id)
+        with mock.patch.object(guard, "lookup_ip_location", provider):
+            await self.location(ip="8.8.8.8")
+            state = await guard._get(self.db, key)
+            self.now = int(state["retry_at"]) + 1
+            await self.location(ip="8.8.8.8")
+            self.now += 1
+            result = await self.location(ip="1.1.1.1")
+        self.assertFalse(result["allowed"])
+        state = await guard._get(self.db, key)
+        self.assertEqual(state["mismatch_count"], 1)
+        self.assertEqual(
+            state["mismatch_ip_hash"], hashlib.sha256(b"1.1.1.1").hexdigest()
+        )
+
+    async def test_first_claim_cutoff_prevents_later_activity_rehabilitation(self):
+        await self.db.execute(
+            f"UPDATE {schema.USER_TABLE_NAME} SET {schema.USER_CREATED_AT}=? WHERE {schema.USER_ID}=?",
+            (self.now - 31 * 86400, self.user_id))
+        await self.db.commit()
+        cutoff = await guard.record_first_public_claim_attempt(
+            self.db, user_id=self.user_id, now=self.now)
+        await guard.record_meaningful_activity(
+            self.db, user_id=self.user_id, now=self.now + 86400)
+        await guard.record_meaningful_activity(
+            self.db, user_id=self.user_id, now=self.now + 2 * 86400)
+        self.assertEqual(await guard.record_first_public_claim_attempt(
+            self.db, user_id=self.user_id, now=self.now + 3 * 86400), cutoff)
+        user = await db_access.get_user_by_id(self.db, user_id=self.user_id)
+        rpc = mock.AsyncMock(return_value={"data": []})
+        with mock.patch.object(guard.trans_updater, "get_chain_transactions_by_address", rpc):
+            result = await guard.signer_or_account_trusted(
+                self.db, user=user, signer_address=self.address,
+                now=self.now + 4 * 86400)
+        self.assertFalse(result["trusted"])
+
+    async def test_first_claim_cutoff_preserves_independent_old_signer_route(self):
+        await self.db.execute(
+            f"UPDATE {schema.USER_TABLE_NAME} SET {schema.USER_CREATED_AT}=? WHERE {schema.USER_ID}=?",
+            (self.now - 31 * 86400, self.user_id))
+        await self.db.commit()
+        await guard.record_first_public_claim_attempt(
+            self.db, user_id=self.user_id, now=self.now)
+        user = await db_access.get_user_by_id(self.db, user_id=self.user_id)
+        with mock.patch.object(
+            guard.trans_updater, "get_chain_transactions_by_address",
+            mock.AsyncMock(return_value={"data": [self.tx(40 * 86400)]}),
+        ):
+            result = await guard.signer_or_account_trusted(
+                self.db, user=user, signer_address=self.address, now=self.now)
+        self.assertTrue(result["trusted"])
+
+    async def test_concurrent_first_claim_cutoff_is_immutable(self):
+        async def mark(value):
+            async with schema.get_db() as connection:
+                return await guard.record_first_public_claim_attempt(
+                    connection, user_id=self.user_id, now=value)
+        results = await asyncio.gather(mark(self.now), mark(self.now + 10))
+        self.assertEqual(results[0], results[1])
+        self.assertIn(results[0], {self.now, self.now + 10})
+
+    async def test_ordinary_polling_does_not_rewrite_unchanged_anchor(self):
+        with mock.patch.object(guard, "_inside_active_public_spot",
+                               mock.AsyncMock(return_value=False)):
+            await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8",
+                lat=12.34567, long=23.45678, now=self.now)
+            changes = self.db.total_changes
+            await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8",
+                lat=12.34568, long=23.45679, now=self.now + 10)
+        self.assertEqual(self.db.total_changes, changes)
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertEqual((state["last_lat"], state["last_long"]), (12.346, 23.457))
 
     async def test_history_failure_is_not_cached_as_no_history(self):
         rpc = mock.AsyncMock(side_effect=[RuntimeError("offline"),

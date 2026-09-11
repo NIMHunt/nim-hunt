@@ -13,6 +13,7 @@ import cache
 import constants as const
 import database as schema
 import db_access
+import fresh_claim_guard
 import location_behavior_guard as guard
 import public_html
 
@@ -169,8 +170,15 @@ class LocationBehaviorGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["statuses"], {})
         async with schema.get_db() as db:
             user = await db_access.get_user(db, device_id_hash=device)
-            state = await guard.get_state(db, user_id=int(user[schema.USER_ID]))
+            user_id = int(user[schema.USER_ID])
+            state = await guard.get_state(db, user_id=user_id)
+            gps = await fresh_claim_guard._get(
+                db, fresh_claim_guard._key(fresh_claim_guard.GPS_PREFIX, user_id)
+            )
         self.assertEqual(state["browser_outside_observations"], 1)
+        self.assertIsInstance(gps, dict)
+        self.assertFalse(gps["first_inside_public_spot"])
+        self.assertTrue(gps["ordinary_presence_before_reward"])
 
     async def test_restriction_does_not_slide_and_consumed_evidence_does_not_rearm(self):
         result = await self.mature()

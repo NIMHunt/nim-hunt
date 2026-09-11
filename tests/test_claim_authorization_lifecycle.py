@@ -235,12 +235,136 @@ class ClaimAuthorizationLifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((called, status), (1, 200))
         async with schema.get_db() as db:
             self.assertIsNone(await claim_security._metadata_get(db, key))
+            gps = await fresh_claim_guard._get(
+                db, fresh_claim_guard._key(fresh_claim_guard.GPS_PREFIX, self.user_id)
+            )
+            activity = await fresh_claim_guard._get(
+                db, fresh_claim_guard._key(fresh_claim_guard.ACTIVITY_PREFIX, self.user_id)
+            )
+            self.assertEqual((gps["last_lat"], gps["last_long"]), (51.5, -0.1))
+            self.assertEqual(activity["first_public_claim_attempt_at"], 1000)
             cur = await db.execute(
                 f"SELECT COUNT(*) AS n FROM {schema.CLAIM_TABLE_NAME}"
             )
             self.assertEqual((await cur.fetchone())["n"], 1)
         called, status, _ = await self._submit(challenge)
         self.assertEqual((called, status), (0, 409))
+
+    async def test_find_spots_anchor_then_signed_claim_does_not_add_evidence(self):
+        async with schema.get_db() as db:
+            await fresh_claim_guard.record_gps_observation(
+                db, user_id=self.user_id, ip=None, lat=51.5, long=-0.1, now=995
+            )
+        challenge, _ = await self._authorization()
+        called, status, _ = await self._submit(challenge)
+        self.assertEqual((called, status), (1, 200))
+        async with schema.get_db() as db:
+            gps = await fresh_claim_guard._get(
+                db, fresh_claim_guard._key(fresh_claim_guard.GPS_PREFIX, self.user_id)
+            )
+        self.assertEqual(int(gps.get("same_ip_contradiction_count") or 0), 0)
+        self.assertEqual(gps["last_observed_at"], 995)
+
+    async def test_signed_own_spot_attempt_does_not_freeze_public_claim_cutoff(self):
+        async with schema.get_db() as db:
+            own_spot_id = await db_access.create_spot(
+                db, created_by=self.user_id, title="Own authorization Spot",
+                lat=20, long=20, radius=100, claim_duration=0,
+                max_claims_per_user=2, max_total_claims=10,
+                total_value=10 * const.MIN_STANDARD_CLAIM_PAYOUT,
+                starts_at=int(time.time()) - 60, ends_at=3600,
+                auto_reverse_geocode=False,
+            )
+            await db.execute(
+                f"UPDATE {schema.SPOT_TABLE_NAME} SET {schema.SPOT_STATUS}=? "
+                f"WHERE {schema.SPOT_ID}=?",
+                (const.SPOT_STATUS_PUBLISHED, own_spot_id),
+            )
+            await db.commit()
+        challenge, _ = await self._authorization(
+            spot_id=own_spot_id, lat=20, long=20
+        )
+        with mock.patch.object(
+            fresh_claim_guard, "public_claim_decision",
+            mock.AsyncMock(return_value={"allowed": False, "reason": "test_stop"}),
+        ):
+            called, status, _ = await self._submit(
+                challenge, spot_id=own_spot_id, lat=20, long=20
+            )
+        self.assertEqual((called, status), (0, 429))
+        async with schema.get_db() as db:
+            activity = await fresh_claim_guard._get(
+                db, fresh_claim_guard._key(
+                    fresh_claim_guard.ACTIVITY_PREFIX, self.user_id
+                ),
+            )
+            gps = await fresh_claim_guard._get(
+                db, fresh_claim_guard._key(fresh_claim_guard.GPS_PREFIX, self.user_id)
+            )
+        self.assertTrue(activity is None or "first_public_claim_attempt_at" not in activity)
+        self.assertFalse(gps["first_inside_public_spot"])
+
+    async def test_unavailable_other_spots_do_not_freeze_public_claim_cutoff(self):
+        now = int(time.time())
+        async with schema.get_db() as db:
+            owner = await db_access.create_user(
+                db, device_id_hash=hashlib.sha256(b"unavailable-owner").hexdigest()
+            )
+            spot_ids = {}
+            for label, starts_at in (
+                ("draft", now - 60),
+                ("expired", now - 7200),
+                ("upcoming", now + 3600),
+                ("cancelling", now - 60),
+                ("full", now - 60),
+            ):
+                spot_ids[label] = await db_access.create_spot(
+                    db, created_by=owner, title=f"Unavailable {label}",
+                    lat=20, long=20, radius=100, claim_duration=0,
+                    max_claims_per_user=2, max_total_claims=1,
+                    total_value=const.MIN_SPOT_TOTAL_VALUE,
+                    starts_at=starts_at, ends_at=3600,
+                    auto_reverse_geocode=False,
+                )
+                if label != "draft":
+                    await db.execute(
+                        f"UPDATE {schema.SPOT_TABLE_NAME} SET {schema.SPOT_STATUS}=? "
+                        f"WHERE {schema.SPOT_ID}=?",
+                        (const.SPOT_STATUS_PUBLISHED, spot_ids[label]),
+                    )
+            await db.execute(
+                f"UPDATE {schema.SPOT_TABLE_NAME} SET {schema.SPOT_CANCELLATION_STARTED_AT}=? "
+                f"WHERE {schema.SPOT_ID}=?", (now, spot_ids["cancelling"]),
+            )
+            full_claim = await db_access.create_claim(
+                db, spot_id=spot_ids["full"], user_id=self.user_id,
+                lat=20, long=20, accuracy=1, payout_address=WALLET_A,
+            )
+            await db_access.set_claim_status_to_success(db, claim_id=full_claim)
+            await db.commit()
+
+        for index, (label, spot_id) in enumerate(spot_ids.items()):
+            with self.subTest(label=label):
+                challenge, _ = await self._authorization(
+                    now=1000 + index, spot_id=spot_id, lat=20, long=20
+                )
+                with mock.patch.object(
+                    fresh_claim_guard, "public_claim_decision",
+                    mock.AsyncMock(return_value={"allowed": False, "reason": "test_stop"}),
+                ):
+                    called, status, _ = await self._submit(
+                        challenge, spot_id=spot_id, lat=20, long=20
+                    )
+                self.assertEqual((called, status), (0, 429))
+                async with schema.get_db() as db:
+                    activity = await fresh_claim_guard._get(
+                        db, fresh_claim_guard._key(
+                            fresh_claim_guard.ACTIVITY_PREFIX, self.user_id
+                        ),
+                    )
+                self.assertTrue(
+                    activity is None or "first_public_claim_attempt_at" not in activity
+                )
 
     async def test_signed_authorization_precedes_behavioral_observation(self):
         import location_behavior_guard

@@ -1042,7 +1042,6 @@ function eventStartedOnInteractiveElement(event) {
 
 async function refreshClaimStatusesForSpots(spots) {
     state.claimStatusBySpotId = new Map();
-    if (!Array.isArray(spots) || spots.length <= 0) return;
 
     await identifyReportUser();
     if (!state.user) return;
@@ -1053,7 +1052,8 @@ async function refreshClaimStatusesForSpots(spots) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 ...claimAuthPayload(),
-                spot_ids: spots.map((spot) => Number(spot.id)).filter(Number.isFinite),
+                spot_ids: (Array.isArray(spots) ? spots : [])
+                    .map((spot) => Number(spot.id)).filter(Number.isFinite),
             }),
         });
 

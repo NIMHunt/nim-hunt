@@ -454,6 +454,25 @@ CLAIM_LOCATION_HARD_BAN_MAX_SPEED_METRES_PER_SECOND = 500
 CLAIM_LOCATION_SOFT_COOLDOWN_MIN_DISTANCE_METRES = 1_000
 CLAIM_LOCATION_SOFT_COOLDOWN_MAX_SPEED_METRES_PER_SECOND = 75
 
+# Find-Spots GPS evidence. A same-IP jump must be both geographically large and
+# faster than the existing impossible-travel soft threshold. It is only a
+# temporary public-claim signal and never an automatic ban.
+CLAIM_SAME_IP_GPS_MIN_DISTANCE_METRES = _env_int(
+    "NIMHUNT_CLAIM_SAME_IP_GPS_MIN_DISTANCE_METRES", 100_000
+)
+CLAIM_SAME_IP_GPS_MAX_SPEED_METRES_PER_SECOND = _env_int(
+    "NIMHUNT_CLAIM_SAME_IP_GPS_MAX_SPEED_METRES_PER_SECOND", 75
+)
+CLAIM_BEHAVIOURAL_RESTRICTION_SECONDS = _env_int(
+    "NIMHUNT_CLAIM_BEHAVIOURAL_RESTRICTION_SECONDS", 24 * 60 * 60
+)
+CLAIM_GPS_ANCHOR_REFRESH_SECONDS = _env_int(
+    "NIMHUNT_CLAIM_GPS_ANCHOR_REFRESH_SECONDS", 60 * 60
+)
+CLAIM_GPS_ANCHOR_MIN_MOVEMENT_METRES = _env_int(
+    "NIMHUNT_CLAIM_GPS_ANCHOR_MIN_MOVEMENT_METRES", 1_000
+)
+
 # Fresh-account claim safeguards. These values remain server-side: clients only
 # receive a deliberately generic temporary-unavailability message.
 CLAIM_IDENTITY_TRUST_AGE_SECONDS = _env_int(

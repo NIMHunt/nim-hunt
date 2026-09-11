@@ -2009,8 +2009,8 @@ async def can_publish_spot(db, *, spot_id: int) -> bool:
     return True
 
 
-async def is_spot_claim_capacity_available(db, *, spot_id: int) -> bool:
-    """Return whether the SPOT has capacity for another claim/entry.
+def spot_summary_has_public_claim_capacity(summary: RowDict) -> bool:
+    """Return whether an aggregate public row has general reward capacity.
 
     Standard spots count successful claims against max_total_claims. Pending
     duration claims may exist while rewards are still available, but once the
@@ -2021,12 +2021,8 @@ async def is_spot_claim_capacity_available(db, *, spot_id: int) -> bool:
     participation action, so pending entries count as participants until future
     draw settlement resolves them.
     """
-    summary = await get_spot_owner_summary(db, spot_id=spot_id)
-    if not summary:
-        return False
-
     max_total = int(summary[schema.SPOT_MAX_TOTAL_CLAIMS])
-    spot_is_prizedraw = await is_prizedraw(db, spot_id=spot_id)
+    spot_is_prizedraw = summary.get(schema.PRIZEDRAW_PRIZE_COUNT) is not None
     counted_claims = int(summary.get("success_claim_count", 0))
     if spot_is_prizedraw:
         counted_claims += int(summary.get("pending_claim_count", 0))
@@ -2040,6 +2036,12 @@ async def is_spot_claim_capacity_available(db, *, spot_id: int) -> bool:
         return False
 
     return True
+
+
+async def is_spot_claim_capacity_available(db, *, spot_id: int) -> bool:
+    """Return whether the SPOT has capacity for another claim/entry."""
+    summary = await get_spot_owner_summary(db, spot_id=spot_id)
+    return bool(summary and spot_summary_has_public_claim_capacity(summary))
 
 
 async def is_spot_currently_claimable(db, *, spot_id: int) -> bool:

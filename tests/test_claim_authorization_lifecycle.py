@@ -222,12 +222,35 @@ class ClaimAuthorizationLifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((called, status), (1, 200))
         async with schema.get_db() as db:
             self.assertIsNone(await claim_security._metadata_get(db, key))
+            gps = await fresh_claim_guard._get(
+                db, fresh_claim_guard._key(fresh_claim_guard.GPS_PREFIX, self.user_id)
+            )
+            activity = await fresh_claim_guard._get(
+                db, fresh_claim_guard._key(fresh_claim_guard.ACTIVITY_PREFIX, self.user_id)
+            )
+            self.assertEqual((gps["last_lat"], gps["last_long"]), (51.5, -0.1))
+            self.assertEqual(activity["first_public_claim_attempt_at"], 1000)
             cur = await db.execute(
                 f"SELECT COUNT(*) AS n FROM {schema.CLAIM_TABLE_NAME}"
             )
             self.assertEqual((await cur.fetchone())["n"], 1)
         called, status, _ = await self._submit(challenge)
         self.assertEqual((called, status), (0, 409))
+
+    async def test_find_spots_anchor_then_signed_claim_does_not_add_evidence(self):
+        async with schema.get_db() as db:
+            await fresh_claim_guard.record_gps_observation(
+                db, user_id=self.user_id, ip=None, lat=51.5, long=-0.1, now=995
+            )
+        challenge, _ = await self._authorization()
+        called, status, _ = await self._submit(challenge)
+        self.assertEqual((called, status), (1, 200))
+        async with schema.get_db() as db:
+            gps = await fresh_claim_guard._get(
+                db, fresh_claim_guard._key(fresh_claim_guard.GPS_PREFIX, self.user_id)
+            )
+        self.assertEqual(int(gps.get("same_ip_contradiction_count") or 0), 0)
+        self.assertEqual(gps["last_observed_at"], 995)
 
     async def test_wallet_change_rejects_before_claim(self):
         challenge, _ = await self._authorization()

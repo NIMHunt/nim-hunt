@@ -466,6 +466,12 @@ CLAIM_SAME_IP_GPS_MAX_SPEED_METRES_PER_SECOND = _env_int(
 CLAIM_BEHAVIOURAL_RESTRICTION_SECONDS = _env_int(
     "NIMHUNT_CLAIM_BEHAVIOURAL_RESTRICTION_SECONDS", 24 * 60 * 60
 )
+CLAIM_GPS_ANCHOR_REFRESH_SECONDS = _env_int(
+    "NIMHUNT_CLAIM_GPS_ANCHOR_REFRESH_SECONDS", 60 * 60
+)
+CLAIM_GPS_ANCHOR_MIN_MOVEMENT_METRES = _env_int(
+    "NIMHUNT_CLAIM_GPS_ANCHOR_MIN_MOVEMENT_METRES", 1_000
+)
 
 # Fresh-account claim safeguards. These values remain server-side: clients only
 # receive a deliberately generic temporary-unavailability message.

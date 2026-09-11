@@ -1765,10 +1765,8 @@ def _claim_kind_for_spot(spot: dict[str, Any], *, allowed: bool) -> str:
 
 @router.post("/api/spots/claim-status")
 async def spots_claim_status_api(payload: ClaimStatusRequest, request: Request) -> JSONResponse:
-    """Return current-user claim state for visible Find Spots entries."""
+    """Record Find Spots presence and return claim state for visible entries."""
     ids = [int(v) for v in payload.spot_ids[:500] if int(v) > 0]
-    if not ids:
-        return JSONResponse({"ok": True, "statuses": {}})
 
     async with get_db() as db:
         user, meta, http_status = await _identify_private_page_user(db, payload)

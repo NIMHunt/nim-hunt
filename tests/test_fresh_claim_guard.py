@@ -114,6 +114,16 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
         state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
         self.assertTrue(state["ordinary_presence_before_reward"])
         self.assertEqual(state["same_ip_contradiction_count"], 1)
+        self.assertNotIn("restricted_until", state)
+        with mock.patch.object(guard, "_inside_active_public_spot",
+                               mock.AsyncMock(return_value=False)):
+            second = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=-40, long=-40,
+                now=self.now + 8 * 3600 + 2)
+        self.assertTrue(second["contradiction"])
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertGreater(state["restricted_until"], self.now)
+        self.assertEqual((state["last_lat"], state["last_long"]), (-40.0, -40.0))
 
     async def test_first_inside_and_shared_ip_are_user_scoped(self):
         other = await db_access.create_user(
@@ -131,6 +141,16 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
         self.assertFalse(first["contradiction"] or other_first["contradiction"])
         user = await db_access.get_user_by_id(self.db, user_id=self.user_id)
         self.assertEqual(user[schema.USER_STATUS], const.USER_STATUS_ACTIVE)
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertNotIn("restricted_until", state)
+        with mock.patch.object(guard, "_inside_active_public_spot",
+                               mock.AsyncMock(return_value=False)):
+            contradiction = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=-40, long=-40,
+                now=self.now + 1)
+        self.assertTrue(contradiction["contradiction"])
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertGreater(state["restricted_until"], self.now)
 
     async def test_concurrent_identical_jump_counts_once(self):
         with mock.patch.object(guard, "_inside_active_public_spot",
@@ -180,6 +200,70 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
         state = await guard._get(self.db, key)
         self.assertEqual(state["last_result"], "provider_unreliable")
         self.assertEqual(state["mismatch_count"], 1)
+        self.now += 1
+        again = await self.location()
+        self.assertTrue(again["allowed"])
+        self.assertEqual(provider.await_count, 2)
+
+    async def test_first_claim_cutoff_prevents_later_activity_rehabilitation(self):
+        await self.db.execute(
+            f"UPDATE {schema.USER_TABLE_NAME} SET {schema.USER_CREATED_AT}=? WHERE {schema.USER_ID}=?",
+            (self.now - 31 * 86400, self.user_id))
+        await self.db.commit()
+        cutoff = await guard.record_first_public_claim_attempt(
+            self.db, user_id=self.user_id, now=self.now)
+        await guard.record_meaningful_activity(
+            self.db, user_id=self.user_id, now=self.now + 86400)
+        await guard.record_meaningful_activity(
+            self.db, user_id=self.user_id, now=self.now + 2 * 86400)
+        self.assertEqual(await guard.record_first_public_claim_attempt(
+            self.db, user_id=self.user_id, now=self.now + 3 * 86400), cutoff)
+        user = await db_access.get_user_by_id(self.db, user_id=self.user_id)
+        rpc = mock.AsyncMock(return_value={"data": []})
+        with mock.patch.object(guard.trans_updater, "get_chain_transactions_by_address", rpc):
+            result = await guard.signer_or_account_trusted(
+                self.db, user=user, signer_address=self.address,
+                now=self.now + 4 * 86400)
+        self.assertFalse(result["trusted"])
+
+    async def test_first_claim_cutoff_preserves_independent_old_signer_route(self):
+        await self.db.execute(
+            f"UPDATE {schema.USER_TABLE_NAME} SET {schema.USER_CREATED_AT}=? WHERE {schema.USER_ID}=?",
+            (self.now - 31 * 86400, self.user_id))
+        await self.db.commit()
+        await guard.record_first_public_claim_attempt(
+            self.db, user_id=self.user_id, now=self.now)
+        user = await db_access.get_user_by_id(self.db, user_id=self.user_id)
+        with mock.patch.object(
+            guard.trans_updater, "get_chain_transactions_by_address",
+            mock.AsyncMock(return_value={"data": [self.tx(40 * 86400)]}),
+        ):
+            result = await guard.signer_or_account_trusted(
+                self.db, user=user, signer_address=self.address, now=self.now)
+        self.assertTrue(result["trusted"])
+
+    async def test_concurrent_first_claim_cutoff_is_immutable(self):
+        async def mark(value):
+            async with schema.get_db() as connection:
+                return await guard.record_first_public_claim_attempt(
+                    connection, user_id=self.user_id, now=value)
+        results = await asyncio.gather(mark(self.now), mark(self.now + 10))
+        self.assertEqual(results[0], results[1])
+        self.assertIn(results[0], {self.now, self.now + 10})
+
+    async def test_ordinary_polling_does_not_rewrite_unchanged_anchor(self):
+        with mock.patch.object(guard, "_inside_active_public_spot",
+                               mock.AsyncMock(return_value=False)):
+            await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8",
+                lat=12.34567, long=23.45678, now=self.now)
+            changes = self.db.total_changes
+            await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8",
+                lat=12.34568, long=23.45679, now=self.now + 10)
+        self.assertEqual(self.db.total_changes, changes)
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertEqual((state["last_lat"], state["last_long"]), (12.346, 23.457))
 
     async def test_history_failure_is_not_cached_as_no_history(self):
         rpc = mock.AsyncMock(side_effect=[RuntimeError("offline"),

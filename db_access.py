@@ -539,20 +539,81 @@ async def _generate_unique_spot_link(db, *, byte_count: int = 8) -> str:
 
 
 async def _next_spot_deposit_key_index(db) -> int:
-    """Return the next unused SPOT deposit-key index.
-
-    Call this inside the same transaction that inserts the SPOT. SQLite has a
-    single writer, so MAX()+1 is sufficient for this app once wrapped in the
-    existing transaction() helper.
-    """
+    """Allocate from the one durable monotonic Spot deposit-key sequence."""
+    await db.execute(
+        f"""
+        INSERT OR IGNORE INTO {schema.APP_METADATA_TABLE_NAME}
+            ({schema.APP_METADATA_KEY}, {schema.APP_METADATA_VALUE})
+        SELECT ?, CAST(COALESCE(MAX({schema.SPOT_DEPOSIT_KEY_INDEX}), -1) + 1 AS TEXT)
+        FROM {schema.SPOT_TABLE_NAME};
+        """,
+        (schema.METADATA_NEXT_SPOT_DEPOSIT_KEY_INDEX,),
+    )
     cur = await db.execute(
         f"""
-        SELECT COALESCE(MAX({schema.SPOT_DEPOSIT_KEY_INDEX}), -1) + 1 AS next_index
-        FROM {schema.SPOT_TABLE_NAME};
-        """
+        UPDATE {schema.APP_METADATA_TABLE_NAME}
+        SET {schema.APP_METADATA_VALUE} = CAST({schema.APP_METADATA_VALUE} AS INTEGER) + 1
+        WHERE {schema.APP_METADATA_KEY} = ?
+        RETURNING CAST({schema.APP_METADATA_VALUE} AS INTEGER) - 1 AS next_index;
+        """,
+        (schema.METADATA_NEXT_SPOT_DEPOSIT_KEY_INDEX,),
     )
     row = await cur.fetchone()
     return int(row["next_index"] or 0)
+
+
+async def reserve_draft_creation(db, *, user_id: int, now: int | None = None) -> RowDict | None:
+    """Reserve rolling capacity and one never-reused deposit key index.
+
+    The caller must hold an IMMEDIATE transaction. Stale pending work is
+    removed at its own threshold; consumed work remains for the full window.
+    """
+    now = await get_unixepoch(db) if now is None else int(now)
+    window_start = now - int(const.DRAFT_CREATION_WINDOW_SECONDS)
+    stale_start = now - int(const.DRAFT_RESERVATION_STALE_SECONDS)
+    await db.execute(
+        f"""
+        DELETE FROM {schema.DRAFT_CREATION_ADMISSION_TABLE_NAME}
+        WHERE ({schema.DRAFT_CREATION_ADMISSION_STATUS} = ?
+               AND {schema.DRAFT_CREATION_ADMISSION_CREATED_AT} <= ?)
+           OR ({schema.DRAFT_CREATION_ADMISSION_STATUS} = ?
+               AND {schema.DRAFT_CREATION_ADMISSION_CREATED_AT} <= ?);
+        """,
+        (schema.DRAFT_ADMISSION_PENDING, stale_start,
+         schema.DRAFT_ADMISSION_CONSUMED, window_start),
+    )
+    cur = await db.execute(
+        f"""SELECT COUNT(*) AS total,
+                    SUM(CASE WHEN {schema.DRAFT_CREATION_ADMISSION_USER_ID} = ? THEN 1 ELSE 0 END) AS user_total
+             FROM {schema.DRAFT_CREATION_ADMISSION_TABLE_NAME};""",
+        (int(user_id),),
+    )
+    counts = await cur.fetchone()
+    if (int(counts["total"] or 0) >= int(const.DRAFT_CREATION_GLOBAL_LIMIT)
+            or int(counts["user_total"] or 0) >= int(const.DRAFT_CREATION_LIMIT_PER_USER)):
+        return None
+    key_index = await _next_spot_deposit_key_index(db)
+    cur = await db.execute(
+        f"""INSERT INTO {schema.DRAFT_CREATION_ADMISSION_TABLE_NAME}
+            ({schema.DRAFT_CREATION_ADMISSION_USER_ID}, {schema.DRAFT_CREATION_ADMISSION_KEY_INDEX},
+             {schema.DRAFT_CREATION_ADMISSION_STATUS}, {schema.DRAFT_CREATION_ADMISSION_CREATED_AT})
+            VALUES (?, ?, ?, ?);""",
+        (int(user_id), key_index, schema.DRAFT_ADMISSION_PENDING, now),
+    )
+    return {"id": int(cur.lastrowid), "user_id": int(user_id), "deposit_key_index": key_index}
+
+
+async def consume_draft_creation(db, *, reservation_id: int, user_id: int) -> None:
+    cur = await db.execute(
+        f"""UPDATE {schema.DRAFT_CREATION_ADMISSION_TABLE_NAME}
+            SET {schema.DRAFT_CREATION_ADMISSION_STATUS} = ?,
+                {schema.DRAFT_CREATION_ADMISSION_CONSUMED_AT} = unixepoch()
+            WHERE {schema.DRAFT_CREATION_ADMISSION_ID} = ?
+              AND {schema.DRAFT_CREATION_ADMISSION_USER_ID} = ?
+              AND {schema.DRAFT_CREATION_ADMISSION_STATUS} = ?;""",
+        (schema.DRAFT_ADMISSION_CONSUMED, int(reservation_id), int(user_id), schema.DRAFT_ADMISSION_PENDING),
+    )
+    _require_one(cur.rowcount, "Draft-creation reservation is no longer pending")
 
 
 async def _generate_unique_spot_deposit_record(db):
@@ -854,6 +915,7 @@ async def create_spot(
     geohash_precision: int = GEOHASH_DEFAULT_PRECISION,
     place_resolver: PlaceResolver | None = None,
     auto_reverse_geocode: bool = True,
+    deposit_record: Any | None = None,
 ) -> int:
     """Create a DRAFT SPOT and return its id.
 
@@ -906,7 +968,7 @@ async def create_spot(
         country = _clean_optional_text(country)
 
     link = _clean_optional_text(link) or await _generate_unique_spot_link(db)
-    deposit_record = await _generate_unique_spot_deposit_record(db)
+    deposit_record = deposit_record or await _generate_unique_spot_deposit_record(db)
     creation_fee = configured_spot_creation_fee(is_prizedraw=bool(is_prizedraw))
     creation_fee_address = str(
         getattr(const, "SPOT_FEE_ADDRESS", "") or ""
@@ -2080,6 +2142,7 @@ async def create_prizedraw(
     geohash_precision: int = GEOHASH_DEFAULT_PRECISION,
     place_resolver: PlaceResolver | None = None,
     auto_reverse_geocode: bool = True,
+    deposit_record: Any | None = None,
 ) -> int:
     """Create a DRAFT PRIZEDRAW SPOT and return the SPOT id.
 
@@ -2129,6 +2192,7 @@ async def create_prizedraw(
         geohash_precision=geohash_precision,
         place_resolver=place_resolver,
         auto_reverse_geocode=auto_reverse_geocode,
+        deposit_record=deposit_record,
     )
     await db.execute(
         f"""

@@ -2,15 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
 import threading
 import time
 import unittest
 from unittest import mock
 
+import constants as const
+import database as schema
+import db_access
+import draft_creation
 import main
 import public_html
 import request_body_limit
 import social_preview
+from spot_duplicate import duplicate_owned_spot_as_draft
 
 
 def _scope(*, content_length: int | None = None, path: str = "/api/test") -> dict:
@@ -205,6 +211,125 @@ class PublicTransactionHealthTest(unittest.IsolatedAsyncioTestCase):
         ):
             response = await main.transaction_healthz()
         self.assertEqual(json.loads(response.body), {"ok": True})
+
+
+class DraftCreationAdmissionTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        draft_creation._derivation_semaphore = asyncio.Semaphore(
+            const.DRAFT_DERIVATION_MAX_CONCURRENCY
+        )
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db")
+        self.old_path = schema.DB_PATH
+        schema.DB_PATH = self.tmp.name
+        await schema.init_db()
+        async with schema.get_db() as db:
+            self.user_id = await db_access.create_user(db, device_id_hash="d" * 64)
+            await db.commit()
+
+    async def asyncTearDown(self):
+        schema.DB_PATH = self.old_path
+        self.tmp.close()
+
+    async def test_stale_pending_is_reclaimed_but_consumed_is_counted_and_indexes_burn(self):
+        with (
+            mock.patch.object(const, "DRAFT_CREATION_WINDOW_SECONDS", 100),
+            mock.patch.object(const, "DRAFT_RESERVATION_STALE_SECONDS", 10),
+            mock.patch.object(const, "DRAFT_CREATION_LIMIT_PER_USER", 2),
+        ):
+            async with schema.get_db() as db:
+                async with db_access.transaction(db, immediate=True):
+                    stale = await db_access.reserve_draft_creation(db, user_id=self.user_id, now=100)
+                async with db_access.transaction(db, immediate=True):
+                    consumed = await db_access.reserve_draft_creation(db, user_id=self.user_id, now=101)
+                    await db_access.consume_draft_creation(db, reservation_id=consumed["id"], user_id=self.user_id)
+                async with db_access.transaction(db, immediate=True):
+                    replacement = await db_access.reserve_draft_creation(db, user_id=self.user_id, now=111)
+
+            self.assertIsNotNone(replacement)
+            self.assertGreater(replacement["deposit_key_index"], consumed["deposit_key_index"])
+            self.assertGreater(replacement["deposit_key_index"], stale["deposit_key_index"])
+            # The consumed row plus replacement exhaust the allowance; the
+            # stale pending row did not remain counted.
+            async with schema.get_db() as db:
+                async with db_access.transaction(db, immediate=True):
+                    blocked = await db_access.reserve_draft_creation(db, user_id=self.user_id, now=111)
+            self.assertIsNone(blocked)
+
+    async def test_cancelled_waiter_keeps_derivation_slot_until_thread_finishes(self):
+        active = 0
+        maximum = 0
+        lock = threading.Lock()
+
+        def derive(index):
+            nonlocal active, maximum
+            with lock:
+                active += 1
+                maximum = max(maximum, active)
+            time.sleep(0.04)
+            with lock:
+                active -= 1
+            return index
+
+        draft_creation._derivation_semaphore = asyncio.Semaphore(1)
+        with mock.patch.object(draft_creation.wallet, "derive_spot_deposit_address", derive):
+            first = asyncio.create_task(draft_creation.derive_reserved_deposit(1))
+            await asyncio.sleep(0.005)
+            first.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await first
+            await draft_creation.derive_reserved_deposit(2)
+        self.assertEqual(maximum, 1)
+
+    async def test_successful_derivations_remain_counted_when_only_draft_capacity_is_inserted(self):
+        async with schema.get_db() as db:
+            source_id = await db_access.create_spot(
+                db, created_by=self.user_id, title="Duplicate Source"
+            )
+            await db.commit()
+            reservations = []
+            for _ in range(5):
+                async with db_access.transaction(db, immediate=True):
+                    reservations.append(
+                        await db_access.reserve_draft_creation(db, user_id=self.user_id)
+                    )
+
+        records = await asyncio.gather(
+            *(
+                draft_creation.derive_admitted_deposit(
+                    reservation_id=item["id"],
+                    user_id=self.user_id,
+                    key_index=item["deposit_key_index"],
+                )
+                for item in reservations
+            )
+        )
+        async with schema.get_db() as db:
+            async with db_access.transaction(db, immediate=True):
+                await db_access.create_spot(
+                    db,
+                    created_by=self.user_id,
+                    title="Ordinary Winner",
+                    deposit_record=records[0],
+                )
+            async with db_access.transaction(db, immediate=True):
+                await duplicate_owned_spot_as_draft(
+                    db,
+                    source_spot_id=source_id,
+                    user_id=self.user_id,
+                    title="Duplicate Winner",
+                    now=await db_access.get_unixepoch(db),
+                    draft_limit=3,
+                    deposit_record=records[1],
+                )
+            self.assertEqual(
+                await db_access.count_draft_spots_by_user(db, user_id=self.user_id), 3
+            )
+            cur = await db.execute(
+                f"SELECT COUNT(*) AS n FROM {schema.DRAFT_CREATION_ADMISSION_TABLE_NAME} "
+                f"WHERE {schema.DRAFT_CREATION_ADMISSION_STATUS} = ?;",
+                (schema.DRAFT_ADMISSION_CONSUMED,),
+            )
+            self.assertEqual(int((await cur.fetchone())["n"]), 5)
 
 
 if __name__ == "__main__":

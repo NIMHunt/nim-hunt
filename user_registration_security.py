@@ -15,8 +15,14 @@ import database as schema
 import db_access
 
 METADATA_PREFIX = "user_registration_security:recent:"
-SOURCE_HOURLY_LIMIT = int(os.getenv("NIMHUNT_USER_REGISTRATION_SOURCE_HOURLY_LIMIT", "5"))
-SOURCE_DAILY_LIMIT = int(os.getenv("NIMHUNT_USER_REGISTRATION_SOURCE_DAILY_LIMIT", "12"))
+SOURCE_BURST_WINDOW_SECONDS = int(
+    os.getenv("NIMHUNT_USER_REGISTRATION_SOURCE_BURST_WINDOW_SECONDS", str(10 * 60))
+)
+SOURCE_BURST_LIMIT = int(
+    os.getenv("NIMHUNT_USER_REGISTRATION_SOURCE_BURST_LIMIT", "40")
+)
+SOURCE_HOURLY_LIMIT = int(os.getenv("NIMHUNT_USER_REGISTRATION_SOURCE_HOURLY_LIMIT", "120"))
+SOURCE_DAILY_LIMIT = int(os.getenv("NIMHUNT_USER_REGISTRATION_SOURCE_DAILY_LIMIT", "300"))
 GLOBAL_HOURLY_LIMIT = int(os.getenv("NIMHUNT_USER_REGISTRATION_GLOBAL_HOURLY_LIMIT", "500"))
 
 
@@ -66,6 +72,15 @@ async def get_or_create_public_user(
     global_stamps = await _timestamps(db, key=global_key, cutoff=int(now) - 60 * 60)
 
     hourly = [stamp for stamp in source_stamps if stamp > int(now) - 60 * 60]
+    burst = [
+        stamp
+        for stamp in source_stamps
+        if stamp > int(now) - max(1, SOURCE_BURST_WINDOW_SECONDS)
+    ]
+    if len(burst) >= max(1, SOURCE_BURST_LIMIT):
+        raise RegistrationRateLimited(
+            retry_at=min(burst) + max(1, SOURCE_BURST_WINDOW_SECONDS) + 1
+        )
     if len(hourly) >= max(1, SOURCE_HOURLY_LIMIT):
         raise RegistrationRateLimited(retry_at=min(hourly) + 60 * 60 + 1)
     if len(source_stamps) >= max(1, SOURCE_DAILY_LIMIT):

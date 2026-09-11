@@ -185,6 +185,15 @@ SPOT_TITLE_MAX_CHARS = 27
 # Once a draft is published, cancelled, or deleted, it no longer counts.
 MAX_DRAFT_SPOTS_PER_USER = 3
 
+# Durable rolling admission for operations which allocate a fresh Spot deposit
+# identity. This is independent of the simultaneous draft cap: deleting a
+# draft must not turn address derivation into an unbounded resource.
+DRAFT_CREATION_WINDOW_SECONDS = 60 * 60
+DRAFT_RESERVATION_STALE_SECONDS = 5 * 60
+DRAFT_CREATION_LIMIT_PER_USER = 10
+DRAFT_CREATION_GLOBAL_LIMIT = 200
+DRAFT_DERIVATION_MAX_CONCURRENCY = 4
+
 
 # Find Spots map defaults.
 # MAX_MAP_INIT_SPOTS is the target number of nearby spots the initial map view

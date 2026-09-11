@@ -27,7 +27,9 @@ from database import get_db
 ASGIApp = Callable[..., Awaitable[None]]
 
 VERIFY_RATE_LIMIT_PER_IP = int(
-    os.getenv("NIMHUNT_CLAIM_AUTH_VERIFY_RATE_LIMIT_PER_IP", "12")
+    # A venue NAT is not an identity boundary. Keep enough source capacity for
+    # many independently device-limited wallets on ordinary shared Wi-Fi.
+    os.getenv("NIMHUNT_CLAIM_AUTH_VERIFY_RATE_LIMIT_PER_IP", "64")
 )
 VERIFY_RATE_LIMIT_PER_DEVICE = int(
     os.getenv("NIMHUNT_CLAIM_AUTH_VERIFY_RATE_LIMIT_PER_DEVICE", "8")

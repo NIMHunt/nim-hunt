@@ -83,6 +83,41 @@ class UserRegistrationSecurityTest(unittest.IsolatedAsyncioTestCase):
         boundary.assert_awaited_once()
         self.assertNotEqual(boundary.await_args.kwargs.get("source_network_hash"), None)
 
+    async def test_shared_venue_allows_existing_five_then_twenty_new_devices(self):
+        async with schema.get_db() as db:
+            async with db_access.transaction(db, immediate=True):
+                for index in range(25):
+                    _user_id, created = await registration.get_or_create_public_user(
+                        db,
+                        device_id_hash=f"{index:064x}",
+                        source_network_hash="shared-venue",
+                    )
+                    self.assertTrue(created)
+
+    async def test_shared_source_is_bounded_and_existing_user_bypasses_full_bucket(self):
+        first_device = "a" * 64
+        with mock.patch.object(registration, "SOURCE_BURST_LIMIT", 20):
+            async with schema.get_db() as db:
+                async with db_access.transaction(db, immediate=True):
+                    first_id, _ = await registration.get_or_create_public_user(
+                        db, device_id_hash=first_device, source_network_hash="venue"
+                    )
+                    for index in range(1, 20):
+                        await registration.get_or_create_public_user(
+                            db,
+                            device_id_hash=f"{index:064x}",
+                            source_network_hash="venue",
+                        )
+                    with self.assertRaises(registration.RegistrationRateLimited):
+                        await registration.get_or_create_public_user(
+                            db, device_id_hash="f" * 64, source_network_hash="venue"
+                        )
+                    existing_id, created = await registration.get_or_create_public_user(
+                        db, device_id_hash=first_device, source_network_hash="venue"
+                    )
+        self.assertEqual(existing_id, first_id)
+        self.assertFalse(created)
+
 
 if __name__ == "__main__":
     unittest.main()

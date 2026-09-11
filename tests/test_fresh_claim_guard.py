@@ -199,7 +199,7 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
             second = await guard.signer_or_account_trusted(
                 self.db, user=self.user, signer_address=self.address, now=self.now + 86400)
         self.assertTrue(first["trusted"] and second["trusted"])
-        self.assertEqual(rpc.await_count, 1)
+        rpc.assert_awaited_once()
 
     async def test_old_account_without_active_days_does_not_bypass_signer_lookup(self):
         await self.db.execute(
@@ -212,7 +212,7 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
             result = await guard.signer_or_account_trusted(
                 self.db, user=user, signer_address=self.address, now=self.now)
         self.assertFalse(result["trusted"])
-        rpc.assert_awaited_once()
+        self.assertEqual(rpc.await_count, 1)
 
     async def test_old_account_with_two_earlier_active_days_is_trusted(self):
         await self.db.execute(
@@ -638,7 +638,9 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
                 self.db, user_id=self.user_id, signer_address=self.address,
                 spot=spot, ip="8.8.8.8", lat=43.65, long=-79.38)
         self.assertTrue(first["allowed"] and second["allowed"])
-        rpc.assert_awaited_once()
+        # One bounded funding-origin observation plus the signer-age lookup;
+        # both durable caches avoid I/O after reopening.
+        self.assertEqual(rpc.await_count, 2)
         provider.assert_awaited_once()
 
     async def test_stale_mismatch_cannot_overwrite_concurrent_verification(self):

@@ -674,6 +674,14 @@ sent to the provider.
 | `NIMHUNT_IP_GEOLOCATION_TIMEOUT_SECONDS` | `4` | provider and signer-history request timeout |
 | `NIMHUNT_CLAIM_IDENTITY_TRUST_AGE_SECONDS` | `2592000` | required account or oldest confirmed signer-activity age |
 | `NIMHUNT_CLAIM_SIGNER_HISTORY_NEGATIVE_CACHE_SECONDS` | `86400` | maximum negative signer-history cache lifetime |
+| `NIMHUNT_CLAIM_FUNDING_HISTORY_PAGE_SIZE` | `100` | transactions per bounded claimant funding-origin page |
+| `NIMHUNT_CLAIM_FUNDING_HISTORY_MAX_PAGES` | `4` | maximum one-hop claimant history pages before the result is UNKNOWN |
+| `NIMHUNT_CLAIM_FUNDING_SOURCE_SAMPLE_SIZE` | `100` | direct source transactions sampled for service-like suppression |
+| `NIMHUNT_CLAIM_FUNDING_SOURCE_SERVICE_DEGREE` | `50` | sampled distinct-recipient threshold for service-like suppression |
+| `NIMHUNT_CLAIM_FUNDING_CLUSTER_MIN_CLAIMANTS` | `5` | minimum claimant signers for small-source evidence |
+| `NIMHUNT_CLAIM_FUNDING_CLUSTER_WINDOW_SECONDS` | `604800` | maximum first-funding time span for cluster evidence |
+| `NIMHUNT_CLAIM_FUNDING_CLUSTER_MEMBER_LIMIT` | `16` | maximum exact signer-hash members retained per source |
+| `NIMHUNT_CLAIM_FUNDING_CACHE_SECONDS` | `2592000` | stable funding-origin and source-sample cache lifetime |
 | `NIMHUNT_CLAIM_SIGNER_HISTORY_FAILURE_RETRY_SECONDS` | `600` | transient RPC-failure retry cache; distinct from a negative history result |
 | `NIMHUNT_CLAIM_FIRST_LOCATION_MISMATCH_METRES` | `1500000` | minimum uncertainty-adjusted, cross-country mismatch distance |
 | `NIMHUNT_CLAIM_FIRST_LOCATION_COOLDOWN_SECONDS` | `86400` | retry delay after the first independent mismatch |
@@ -684,6 +692,52 @@ post-cooldown mismatch starts the longer restriction, and further mismatches
 continue that restriction while preserving the event count. IP geolocation is
 only a weak heuristic and never permanently bans an account by itself. Existing
 impossible-travel, claim-security, and administrator ban paths remain unchanged.
+
+Funding-origin observation uses only the configured Nimiq RPC. For a claimant
+signer, NimHunt exhausts at most four one-hundred-transaction pages and selects
+the sender of the oldest confirmed, successful, positive-value transfer into a
+basic account. Self-transfers and explicitly contract-originated transfers are
+excluded. If that bounded walk cannot be exhausted, the result is UNKNOWN rather
+than an asserted origin. NimHunt then samples only the candidate source's first
+page; at least fifty distinct successful outgoing recipients makes it
+service-like and suppresses cluster evidence. A full page with narrower
+recipient breadth remains explicitly inconclusive rather than being called a
+service. This is meant to conservatively cover exchanges, faucets, custodians,
+distributions, creator wallets, and other high-degree senders without maintaining
+an address list. Inconclusive breadth retains bounded observations for a later
+classification but cannot contribute to a public-claim restriction.
+
+For a non-service source, at least five claimant signers whose first funding
+falls within seven days creates cluster evidence. Amounts all within ten percent
+create the stronger similar-pattern flag. Neither result bans a user, changes a
+user status, exposes related wallets, nor affects Password Spots. Only the
+stronger flag combined with a recent independent same-IP/GPS contradiction can
+temporarily withhold a public claim. Established signer history still proves
+age; a separate aged-wallet-farming qualification is intentionally deferred
+because the ordinary first-location step is not independent cluster evidence.
+False
+positives remain possible for a small family, migration, or community giveaway,
+which is why a shared funder alone never restricts and service-like membership
+details are bounded to sixteen exact signer hashes. Evidence is monotonic as
+members are added, so creating more claimant wallets cannot make a suspicious
+source appear service-like. If a signer changes sources after exact membership
+has saturated, the old source is marked uncertain and punitive evidence is
+disabled rather than retaining a potentially false ghost member.
+
+New claimant members preserve already-established evidence monotonically, but
+an authoritative timestamp or amount correction for an existing exact member
+replaces the old aggregate with a complete recomputation. A material correction
+after membership saturation instead marks the source uncertain and disables its
+punitive evidence because the exact aggregate can no longer be reconstructed.
+
+The durable observation contains SHA-256 address keys, the first-funding time
+and amount, cache timestamps, bounded hashed claimant membership, and the source
+classification—never raw source/signer addresses or full transaction history.
+Stable observations cache for thirty days; RPC failures and incomplete history
+are a distinct, neutral UNKNOWN state retried after ten minutes. UNKNOWN never
+creates safe or cluster evidence and does not block by itself. All RPC calls
+happen before a short immediate SQLite reconciliation transaction, so
+concurrent misses may duplicate network I/O but merge membership idempotently.
 
 The [Railway public-networking documentation](https://docs.railway.com/guides/public-networking)
 documents its HTTP proxy source range as `100.0.0.0/8`. The Railway launcher

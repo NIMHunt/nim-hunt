@@ -305,6 +305,15 @@ async def _behaviour_allows_public_claim(db, *, user_id: int, now: int) -> bool:
     return not isinstance(state, dict) or int(state.get("restricted_until") or 0) <= now
 
 
+async def _recent_weak_behaviour_anomaly(db, *, user_id: int, now: int) -> bool:
+    """Return one independent, recent anomaly that is insufficient by itself."""
+    state = await _get(db, _key(GPS_PREFIX, user_id))
+    if not isinstance(state, dict) or int(state.get("same_ip_contradiction_count") or 0) < 1:
+        return False
+    observed_at = int(state.get("last_contradiction_at") or 0)
+    return observed_at <= now < observed_at + const.CLAIM_BEHAVIOURAL_RESTRICTION_SECONDS
+
+
 def _transaction_timestamp(tx: dict[str, Any]) -> int | None:
     value = trans_updater._first_chain_scalar_for_keys(tx, {"timestamp", "time"})
     millis = trans_updater._normalise_chain_timestamp_milliseconds(value)
@@ -643,6 +652,17 @@ async def public_claim_decision(db, *, user_id: int, signer_address: str,
     now = await db_access.get_unixepoch(db)
     if not await _behaviour_allows_public_claim(db, user_id=user_id, now=now):
         return {"allowed": False, "reason": "behavioural_temporary_restriction"}
+    # Funding observation is one-hop and never bans. UNKNOWN retains a short
+    # retry cache and contributes no evidence, but is not a claim denial.
+    import wallet_cluster_guard
+    cluster = await wallet_cluster_guard.observe(
+        db, signer_address=signer_address, now=now)
+    # UNKNOWN is deliberately neutral: this optional corroborating observer
+    # must not become a second availability dependency on Nimiq history. The
+    # pre-existing signer-history and location decisions below remain fail-safe.
+    if (cluster["evidence"] and cluster.get("similar_pattern") is True
+            and await _recent_weak_behaviour_anomaly(db, user_id=user_id, now=now)):
+        return {"allowed": False, "reason": "corroborated_temporary_restriction"}
     trust = await signer_or_account_trusted(db, user=user, signer_address=signer_address, now=now)
     if not trust["trusted"]:
         return {"allowed": False, **trust}

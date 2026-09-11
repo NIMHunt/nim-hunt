@@ -35,6 +35,7 @@ import constants as const
 import content_moderation
 import database as schema
 import db_access
+import draft_creation
 import settlement_updater
 import trans_updater
 import user_registration_security
@@ -2629,7 +2630,7 @@ async def create_draft_spot_api(payload: CreateDraftSpotRequest) -> JSONResponse
         )
 
     async with get_db() as db:
-        async with db_access.transaction(db):
+        async with db_access.transaction(db, immediate=True):
             user, meta, http_status = await _creator_api_user_or_response(db, payload)
             if user is None:
                 return JSONResponse(meta, status_code=http_status)
@@ -2651,18 +2652,56 @@ async def create_draft_spot_api(payload: CreateDraftSpotRequest) -> JSONResponse
                     status_code=status.HTTP_409_CONFLICT,
                 )
 
+            reservation = await db_access.reserve_draft_creation(db, user_id=user_id)
+            if reservation is None:
+                return JSONResponse(
+                    {
+                        **meta,
+                        "ok": False,
+                        "code": "draft_creation_rate_limited",
+                        "message": "Too many drafts were created recently. Please try again later.",
+                        "user": _public_user(user),
+                    },
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
+
+        deposit_record = await draft_creation.derive_reserved_deposit(
+            reservation["deposit_key_index"]
+        )
+        async with db_access.transaction(db, immediate=True):
+            # Another request may have filled the simultaneous-draft capacity
+            # while derivation ran outside the writer transaction.
+            draft_count = await db_access.count_draft_spots_by_user(db, user_id=user_id)
+            if draft_count >= draft_limit:
+                return JSONResponse(
+                    {
+                        **meta,
+                        "ok": False,
+                        "code": "draft_limit_reached",
+                        "message": f"You already have {draft_count} draft spots. Publish or delete one before creating another.",
+                        "user": _public_user(user),
+                        "draft_count": draft_count,
+                        "draft_limit": draft_limit,
+                    },
+                    status_code=status.HTTP_409_CONFLICT,
+                )
             if payload.is_prizedraw:
                 spot_id = await db_access.create_prizedraw(
                     db,
                     created_by=user_id,
                     title=payload.title,
+                    deposit_record=deposit_record,
                 )
             else:
                 spot_id = await db_access.create_spot(
                     db,
                     created_by=user_id,
                     title=payload.title,
+                    deposit_record=deposit_record,
                 )
+            await db_access.consume_draft_creation(
+                db, reservation_id=reservation["id"], user_id=user_id
+            )
 
         await _notify_user_cache(db, user_id=user_id)
         spot = await db_access.get_spot_owner_summary(db, spot_id=spot_id)

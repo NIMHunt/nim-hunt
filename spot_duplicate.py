@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 import constants as const
 import database as schema
 import db_access
+import draft_creation
 from database import get_db
 from public_html import (
     CreateDraftSpotRequest,
@@ -97,6 +98,7 @@ async def duplicate_owned_spot_as_draft(
     title: str,
     now: int,
     draft_limit: int,
+    deposit_record=None,
 ) -> int:
     """Create one clean duplicate after ownership and draft-limit checks."""
     source = await db_access.get_spot_owner_summary(
@@ -138,11 +140,13 @@ async def duplicate_owned_spot_as_draft(
         return await db_access.create_prizedraw(
             db,
             created_by=int(user_id),
+            deposit_record=deposit_record,
             **create_kwargs,
         )
     return await db_access.create_spot(
         db,
         created_by=int(user_id),
+        deposit_record=deposit_record,
         **create_kwargs,
     )
 
@@ -178,6 +182,34 @@ async def duplicate_spot_api(
                 draft_limit = int(
                     getattr(const, "MAX_DRAFT_SPOTS_PER_USER", 3)
                 )
+                # Validate ownership/configuration and the existing simultaneous
+                # draft cap before reserving scarce derivation work.
+                source = await db_access.get_spot_owner_summary(db, spot_id=int(spot_id))
+                if source is None:
+                    raise DuplicateSpotError("spot_missing", "This spot could not be found.", status.HTTP_404_NOT_FOUND)
+                if int(source[schema.SPOT_CREATED_BY]) != user_id:
+                    raise DuplicateSpotError("not_owner", "This spot was not created by this device account.", status.HTTP_403_FORBIDDEN)
+                draft_count = await db_access.count_draft_spots_by_user(db, user_id=user_id)
+                if draft_count >= draft_limit:
+                    raise DuplicateSpotError(
+                        "draft_limit_reached",
+                        f"You already have {draft_count} draft spots. Publish or delete one before creating another.",
+                        status.HTTP_409_CONFLICT,
+                        draft_count=draft_count,
+                        draft_limit=draft_limit,
+                    )
+                reservation = await db_access.reserve_draft_creation(db, user_id=user_id)
+                if reservation is None:
+                    raise DuplicateSpotError(
+                        "draft_creation_rate_limited",
+                        "Too many drafts were created recently. Please try again later.",
+                        status.HTTP_429_TOO_MANY_REQUESTS,
+                    )
+
+            deposit_record = await draft_creation.derive_reserved_deposit(
+                reservation["deposit_key_index"]
+            )
+            async with db_access.transaction(db, immediate=True):
                 new_spot_id = await duplicate_owned_spot_as_draft(
                     db,
                     source_spot_id=int(spot_id),
@@ -185,6 +217,10 @@ async def duplicate_spot_api(
                     title=payload.title,
                     now=now,
                     draft_limit=draft_limit,
+                    deposit_record=deposit_record,
+                )
+                await db_access.consume_draft_creation(
+                    db, reservation_id=reservation["id"], user_id=user_id
                 )
         except DuplicateSpotError as exc:
             error = {

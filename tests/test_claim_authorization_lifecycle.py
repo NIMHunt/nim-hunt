@@ -15,6 +15,7 @@ import constants as const
 import database as schema
 import db_access
 import fresh_claim_guard
+import wallet_cluster_guard
 
 WALLET_A = "NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF"
 WALLET_B = "NQ48 LH6Q 7PFD LJYF 7PGB NJXL F8CX GHTJ YEKG"
@@ -71,6 +72,12 @@ class ClaimAuthorizationLifecycleTest(unittest.IsolatedAsyncioTestCase):
                 db,
                 fresh_claim_guard._key(fresh_claim_guard.SIGNER_PREFIX, WALLET_A),
                 {"address": WALLET_A, "trusted": True, "checked_at": 100},
+            )
+            await fresh_claim_guard._set(
+                db,
+                f"{wallet_cluster_guard.ORIGIN_PREFIX}{wallet_cluster_guard._hash(WALLET_A)}",
+                {"result": "observed", "source_hash": None,
+                 "checked_at": 100, "refresh_at": 10_000},
             )
             await db.commit()
 

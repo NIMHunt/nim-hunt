@@ -168,6 +168,45 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
         state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
         self.assertEqual(state["same_ip_contradiction_count"], 1)
 
+    async def test_bad_gps_excursion_then_stable_recovery_is_not_second_strike(self):
+        london = (51.507, -0.128)
+        cairo = (30.044, 31.236)
+        with mock.patch.object(guard, "_inside_active_public_spot",
+                               mock.AsyncMock(return_value=False)):
+            await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8",
+                lat=london[0], long=london[1], now=self.now)
+            first = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8",
+                lat=cairo[0], long=cairo[1], now=self.now + 1)
+            recovered = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8",
+                lat=london[0], long=london[1], now=self.now + 2)
+        self.assertTrue(first["contradiction"])
+        self.assertFalse(recovered["contradiction"])
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertEqual(state["same_ip_contradiction_count"], 1)
+        self.assertNotIn("pending_suspicious_at", state)
+        self.assertNotIn("restricted_until", state)
+        self.assertEqual((state["last_lat"], state["last_long"]), london)
+
+    async def test_third_location_inconsistent_with_stable_and_excursion_is_distinct(self):
+        with mock.patch.object(guard, "_inside_active_public_spot",
+                               mock.AsyncMock(return_value=False)):
+            await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=51.507,
+                long=-0.128, now=self.now)
+            await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=30.044,
+                long=31.236, now=self.now + 1)
+            distinct = await guard.record_gps_observation(
+                self.db, user_id=self.user_id, ip="8.8.8.8", lat=-33.869,
+                long=151.209, now=self.now + 2)
+        self.assertTrue(distinct["contradiction"])
+        state = await guard._get(self.db, guard._key(guard.GPS_PREFIX, self.user_id))
+        self.assertEqual(state["same_ip_contradiction_count"], 2)
+        self.assertGreater(state["restricted_until"], self.now)
+
     async def test_activity_rollout_grandfathers_existing_account(self):
         await self.db.execute(
             f"UPDATE {schema.USER_TABLE_NAME} SET {schema.USER_CREATED_AT}=? WHERE {schema.USER_ID}=?",
@@ -199,11 +238,48 @@ class FreshClaimGuardTests(IsolatedAsyncioTestCase):
         self.assertTrue(shifted["allowed"])
         state = await guard._get(self.db, key)
         self.assertEqual(state["last_result"], "provider_unreliable")
-        self.assertEqual(state["mismatch_count"], 1)
+        self.assertEqual(state["mismatch_count"], 0)
         self.now += 1
         again = await self.location()
         self.assertTrue(again["allowed"])
         self.assertEqual(provider.await_count, 2)
+
+    async def test_unreliable_ip_does_not_bypass_independent_active_restriction(self):
+        key = guard._key(guard.LOCATION_PREFIX, self.user_id)
+        ip_hash = hashlib.sha256(b"8.8.8.8").hexdigest()
+        await guard._set(self.db, key, {
+            "unreliable_ip_hashes": [ip_hash], "mismatch_count": 1,
+            "retry_at": self.now + 600,
+            "restriction_reason": "first_location_mismatch_restriction",
+        })
+        await self.db.commit()
+        provider = mock.AsyncMock()
+        with mock.patch.object(guard, "lookup_ip_location", provider):
+            result = await self.location()
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["reason"], "first_location_mismatch_restriction")
+        provider.assert_not_awaited()
+
+    async def test_new_ip_starts_at_first_mismatch_after_unreliable_evidence_retired(self):
+        provider = mock.AsyncMock(side_effect=[
+            {"latitude": 28.6, "longitude": 77.2, "country_name": "India"},
+            {"latitude": 40.4, "longitude": -3.7, "country_name": "Spain"},
+            {"latitude": 28.6, "longitude": 77.2, "country_name": "India"},
+        ])
+        key = guard._key(guard.LOCATION_PREFIX, self.user_id)
+        with mock.patch.object(guard, "lookup_ip_location", provider):
+            await self.location(ip="8.8.8.8")
+            state = await guard._get(self.db, key)
+            self.now = int(state["retry_at"]) + 1
+            await self.location(ip="8.8.8.8")
+            self.now += 1
+            result = await self.location(ip="1.1.1.1")
+        self.assertFalse(result["allowed"])
+        state = await guard._get(self.db, key)
+        self.assertEqual(state["mismatch_count"], 1)
+        self.assertEqual(
+            state["mismatch_ip_hash"], hashlib.sha256(b"1.1.1.1").hexdigest()
+        )
 
     async def test_first_claim_cutoff_prevents_later_activity_rehabilitation(self):
         await self.db.execute(

@@ -193,25 +193,64 @@ async def record_gps_observation(db, *, user_id: int, ip: str | None,
                           "ordinary_presence_before_reward": not inside})
         previous_at = int(state.get("last_observed_at") or 0)
         contradiction = False
+        state_changed = False
+        pending_continuation = False
         previous_distance = None
         if previous_at:
             previous_distance = db_access.distance_metres(
                 float(state["last_lat"]), float(state["last_long"]), lat, long)
+        pending_at = int(state.get("pending_suspicious_at") or 0)
+        if pending_at and state.get("pending_suspicious_ip_hash") != ip_hash:
+            for field in ("pending_suspicious_at", "pending_suspicious_lat",
+                          "pending_suspicious_long", "pending_suspicious_ip_hash"):
+                state.pop(field, None)
+            pending_at = 0
+            state_changed = True
         if (ip_hash and state.get("last_ip_hash") == ip_hash and previous_at
                 and now >= previous_at):
             distance = float(previous_distance)
             speed = distance / max(1, now - previous_at)
-            contradiction = (
+            contradicts_stable = (
                 distance >= const.CLAIM_SAME_IP_GPS_MIN_DISTANCE_METRES
                 and speed > const.CLAIM_SAME_IP_GPS_MAX_SPEED_METRES_PER_SECOND
             )
+            if pending_at:
+                suspicious_distance = db_access.distance_metres(
+                    float(state["pending_suspicious_lat"]),
+                    float(state["pending_suspicious_long"]), lat, long,
+                )
+                contradicts_suspicious = (
+                    suspicious_distance >= const.CLAIM_SAME_IP_GPS_MIN_DISTANCE_METRES
+                    and suspicious_distance / max(1, now - pending_at)
+                    > const.CLAIM_SAME_IP_GPS_MAX_SPEED_METRES_PER_SECOND
+                )
+                if not contradicts_stable:
+                    # Returning to the stable anchor retires the one bounded bad
+                    # excursion without manufacturing a second contradiction.
+                    for field in ("pending_suspicious_at", "pending_suspicious_lat",
+                                  "pending_suspicious_long", "pending_suspicious_ip_hash"):
+                        state.pop(field, None)
+                    pending_at = 0
+                    state_changed = True
+                elif contradicts_suspicious:
+                    contradiction = True
+                else:
+                    pending_continuation = True
+            elif contradicts_stable:
+                contradiction = True
+
             if contradiction:
-                # Updating the anchor makes an identical retry harmless and the
-                # immediate transaction prevents concurrent double counting.
                 state["same_ip_contradiction_count"] = int(
                     state.get("same_ip_contradiction_count") or 0
                 ) + 1
                 state["last_contradiction_at"] = now
+                if not pending_at:
+                    state.update({
+                        "pending_suspicious_at": now,
+                        "pending_suspicious_lat": round(float(lat), 3),
+                        "pending_suspicious_long": round(float(long), 3),
+                        "pending_suspicious_ip_hash": ip_hash,
+                    })
                 if (int(state["same_ip_contradiction_count"]) >= 2
                         or (bool(state.get("first_inside_public_spot"))
                             and not bool(state.get("ordinary_presence_before_reward")))):
@@ -219,14 +258,28 @@ async def record_gps_observation(db, *, user_id: int, ip: str | None,
                         int(state.get("restricted_until") or 0),
                         now + const.CLAIM_BEHAVIOURAL_RESTRICTION_SECONDS,
                     )
+                # A genuinely distinct second point becomes the new stable
+                # anchor; the old stable + pending pair has served its purpose.
+                if pending_at:
+                    for field in ("pending_suspicious_at", "pending_suspicious_lat",
+                                  "pending_suspicious_long", "pending_suspicious_ip_hash"):
+                        state.pop(field, None)
+                    previous_at = 0
         should_refresh = (
             not previous_at
             or state.get("last_ip_hash") != ip_hash
             or float(previous_distance or 0) >= const.CLAIM_GPS_ANCHOR_MIN_MOVEMENT_METRES
             or now - previous_at >= const.CLAIM_GPS_ANCHOR_REFRESH_SECONDS
             or contradiction
+            or state_changed
         )
-        if now >= previous_at and should_refresh:
+        if pending_continuation:
+            should_refresh = False
+        # Keep the stable anchor on a first contradiction. Identical retries are
+        # therefore compared with both the stable and pending points and dedupe.
+        first_pending_contradiction = contradiction and state.get("pending_suspicious_at") == now
+        if (now >= previous_at and should_refresh and not first_pending_contradiction
+                and not pending_continuation):
             state.update({"last_observed_at": now, "last_lat": round(float(lat), 3),
                           "last_long": round(float(long), 3), "last_ip_hash": ip_hash})
         if should_refresh:
@@ -401,8 +454,6 @@ def _country(value: Any) -> str:
 def _location_state_decision(state: Any, *, now: int) -> dict[str, Any] | None:
     if not isinstance(state, dict):
         return None
-    if state.get("verified_at"):
-        return {"allowed": True, "reason": "first_location_verified"}
     if int(state.get("retry_at") or 0) > now:
         return {
             "allowed": False,
@@ -411,6 +462,8 @@ def _location_state_decision(state: Any, *, now: int) -> dict[str, Any] | None:
                 or "first_location_mismatch_restriction"
             ),
         }
+    if state.get("verified_at"):
+        return {"allowed": True, "reason": "first_location_verified"}
     return None
 
 
@@ -426,6 +479,9 @@ async def first_location_decision(db, *, user: dict[str, Any], ip: str | None,
         return {"allowed": True, "reason": "legacy_account"}
     key = _key(LOCATION_PREFIX, int(user[schema.USER_ID]))
     state = await _get(db, key)
+    existing = _location_state_decision(state, now=now)
+    if existing is not None:
+        return existing
     ip_hash = hashlib.sha256(ip.encode()).hexdigest() if ip else None
     unreliable_hashes = (
         list(state.get("unreliable_ip_hashes", []))
@@ -435,9 +491,6 @@ async def first_location_decision(db, *, user: dict[str, Any], ip: str | None,
         unreliable_hashes.append(state["unreliable_ip_hash"])
     if ip_hash and ip_hash in unreliable_hashes:
         return {"allowed": True, "reason": "ip_geolocation_unreliable"}
-    existing = _location_state_decision(state, now=now)
-    if existing is not None:
-        return existing
     if db.in_transaction:
         raise RuntimeError("IP-geolocation lookup requires a connection outside a transaction")
     lookup_started_at = int(now)
@@ -481,6 +534,9 @@ async def first_location_decision(db, *, user: dict[str, Any], ip: str | None,
         if current_user is None or int(current_user[schema.USER_STATUS]) == const.USER_STATUS_BANNED:
             return {"allowed": False, "reason": "user_not_allowed"}
         current = await _get(db, key)
+        current_decision = _location_state_decision(current, now=now)
+        if current_decision is not None:
+            return current_decision
         current_unreliable = (
             list(current.get("unreliable_ip_hashes", []))
             if isinstance(current, dict) else []
@@ -489,9 +545,6 @@ async def first_location_decision(db, *, user: dict[str, Any], ip: str | None,
             current_unreliable.append(current["unreliable_ip_hash"])
         if outcome.get("ip_hash") in current_unreliable:
             return {"allowed": True, "reason": "ip_geolocation_unreliable"}
-        current_decision = _location_state_decision(current, now=now)
-        if current_decision is not None:
-            return current_decision
         if isinstance(current, dict) and int(current.get("decision_at") or 0) >= lookup_started_at:
             # Another equally/newer lookup completed while this one was in
             # flight. Its durable result is authoritative even if its retry
@@ -516,6 +569,10 @@ async def first_location_decision(db, *, user: dict[str, Any], ip: str | None,
                               "provider_unreliable_at": now,
                               "unreliable_ip_hashes": known_unreliable[-2:]})
                 state.pop("unreliable_ip_hash", None)
+                if state.get("mismatch_ip_hash") == outcome["ip_hash"]:
+                    state["mismatch_count"] = 0
+                    state.pop("mismatch_ip_hash", None)
+                    state.pop("last_mismatch_at", None)
                 state.pop("retry_at", None)
                 state.pop("restriction_reason", None)
                 await _set(db, key, state)
@@ -538,13 +595,17 @@ async def first_location_decision(db, *, user: dict[str, Any], ip: str | None,
                           "restriction_reason": "first_location_provider_unavailable"})
             await _set(db, key, state)
             return {"allowed": False, "reason": "first_location_provider_unavailable"}
-        strikes = int(state.get("mismatch_count") or 0) + 1
+        strikes = (
+            int(state.get("mismatch_count") or 0) + 1
+            if state.get("mismatch_ip_hash") == outcome["ip_hash"] else 1
+        )
         cooldown = (const.CLAIM_FIRST_LOCATION_COOLDOWN_SECONDS if strikes == 1
                     else const.CLAIM_FIRST_LOCATION_SECOND_COOLDOWN_SECONDS)
         state.update({"mismatch_count": strikes, "decision_at": now,
                       "last_result": "blatant_mismatch", "last_mismatch_at": now,
                       "retry_at": now + cooldown,
                       "restriction_reason": "first_location_mismatch_restriction",
+                      "mismatch_ip_hash": outcome["ip_hash"],
                       "ip_country": outcome["ip_country"],
                       "gps_country": outcome["gps_country"],
                       "distance_km": outcome["distance_km"]})

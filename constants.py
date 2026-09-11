@@ -185,6 +185,15 @@ SPOT_TITLE_MAX_CHARS = 27
 # Once a draft is published, cancelled, or deleted, it no longer counts.
 MAX_DRAFT_SPOTS_PER_USER = 3
 
+# Durable rolling admission for public draft creation. Deleted drafts remain in
+# this history until the window expires; the arithmetic prompt is UI friction,
+# not an automation or resource-security boundary.
+DRAFT_CREATION_WINDOW_SECONDS = _env_int("NIMHUNT_DRAFT_CREATION_WINDOW_SECONDS", 60 * 60)
+DRAFT_CREATION_PER_USER_LIMIT = _env_int("NIMHUNT_DRAFT_CREATION_PER_USER_LIMIT", 12)
+DRAFT_CREATION_GLOBAL_LIMIT = _env_int("NIMHUNT_DRAFT_CREATION_GLOBAL_LIMIT", 300)
+DRAFT_DERIVATION_CONCURRENCY = _env_int("NIMHUNT_DRAFT_DERIVATION_CONCURRENCY", 2)
+DRAFT_RESERVATION_STALE_SECONDS = _env_int("NIMHUNT_DRAFT_RESERVATION_STALE_SECONDS", 5 * 60)
+
 
 # Find Spots map defaults.
 # MAX_MAP_INIT_SPOTS is the target number of nearby spots the initial map view

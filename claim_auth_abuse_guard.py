@@ -27,7 +27,7 @@ from database import get_db
 ASGIApp = Callable[..., Awaitable[None]]
 
 VERIFY_RATE_LIMIT_PER_IP = int(
-    os.getenv("NIMHUNT_CLAIM_AUTH_VERIFY_RATE_LIMIT_PER_IP", "12")
+    os.getenv("NIMHUNT_CLAIM_AUTH_VERIFY_RATE_LIMIT_PER_IP", "40")
 )
 VERIFY_RATE_LIMIT_PER_DEVICE = int(
     os.getenv("NIMHUNT_CLAIM_AUTH_VERIFY_RATE_LIMIT_PER_DEVICE", "8")

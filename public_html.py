@@ -35,6 +35,7 @@ import constants as const
 import content_moderation
 import database as schema
 import db_access
+import draft_creation_admission
 import settlement_updater
 import trans_updater
 import user_registration_security
@@ -2617,7 +2618,7 @@ async def create_spot_form_detail_api(spot_id: int, payload: HomeSessionRequest)
 
 @router.post("/api/create-spot/draft")
 async def create_draft_spot_api(payload: CreateDraftSpotRequest) -> JSONResponse:
-    """Create the first-step DRAFT SPOT from title + current creator."""
+    """Create a first-step draft; arithmetic is only lightweight UI friction."""
     if int(payload.captcha_answer) != int(payload.captcha_a) + int(payload.captcha_b):
         return JSONResponse(
             {
@@ -2629,40 +2630,73 @@ async def create_draft_spot_api(payload: CreateDraftSpotRequest) -> JSONResponse
         )
 
     async with get_db() as db:
-        async with db_access.transaction(db):
-            user, meta, http_status = await _creator_api_user_or_response(db, payload)
-            if user is None:
-                return JSONResponse(meta, status_code=http_status)
+        try:
+            async with db_access.transaction(db, immediate=True):
+                user, meta, http_status = await _creator_api_user_or_response(db, payload)
+                if user is None:
+                    return JSONResponse(meta, status_code=http_status)
 
-            user_id = int(user[schema.USER_ID])
-            draft_count = await db_access.count_draft_spots_by_user(db, user_id=user_id)
-            draft_limit = int(getattr(const, "MAX_DRAFT_SPOTS_PER_USER", 3))
-            if draft_count >= draft_limit:
-                return JSONResponse(
-                    {
-                        **meta,
-                        "ok": False,
-                        "code": "draft_limit_reached",
-                        "message": f"You already have {draft_count} draft spots. Publish or delete one before creating another.",
-                        "user": _public_user(user),
-                        "draft_count": draft_count,
-                        "draft_limit": draft_limit,
-                    },
-                    status_code=status.HTTP_409_CONFLICT,
+                user_id = int(user[schema.USER_ID])
+                draft_count = await db_access.count_draft_spots_by_user(db, user_id=user_id)
+                draft_limit = int(getattr(const, "MAX_DRAFT_SPOTS_PER_USER", 3))
+                if draft_count >= draft_limit:
+                    return JSONResponse(
+                        {
+                            **meta,
+                            "ok": False,
+                            "code": "draft_limit_reached",
+                            "message": f"You already have {draft_count} draft spots. Publish or delete one before creating another.",
+                            "user": _public_user(user),
+                            "draft_count": draft_count,
+                            "draft_limit": draft_limit,
+                        },
+                        status_code=status.HTTP_409_CONFLICT,
+                    )
+                reservation_id, key_index = await draft_creation_admission.reserve(
+                    db, user_id=user_id
                 )
+        except draft_creation_admission.DraftAdmissionLimited as exc:
+            return JSONResponse(
+                {"ok": False, "code": exc.code, "message": str(exc), "retry_at": exc.retry_at},
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
 
-            if payload.is_prizedraw:
-                spot_id = await db_access.create_prizedraw(
-                    db,
-                    created_by=user_id,
-                    title=payload.title,
+        # Never hold SQLite's writer reservation while the configured external
+        # address helper runs. The durable row above owns this unique key index.
+        try:
+            deposit_record = await draft_creation_admission.derive(key_index=key_index)
+        except Exception:
+            async with db_access.transaction(db, immediate=True):
+                await draft_creation_admission.release(
+                    db, reservation_id=reservation_id, user_id=user_id
                 )
-            else:
-                spot_id = await db_access.create_spot(
-                    db,
-                    created_by=user_id,
-                    title=payload.title,
+            raise
+
+        try:
+            async with db_access.transaction(db, immediate=True):
+                if payload.is_prizedraw:
+                    spot_id = await db_access.create_prizedraw(
+                        db,
+                        created_by=user_id,
+                        title=payload.title,
+                        deposit_record=deposit_record,
+                    )
+                else:
+                    spot_id = await db_access.create_spot(
+                        db,
+                        created_by=user_id,
+                        title=payload.title,
+                        deposit_record=deposit_record,
+                    )
+                await draft_creation_admission.consume(
+                    db, reservation_id=reservation_id, user_id=user_id
                 )
+        except Exception:
+            async with db_access.transaction(db, immediate=True):
+                await draft_creation_admission.release(
+                    db, reservation_id=reservation_id, user_id=user_id
+                )
+            raise
 
         await _notify_user_cache(db, user_id=user_id)
         spot = await db_access.get_spot_owner_summary(db, spot_id=spot_id)

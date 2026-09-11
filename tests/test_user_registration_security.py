@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from unittest import mock
@@ -82,6 +83,67 @@ class UserRegistrationSecurityTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 429)
         boundary.assert_awaited_once()
         self.assertNotEqual(boundary.await_args.kwargs.get("source_network_hash"), None)
+
+    async def test_venue_preburst_then_twenty_devices_can_register(self):
+        async with schema.get_db() as db:
+            async with db_access.transaction(db, immediate=True):
+                ids = []
+                for index in range(25):  # five hostile, then twenty attendees
+                    user_id, created = await registration.get_or_create_public_user(
+                        db,
+                        device_id_hash=f"{index:064x}",
+                        source_network_hash="shared-venue",
+                    )
+                    self.assertTrue(created)
+                    ids.append(user_id)
+        self.assertEqual(len(set(ids)), 25)
+
+    async def test_source_ceiling_is_durable_but_existing_user_still_works(self):
+        with (
+            mock.patch.object(registration, "SOURCE_BURST_LIMIT", 3),
+            mock.patch.object(registration, "SOURCE_HOURLY_LIMIT", 3),
+        ):
+            async with schema.get_db() as db:
+                async with db_access.transaction(db, immediate=True):
+                    for index in range(3):
+                        await registration.get_or_create_public_user(
+                            db, device_id_hash=f"{index:064x}", source_network_hash="venue"
+                        )
+                    with self.assertRaises(registration.RegistrationRateLimited):
+                        await registration.get_or_create_public_user(
+                            db, device_id_hash="f" * 64, source_network_hash="venue"
+                        )
+                    existing, created = await registration.get_or_create_public_user(
+                        db, device_id_hash=f"{0:064x}", source_network_hash="venue"
+                    )
+        self.assertGreater(existing, 0)
+        self.assertFalse(created)
+
+    async def test_twenty_devices_can_complete_wallet_authentication_on_one_ip(self):
+        request = Request({"type": "http", "method": "POST", "path": "/challenge",
+                           "headers": [], "client": ("198.51.100.8", 1234)})
+        with mock.patch.object(
+            claim_security,
+            "_verify_signature",
+            new=mock.AsyncMock(return_value="NQ45 1KUT 73F7 ADV4 UCT8 TX64 2DE4 CHBP SJBF"),
+        ):
+            for index in range(20):
+                device = f"{index:064x}"
+                response = await claim_security.security_challenge(
+                    claim_security.SecurityDeviceRequest(device_id_hash=device), request
+                )
+                self.assertEqual(response.status_code, 200)
+                challenge_id = json.loads(response.body)["challenge_id"]
+                verified = await claim_security.security_verify(
+                    claim_security.SecurityVerifyRequest(
+                        device_id_hash=device,
+                        challenge_id=challenge_id,
+                        public_key="d" * 64,
+                        signature="e" * 128,
+                    ),
+                    request,
+                )
+                self.assertEqual(verified.status_code, 200)
 
 
 if __name__ == "__main__":

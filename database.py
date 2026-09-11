@@ -77,7 +77,6 @@ CREATE TABLE IF NOT EXISTS {APP_METADATA_TABLE_NAME} (
 );
 """
 
-
 # --------------------------------------
 # Attribute constants for easy access
 # Use these variables instead of literal strings in code.
@@ -156,6 +155,28 @@ USER_INDEX_LAST_SEEN = "idx_user_last_seen"
 USER_INDEX_LAST_SEEN_QUERY = f"""
 CREATE INDEX IF NOT EXISTS {USER_INDEX_LAST_SEEN}
 ON {USER_TABLE_NAME}({USER_LAST_SEEN_AT});
+"""
+
+# Admission rows deliberately outlive deleted drafts for one rolling window.
+DRAFT_ADMISSION_TABLE_NAME = "draft_creation_admission"
+DRAFT_ADMISSION_ID = "id"
+DRAFT_ADMISSION_USER_ID = "user_id"
+DRAFT_ADMISSION_KEY_INDEX = "key_index"
+DRAFT_ADMISSION_STATE = "state"
+DRAFT_ADMISSION_CREATED_AT = "created_at"
+CREATE_DRAFT_ADMISSION_TABLE = f"""
+CREATE TABLE IF NOT EXISTS {DRAFT_ADMISSION_TABLE_NAME} (
+    {DRAFT_ADMISSION_ID} INTEGER PRIMARY KEY AUTOINCREMENT,
+    {DRAFT_ADMISSION_USER_ID} INTEGER NOT NULL,
+    {DRAFT_ADMISSION_KEY_INDEX} INTEGER NOT NULL UNIQUE,
+    {DRAFT_ADMISSION_STATE} TEXT NOT NULL CHECK ({DRAFT_ADMISSION_STATE} IN ('pending', 'consumed')),
+    {DRAFT_ADMISSION_CREATED_AT} INTEGER NOT NULL DEFAULT (unixepoch()),
+    FOREIGN KEY ({DRAFT_ADMISSION_USER_ID}) REFERENCES {USER_TABLE_NAME}({USER_ID})
+);
+CREATE INDEX IF NOT EXISTS idx_draft_admission_user_created
+ON {DRAFT_ADMISSION_TABLE_NAME}({DRAFT_ADMISSION_USER_ID}, {DRAFT_ADMISSION_CREATED_AT});
+CREATE INDEX IF NOT EXISTS idx_draft_admission_created
+ON {DRAFT_ADMISSION_TABLE_NAME}({DRAFT_ADMISSION_CREATED_AT});
 """
 
 
@@ -1685,6 +1706,7 @@ async def init_db():
         await db.executescript(CREATE_USER_TABLE)
         await db.executescript(USER_INDEX_STATUS_QUERY)
         await db.executescript(USER_INDEX_LAST_SEEN_QUERY)
+        await db.executescript(CREATE_DRAFT_ADMISSION_TABLE)
 
 
         await db.executescript(CREATE_SPOT_TABLE)

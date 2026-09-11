@@ -854,6 +854,7 @@ async def create_spot(
     geohash_precision: int = GEOHASH_DEFAULT_PRECISION,
     place_resolver: PlaceResolver | None = None,
     auto_reverse_geocode: bool = True,
+    deposit_record: wallet.DerivedSpotAddress | None = None,
 ) -> int:
     """Create a DRAFT SPOT and return its id.
 
@@ -906,7 +907,7 @@ async def create_spot(
         country = _clean_optional_text(country)
 
     link = _clean_optional_text(link) or await _generate_unique_spot_link(db)
-    deposit_record = await _generate_unique_spot_deposit_record(db)
+    deposit_record = deposit_record or await _generate_unique_spot_deposit_record(db)
     creation_fee = configured_spot_creation_fee(is_prizedraw=bool(is_prizedraw))
     creation_fee_address = str(
         getattr(const, "SPOT_FEE_ADDRESS", "") or ""
@@ -2080,6 +2081,7 @@ async def create_prizedraw(
     geohash_precision: int = GEOHASH_DEFAULT_PRECISION,
     place_resolver: PlaceResolver | None = None,
     auto_reverse_geocode: bool = True,
+    deposit_record: wallet.DerivedSpotAddress | None = None,
 ) -> int:
     """Create a DRAFT PRIZEDRAW SPOT and return the SPOT id.
 
@@ -2129,6 +2131,7 @@ async def create_prizedraw(
         geohash_precision=geohash_precision,
         place_resolver=place_resolver,
         auto_reverse_geocode=auto_reverse_geocode,
+        deposit_record=deposit_record,
     )
     await db.execute(
         f"""

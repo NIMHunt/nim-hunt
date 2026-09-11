@@ -167,7 +167,7 @@ change, and test state transitions before overriding them.
 | `NIMHUNT_USER_REGISTRATION_SOURCE_HOURLY_LIMIT` | `120` | new USERs per source/hour |
 | `NIMHUNT_USER_REGISTRATION_SOURCE_DAILY_LIMIT` | `300` | new USERs per source/rolling day |
 | `NIMHUNT_USER_REGISTRATION_GLOBAL_HOURLY_LIMIT` | `500` | new USERs globally/hour |
-| `NIMHUNT_CLAIM_IDENTITY_TRUST_AGE_SECONDS` | `2592000` | signer-history age considered established |
+| `NIMHUNT_CLAIM_IDENTITY_TRUST_AGE_SECONDS` | `2592000` | required account or oldest confirmed signer-activity age |
 | `NIMHUNT_CLAIM_SIGNER_HISTORY_PAGE_SIZE` | `500` | history records per RPC page |
 | `NIMHUNT_CLAIM_SIGNER_HISTORY_MAX_PAGES` | `100` | maximum signer-history pages |
 | `NIMHUNT_CLAIM_SIGNER_HISTORY_NEGATIVE_CACHE_SECONDS` | `86400` | negative-history cache lifetime |
@@ -184,7 +184,7 @@ change, and test state transitions before overriding them.
 | `NIMHUNT_CLAIM_FUNDING_HISTORY_PAGE_SIZE` | `100` | funding-history records per RPC page |
 | `NIMHUNT_CLAIM_FUNDING_HISTORY_MAX_PAGES` | `4` | maximum funding-history pages |
 | `NIMHUNT_CLAIM_FUNDING_SOURCE_SAMPLE_SIZE` | `100` | sampled funding-source transactions |
-| `NIMHUNT_CLAIM_FUNDING_SOURCE_SERVICE_DEGREE` | `50` | claimant degree treated as service-like |
+| `NIMHUNT_CLAIM_FUNDING_SOURCE_SERVICE_DEGREE` | `50` | sampled distinct-recipient threshold for service-like source suppression |
 | `NIMHUNT_CLAIM_FUNDING_CLUSTER_MIN_CLAIMANTS` | `5` | claimant threshold for corroboration |
 | `NIMHUNT_CLAIM_FUNDING_CLUSTER_WINDOW_SECONDS` | `604800` | funding-cluster observation window |
 | `NIMHUNT_CLAIM_FUNDING_CLUSTER_MEMBER_LIMIT` | `16` | retained members per source |

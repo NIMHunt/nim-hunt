@@ -45,10 +45,47 @@ NimHunt has substantial automated regression coverage but has not received an
 independent security audit. The repository documents its intended modest-use
 scope and operational limitations in `README.md`.
 
+## Architecture and trust model
+
+The current implementation is documented in the developer-facing
+[security architecture and audit map](docs/security-architecture.md). That map
+traces identity, claim authorization, location evidence, settlement, creator
+funding, metadata lifecycle, writer transactions, configuration, Password Spot
+semantics and accepted limitations.
+
+NimHunt trusts verified key control, durable server state and chain-confirmed
+financial facts for the narrow purposes they establish. Device identifiers,
+source networks, browser geolocation, behavioural patterns and wallet-funding
+relationships remain continuity or corroborating evidence. They do not prove a
+unique human or physical presence. Security therefore combines cryptographic
+authorization, explicit weak evidence, financial exposure ceilings, durable
+transactional invariants and bounded resource consumption.
+
+### Decision classes
+
+* Invalid authentication, authorization, capacity, radius or replay facts reject
+  the request immediately.
+* Fresh-account, first-location, behavioural and funding evidence can make Open
+  public claims temporarily unavailable; weak evidence alone is not silently
+  converted into a permanent ban.
+* Impossible-travel escalation can use the existing explicit cooldown/ban state.
+* Missing claim audit, payout-identity mismatch, individual/Open Spot exposure
+  and operator-visible exceptions hold settlement for manual review.
+* Global rolling/daily payout capacity defers settlement until capacity returns.
+
+### Resource security
+
+The outer request-body middleware rejects oversized declared and streaming
+bodies before claim-security buffering. Reverse geocoding is cache-bounded,
+coalesced, concurrency-limited and circuit-broken. Draft creation and duplication
+share durable admission; monotonic deposit indexes are never reused; external
+derivation is bounded and runs outside SQLite writer transactions. Public
+transaction health is intentionally minimal.
+
 ## Claim-abuse containment
 
-Public USER creation uses durable hashed-source-network quotas (five per hour
-and twelve per rolling day by default), plus a generous global hourly ceiling.
+Public USER creation uses durable hashed-source-network quotas (forty per ten-minute burst, 120 per hour,
+and 300 per rolling day by default), plus a generous global hourly ceiling.
 Existing USERs are looked up before either quota is considered. Source network
 is only a registration-abuse signal: shared Wi-Fi, carrier NATs and VPN exits do
 not establish that several claims belong to one person.

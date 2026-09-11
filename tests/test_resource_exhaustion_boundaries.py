@@ -153,29 +153,46 @@ class ReverseGeocodeResourceTest(unittest.IsolatedAsyncioTestCase):
         active = 0
         maximum = 0
         lock = threading.Lock()
+        workers_saturated = threading.Event()
+        release_workers = threading.Event()
 
         def slow(_lat, _long):
             nonlocal active, maximum
             with lock:
                 active += 1
                 maximum = max(maximum, active)
-            time.sleep(0.05)
-            with lock:
-                active -= 1
+                if active == public_html.REVERSE_GEOCODE_MAX_CONCURRENCY:
+                    workers_saturated.set()
+            try:
+                release_workers.wait(timeout=2)
+            finally:
+                with lock:
+                    active -= 1
             return "Recovered", "Country"
 
         with (
             mock.patch.object(public_html, "_reverse_geocode_sync", slow),
             mock.patch.object(public_html, "REVERSE_GEOCODE_CALLER_TIMEOUT_SECONDS", 0.005),
         ):
-            started = time.monotonic()
-            results = await asyncio.gather(*(
-                public_html._derive_place_for_create_map(10 + index, 10 + index)
+            callers = [
+                asyncio.create_task(
+                    public_html._derive_place_for_create_map(10 + index, 10 + index)
+                )
                 for index in range(10)
-            ))
-            self.assertLess(time.monotonic() - started, 0.04)
+            ]
+            self.assertTrue(
+                await asyncio.wait_for(
+                    asyncio.to_thread(workers_saturated.wait, 1), timeout=1.5
+                )
+            )
+            results = await asyncio.wait_for(asyncio.gather(*callers), timeout=1)
             self.assertTrue(all(result == (None, None) for result in results))
-            await asyncio.sleep(0.15)
+            with lock:
+                # Timed-out callers have returned, but their underlying workers
+                # still occupy every provider slot until the work really ends.
+                self.assertEqual(active, public_html.REVERSE_GEOCODE_MAX_CONCURRENCY)
+            release_workers.set()
+            await asyncio.gather(*list(public_html._reverse_geocode_inflight.values()))
         self.assertLessEqual(maximum, public_html.REVERSE_GEOCODE_MAX_CONCURRENCY)
 
     async def test_circuit_opens_uses_fallback_and_later_recovers(self):

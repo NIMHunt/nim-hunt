@@ -39,7 +39,9 @@ retried speculatively.
 The administrator password must be distinct from every Nimiq mnemonic or signing
 secret. Generate its stored `scrypt$...` value with
 `scripts/hash_admin_password.py` and keep the plaintext password in a password
-manager. See `ADMIN.md` for administrator-panel deployment and moderation safety.
+manager. See [`ADMIN.md`](ADMIN.md) for administrator-panel deployment and
+moderation safety, and [`docs/configuration.md`](docs/configuration.md) for the
+deployment variable reference.
 
 NimHunt has substantial automated regression coverage but has not received an
 independent security audit. The repository documents its intended modest-use
@@ -144,7 +146,7 @@ Code-protected Standard Spots are deliberately unchanged: their finite,
 creator-issued, single-use claim codes are an additional admission signal and
 already bound participation to the configured Spot capacity. Prizedraw
 settlement is likewise outside this Open Standard Spot containment rule.
-# Claim authorization boundary
+## Claim authorization boundary
 
 Every new public Standard claim (open or code-protected), Prizedraw entry, and
 duration-claim start is approved with a version 2 Nimiq signed message prepared

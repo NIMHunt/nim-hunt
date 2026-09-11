@@ -1,8 +1,8 @@
 # Security architecture and audit map
 
-This document describes the security architecture as code, not as a claim that
-NimHunt can prove physical presence or personhood. It is the audit index for the
-current layered design introduced through PRs #159–166 and #168.
+This document describes the current security architecture as code, not as a
+claim that NimHunt can prove physical presence or personhood. It is an audit map
+for trust boundaries, module ownership, durable state and transaction ordering.
 
 ## Trust hierarchy
 
@@ -20,47 +20,7 @@ current layered design introduced through PRs #159–166 and #168.
 The final defence is financial blast-radius containment. It remains necessary
 when every heuristic is evaded.
 
-## Before-refactor map and problems found
-
-The pre-refactor runtime was composed in `funding_flow.install()` as a sequence
-of monkey-patches. `claim_security.py` owned routes, device validation, signature
-subprocess execution, JSON metadata mechanics, sessions, authorization state,
-ASGI buffering, cross-identity travel heuristics, event storage, claim audit,
-and the first payout gate. Later modules imported its private functions and
-wrapped or replaced them:
-
-```text
-RequestBodyLimitMiddleware
-  -> claim-security response-delivery wrapper
-    -> verification-abuse wrapper
-      -> claim_security.guard_http_request
-        -> FastAPI claim route
-          -> db_access.create_claim wrappers (travel, wallet limit, binding)
-Settlement -> payout throttle -> claim security -> transaction intent/send
-```
-
-Maintainability findings (not newly discovered vulnerabilities):
-
-* `claim_security.py` was a god module and was treated as a bag of private
-  utilities by six modules.
-* `claim_network_security.install()` mutated two imported functions. Correct IP
-  handling therefore depended on startup order and created a circular import.
-* Three guards independently encoded JSON reads/writes and made different,
-  undocumented choices for malformed values.
-* Names such as “verified location” could be inferred from the signed flow even
-  though the browser assertion is not independently verified.
-* Policy composition still uses monkey-patching. Replacing all of it in one PR
-  would make money-moving ordering harder, rather than easier, to review.
-* Security constants are spread across modules and have mixed unit suffixes.
-  Existing defaults remain unchanged in this refactor.
-* Characterisation was strong around recent individual features but weak at the
-  shared metadata/ASGI primitive boundaries.
-
-No immediate theft, double-send, exposure-limit bypass, or trivial production
-DoS was identified in this audit. The creator-route authentication gap described
-below is an accepted architectural concern, not silently changed here.
-
-## After-refactor ownership and dependency direction
+## Ownership and dependency direction
 
 ```text
 claim_identity       security_metadata       claim_http
@@ -87,8 +47,8 @@ claim_identity       security_metadata       claim_http
   fixed-point location representation.
 * `claim_security.py` remains the explicit authentication/authorization HTTP
   coordinator, claim audit recorder and fail-closed payout-record gate. It keeps
-  compatibility aliases during incremental extraction, but no longer implements
-  cryptographic, generic metadata, ASGI, or source-network primitives.
+  compatibility aliases for established extension and test APIs, but no longer
+  implements cryptographic, generic metadata, ASGI, or source-network primitives.
 * `fresh_claim_guard.py` owns account/signer history, first-location checks and
   meaningful activity. Password Spot exemptions occur here only.
 * `claim_location_guard.py` owns authoritative impossible-travel state at the
@@ -232,19 +192,19 @@ peer, and never trusts arbitrary forwarded chains.
 The exemption is deliberately narrow: possession of a finite creator-issued
 secret changes admission, not authentication, payout identity or settlement.
 
-## Behaviour-preservation matrix
+## Verification map
 
-| Change | Current owner | Characterisation |
+| Boundary | Current owner | Characterisation |
 |---|---|---|
-| #159 global/daily/individual and Open Spot exposure, durable reservation/release accounting | `claim_payout_throttle.py`, `claim_security.py` | `test_claim_payout_throttle.py`, `test_claim_security.py`, `test_financial_finality.py` |
-| #160 signer-derived immutable payout and legacy mismatch hold | `claim_identity.py`, `claim_security_defence_in_depth.py`, `claim_security.py` | `test_claim_payout_identity.py`, `test_find_spots_claim_identity.py`, `test_claim_security_defence_in_depth.py` |
-| #161 canonical short-lived one-time authorization | `claim_authorization.py`, `claim_security.py` | `test_claim_authorization.py`, `test_claim_authorization_lifecycle.py`, `test_claim_security_route_boundary.py` |
-| #162 fresh account/activity and first IP/GPS safeguards | `fresh_claim_guard.py` | `test_fresh_claim_guard.py`, `test_fresh_claim_guard_routes.py` |
-| #163 shared-network-compatible behaviour and continuity | `claim_auth_abuse_guard.py`, `fresh_claim_guard.py`, `claim_security_defence_in_depth.py` | `test_claim_auth_abuse_guard.py`, `test_user_registration_security.py`, `test_claim_security_defence_in_depth.py` |
-| #164 exact-centre, inside-only, reward-targeting and own-Spot exclusion | `location_behavior_guard.py` | `test_location_behavior_guard.py` |
-| #165 bounded conservative funding clusters/service suppression | `wallet_cluster_guard.py` | `test_wallet_cluster_guard.py` |
-| #166 request body, reverse geocode bounds, minimal public health | `request_body_limit.py`, reverse-geocode code in `public_html.py`, diagnostics | `test_request_body_limit.py`, `test_resource_exhaustion_boundaries.py`, `test_transaction_health_endpoint.py` |
-| #168 shared admission, monotonic keys, cancellation-safe derivation and NAT verification | relational admission in `db_access.py`, `draft_creation.py`, create/duplicate routes | `test_resource_exhaustion_boundaries.py`, `test_spot_duplication.py`, `test_claim_auth_abuse_guard.py` |
+| Global/daily/individual and Open Spot exposure, durable reservation/release accounting | `claim_payout_throttle.py`, `claim_security.py` | `test_claim_payout_throttle.py`, `test_claim_security.py`, `test_financial_finality.py` |
+| Signer-derived immutable payout and legacy mismatch hold | `claim_identity.py`, `claim_security_defence_in_depth.py`, `claim_security.py` | `test_claim_payout_identity.py`, `test_find_spots_claim_identity.py`, `test_claim_security_defence_in_depth.py` |
+| Canonical short-lived one-time authorization | `claim_authorization.py`, `claim_security.py` | `test_claim_authorization.py`, `test_claim_authorization_lifecycle.py`, `test_claim_security_route_boundary.py` |
+| Fresh account/activity and first IP/GPS safeguards | `fresh_claim_guard.py` | `test_fresh_claim_guard.py`, `test_fresh_claim_guard_routes.py` |
+| Shared-network-compatible behaviour and continuity | `claim_auth_abuse_guard.py`, `fresh_claim_guard.py`, `claim_security_defence_in_depth.py` | `test_claim_auth_abuse_guard.py`, `test_user_registration_security.py`, `test_claim_security_defence_in_depth.py` |
+| Exact-centre, inside-only, reward-targeting and own-Spot exclusion | `location_behavior_guard.py` | `test_location_behavior_guard.py` |
+| Bounded conservative funding clusters/service suppression | `wallet_cluster_guard.py` | `test_wallet_cluster_guard.py` |
+| Request body, reverse geocode bounds and minimal public health | `request_body_limit.py`, reverse-geocode code in `public_html.py`, diagnostics | `test_resource_exhaustion_boundaries.py`, `test_robustness_guards.py` |
+| Shared draft admission, monotonic keys, cancellation-safe derivation and source-network verification | relational admission in `db_access.py`, `draft_creation.py`, create/duplicate routes | `test_resource_exhaustion_boundaries.py`, `test_spot_duplication.py`, `test_claim_auth_abuse_guard.py` |
 | Shared primitives retain caller transaction and bounded replay semantics | `security_metadata.py`, `claim_http.py`, `claim_identity.py` | `test_security_architecture_primitives.py` |
 
 ## Durable metadata and table inventory
@@ -312,21 +272,25 @@ consistent with its dependent write.
 * **Financial exposure:** payout rolling/daily/individual and Open Spot rolling/
   lifetime settings. Zero lifetime percentage is an intentional emergency hold
   mode; defaults are unchanged.
-* **Resources/external services:** body bytes, IP/reverse geocoder timeout/cache/
-  concurrency, derivation command/concurrency, history page/sample caps.
+* **Resources/external services:** body bytes, IP geolocation, reverse-geocoder
+  limits, derivation commands/concurrency and history page/sample caps.
+
+The complete operator-facing names, defaults and units are in
+[`configuration.md`](configuration.md).
 
 Renaming environment variables or centralising all configuration would risk
 silent deployment drift. A follow-up should add a typed startup snapshot and
 cross-field checks (for example grace >= verifier timeout and positive window
 relationships) with deprecation aliases, rather than change production policy
-inside this extraction.
+inside an unrelated refactor.
 
 ## Creator/private-route session migration design (deferred)
 
 Creator/self routes currently use the device identifier as ownership continuity
 for Create Spot detail/edit/delete, My Spots, My Claims, claim-code retrieval,
 deposit intent/submitted, publish, cancel, duplicate and display-name changes.
-This is substantial and is deliberately not folded into a claim refactor.
+This is substantial and is deliberately deferred rather than folded into an
+unrelated change.
 
 A follow-up should:
 
@@ -346,14 +310,6 @@ A follow-up should:
 7. Ship compatibility telemetry first, then enforcement, with endpoint-level
    tests for cross-device access, expiry, reauthentication and no UX loops.
 
-## Removed compatibility/dead code
-
-This refactor removes only the startup-order proxy-IP mutation and duplicate
-implementations of cryptographic verification, JSON metadata access, and ASGI
-body replay. Compatibility aliases preserve referenced extension/test APIs.
-No legacy financial record, payout identity, HTLC/refund path, key allocator or
-historical claim is reinterpreted or deleted.
-
 ## Remaining concerns and recommended follow-ups
 
 1. Migrate creator/self routes to signed server sessions as designed above.
@@ -362,8 +318,7 @@ historical claim is reinterpreted or deleted.
    preclaim—without changing ordering.
 3. Add duration-heartbeat authorization only after a non-interactive wallet-safe
    protocol and replay model are designed.
-4. Pin/audit the Nimiq SDK and helper dependency versions if deployment does not
-   already enforce the lockfile.
+4. Keep the pinned Nimiq SDK and helper lockfile under periodic dependency audit.
 5. Add operational metrics for metadata creation/cleanup lag, reservations,
    manual-review age, provider circuit state and ambiguous intents.
 6. Consider relational migrations for high-cardinality sessions/authorizations

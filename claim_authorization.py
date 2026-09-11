@@ -2,7 +2,7 @@
 
 A valid signature proves that the receiving wallet authorised the reported
 location. It does not prove the receiving wallet was physically at that
-location. PR #159's exposure limits remain the independent loss boundary.
+location. Independent payout-exposure limits remain the financial loss boundary.
 
 E6 coordinates retain roughly 11 cm precision, comfortably finer than browser
 GPS, while integer centimetres represent accuracy without float formatting.

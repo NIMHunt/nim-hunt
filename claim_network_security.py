@@ -17,8 +17,6 @@ from typing import Any
 
 from fastapi import Request
 
-import claim_security
-
 _INSTALLED = False
 
 
@@ -78,12 +76,15 @@ def scope_ip(scope: dict[str, Any]) -> str:
 
 
 def install() -> None:
-    """Replace claim_security's proxy-IP helpers with Railway-safe versions."""
+    """Retained as an idempotent startup hook for runtime composition.
+
+    Claim security now depends on these helpers directly.  The hook no longer
+    mutates another module after import, which makes source-IP policy auditable
+    without relying on installation order.
+    """
     global _INSTALLED
     if _INSTALLED:
         return
-    claim_security._request_ip = request_ip
-    claim_security._scope_ip = scope_ip
     _INSTALLED = True
 
 

@@ -13,7 +13,6 @@ into an automatic ban.
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 from typing import Any, Awaitable, Callable
@@ -21,6 +20,7 @@ from typing import Any, Awaitable, Callable
 import constants as const
 import database as schema
 import db_access
+import security_metadata
 
 RowDict = dict[str, Any]
 ClaimCreator = Callable[..., Awaitable[int]]
@@ -78,29 +78,17 @@ def _suspicion_key(user_id: int) -> str:
 
 
 async def _load_suspicion(db, *, user_id: int) -> RowDict | None:
-    cur = await db.execute(
-        f"""
-        SELECT {schema.APP_METADATA_VALUE} AS value
-        FROM {schema.APP_METADATA_TABLE_NAME}
-        WHERE {schema.APP_METADATA_KEY} = ?;
-        """,
-        (_suspicion_key(user_id),),
+    value = await security_metadata.get_json(
+        db, _suspicion_key(user_id), delete_malformed=False
     )
-    row = await cur.fetchone()
-    if row is None:
-        return None
-
+    required = {
+        "trusted_claim_id", "suspicious_spot_id", "attempted_at", "retry_at",
+        "last_attempted_spot_id", "last_attempted_at",
+    }
     try:
-        value = json.loads(str(row["value"]))
-        required = {
-            "trusted_claim_id",
-            "suspicious_spot_id",
-            "attempted_at",
-            "retry_at",
-            "last_attempted_spot_id",
-            "last_attempted_at",
-        }
         if not isinstance(value, dict) or not required.issubset(value):
+            if value is None:
+                return None
             raise ValueError("incomplete suspicion marker")
         return {name: int(value[name]) for name in required}
     except (TypeError, ValueError):
@@ -110,29 +98,11 @@ async def _load_suspicion(db, *, user_id: int) -> RowDict | None:
 
 
 async def _save_suspicion(db, *, user_id: int, value: RowDict) -> None:
-    payload = json.dumps(value, separators=(",", ":"), sort_keys=True)
-    await db.execute(
-        f"""
-        INSERT INTO {schema.APP_METADATA_TABLE_NAME} (
-            {schema.APP_METADATA_KEY},
-            {schema.APP_METADATA_VALUE}
-        )
-        VALUES (?, ?)
-        ON CONFLICT ({schema.APP_METADATA_KEY}) DO UPDATE SET
-            {schema.APP_METADATA_VALUE} = excluded.{schema.APP_METADATA_VALUE};
-        """,
-        (_suspicion_key(user_id), payload),
-    )
+    await security_metadata.set_json(db, _suspicion_key(user_id), value)
 
 
 async def _clear_suspicion(db, *, user_id: int) -> None:
-    await db.execute(
-        f"""
-        DELETE FROM {schema.APP_METADATA_TABLE_NAME}
-        WHERE {schema.APP_METADATA_KEY} = ?;
-        """,
-        (_suspicion_key(user_id),),
-    )
+    await security_metadata.delete(db, _suspicion_key(user_id))
 
 
 async def get_claim_location_suspicion(db, *, user_id: int) -> RowDict | None:

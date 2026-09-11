@@ -29,17 +29,13 @@ app_metadata table so the change is additive to the production database.
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
 import json
 import logging
 import math
 import os
 import re
 import secrets
-import subprocess
 from http.cookies import SimpleCookie
-from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, Request, status
@@ -47,12 +43,15 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 import claim_authorization
+import claim_http
+import claim_identity
+import claim_network_security
 import constants as const
 import database as schema
 import db_access
+import security_metadata
 import trans_updater
 import user_registration_security
-import wallet
 from database import get_db
 
 RowDict = dict[str, Any]
@@ -68,7 +67,6 @@ ASGIApp = Callable[
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/security", tags=["claim-security"])
 
-_DEVICE_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _CLAIM_CREATE_RE = re.compile(r"^/api/spot/(?P<spot_id>[1-9][0-9]*)/claim$")
 _CLAIM_PRIVATE_RE = re.compile(
     r"^/api/claim/(?P<claim_id>[1-9][0-9]*)/(?:detail|location)$"
@@ -149,11 +147,6 @@ NEW_IDENTITY_MAX_AGE_SECONDS = _env_int(
     "NIMHUNT_CLAIM_SECURITY_NEW_IDENTITY_MAX_AGE_SECONDS", 60 * 60
 )
 
-_VERIFY_HELPER = (
-    Path(__file__).resolve().parent / "helpers" / "verify_nimiq_message.mjs"
-)
-_NODE_BINARY = os.getenv("NIMHUNT_NIMIQ_NODE_BINARY", "node").strip() or "node"
-
 _ORIGINAL_SUBMIT_CLAIM_REWARD = trans_updater.submit_claim_reward_transaction
 _INSTALLED = False
 
@@ -176,16 +169,17 @@ class ClaimAuthorizationPrepareRequest(SecurityDeviceRequest):
     accuracy: float | None = None
 
 
-def _clean_device_id(value: Any) -> str:
-    clean = str(value or "").strip().lower()
-    if not _DEVICE_ID_RE.fullmatch(clean):
-        raise ValueError("A valid Nimiq Pay device identifier is required.")
-    return clean
-
-
-def _sha256_text(value: str) -> str:
-    return hashlib.sha256(str(value).encode("utf-8")).hexdigest()
-
+# Compatibility aliases keep established tests and extension modules working while
+# making the trust-bearing implementation owners explicit.
+_clean_device_id = claim_identity.clean_device_identifier
+_sha256_text = claim_identity.sha256_text
+_canonical_optional_address = claim_identity.canonical_payout_address
+_verify_signature_sync = claim_identity.verify_wallet_signature_sync
+_verify_signature = claim_identity.verify_wallet_signature
+_metadata_get = security_metadata.get_json
+_metadata_set = security_metadata.set_json
+_metadata_delete = security_metadata.delete
+_rate_limit_bucket = security_metadata.admit_timestamp
 
 def _session_key(token: str) -> str:
     return f"{SESSION_PREFIX}{_sha256_text(token)}"
@@ -255,72 +249,8 @@ async def _retire_claim_authorization(key: str) -> None:
             await _metadata_delete(db, key)
 
 
-def _canonical_optional_address(value: Any) -> str | None:
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    try:
-        return wallet.normalise_nimiq_address(
-            raw,
-            field_name="claim payout address",
-            allow_dev_placeholder=False,
-        )
-    except ValueError:
-        return None
-
-
-async def _metadata_get(db, key: str) -> Any | None:
-    cur = await db.execute(
-        f"SELECT {schema.APP_METADATA_VALUE} AS value "
-        f"FROM {schema.APP_METADATA_TABLE_NAME} "
-        f"WHERE {schema.APP_METADATA_KEY} = ?;",
-        (str(key),),
-    )
-    row = await cur.fetchone()
-    if row is None:
-        return None
-    try:
-        return json.loads(str(row["value"]))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        logger.warning("Discarding malformed claim-security metadata key=%s", key)
-        await _metadata_delete(db, key)
-        return None
-
-
-async def _metadata_set(db, key: str, value: Any) -> None:
-    payload = json.dumps(value, separators=(",", ":"), sort_keys=True)
-    await db.execute(
-        f"""
-        INSERT INTO {schema.APP_METADATA_TABLE_NAME} (
-            {schema.APP_METADATA_KEY}, {schema.APP_METADATA_VALUE}
-        ) VALUES (?, ?)
-        ON CONFLICT ({schema.APP_METADATA_KEY}) DO UPDATE SET
-            {schema.APP_METADATA_VALUE} = excluded.{schema.APP_METADATA_VALUE};
-        """,
-        (str(key), payload),
-    )
-
-
-async def _metadata_delete(db, key: str) -> None:
-    await db.execute(
-        f"DELETE FROM {schema.APP_METADATA_TABLE_NAME} WHERE {schema.APP_METADATA_KEY} = ?;",
-        (str(key),),
-    )
-
-
-def _request_ip(request: Request) -> str:
-    # Uvicorn's trusted-proxy middleware has already resolved Railway's
-    # forwarding chain into request.client. Never parse a raw client header.
-    if request.client and request.client.host:
-        return str(request.client.host)
-    return "unknown"
-
-
-def _scope_ip(scope: dict[str, Any]) -> str:
-    client = scope.get("client")
-    if isinstance(client, (list, tuple)) and client:
-        return str(client[0])
-    return "unknown"
+_request_ip = claim_network_security.request_ip
+_scope_ip = claim_network_security.scope_ip
 
 
 def _ip_hash(value: str) -> str:
@@ -370,87 +300,6 @@ async def _load_session(
         "wallet_address": wallet_address,
     }
 
-
-async def _rate_limit_bucket(
-    db,
-    *,
-    key: str,
-    now: int,
-    window_seconds: int,
-    limit: int,
-) -> tuple[bool, int]:
-    raw = await _metadata_get(db, key)
-    timestamps = []
-    if isinstance(raw, list):
-        for value in raw:
-            try:
-                stamp = int(value)
-            except (TypeError, ValueError):
-                continue
-            if stamp > int(now) - int(window_seconds):
-                timestamps.append(stamp)
-
-    if len(timestamps) >= int(limit):
-        retry_at = min(timestamps) + int(window_seconds) + 1
-        await _metadata_set(db, key, timestamps[-int(limit) :])
-        return False, retry_at
-
-    timestamps.append(int(now))
-    await _metadata_set(db, key, timestamps[-int(limit) :])
-    return True, int(now)
-
-
-def _verify_signature_sync(*, message: str, public_key: str, signature: str) -> str:
-    if not _VERIFY_HELPER.exists():
-        raise RuntimeError("Nimiq authentication verifier is missing")
-    payload = {
-        "message": str(message),
-        "public_key": str(public_key),
-        "signature": str(signature),
-    }
-    try:
-        completed = subprocess.run(
-            [_NODE_BINARY, str(_VERIFY_HELPER)],
-            input=json.dumps(payload),
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=10,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError("Nimiq authentication verifier is unavailable") from exc
-
-    try:
-        result = json.loads((completed.stdout or "{}").strip())
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            "Nimiq authentication verifier returned invalid JSON"
-        ) from exc
-
-    if (
-        completed.returncode != 0
-        or not isinstance(result, dict)
-        or result.get("ok") is False
-    ):
-        message_text = "Invalid Nimiq authentication signature"
-        if isinstance(result, dict) and result.get("message"):
-            message_text = str(result["message"])
-        raise ValueError(message_text)
-
-    return wallet.normalise_nimiq_address(
-        str(result.get("address") or ""),
-        field_name="authenticated wallet address",
-        allow_dev_placeholder=False,
-    )
-
-
-async def _verify_signature(*, message: str, public_key: str, signature: str) -> str:
-    return await asyncio.to_thread(
-        _verify_signature_sync,
-        message=message,
-        public_key=public_key,
-        signature=signature,
-    )
 
 
 @router.post("/session")
@@ -1340,57 +1189,10 @@ async def submit_claim_reward_transaction_with_security(
     )
 
 
-def _security_error_response(
-    *, code: str, message: str, http_status: int, **extra: Any
-) -> JSONResponse:
-    return JSONResponse(
-        {"ok": False, "code": str(code), "message": str(message), **extra},
-        status_code=int(http_status),
-    )
-
-
-async def _read_request_body(
-    receive: Callable[..., Awaitable[dict[str, Any]]],
-) -> bytes:
-    chunks: list[bytes] = []
-    while True:
-        message = await receive()
-        if message.get("type") == "http.disconnect":
-            break
-        if message.get("type") != "http.request":
-            continue
-        chunks.append(bytes(message.get("body") or b""))
-        if not message.get("more_body", False):
-            break
-    return b"".join(chunks)
-
-
-def _replay_receive(body: bytes) -> Callable[..., Awaitable[dict[str, Any]]]:
-    sent = False
-
-    async def receive() -> dict[str, Any]:
-        nonlocal sent
-        if not sent:
-            sent = True
-            return {"type": "http.request", "body": body, "more_body": False}
-        return {"type": "http.disconnect"}
-
-    return receive
-
-
-def _response_json(messages: list[dict[str, Any]]) -> tuple[int, RowDict | None]:
-    status_code = 500
-    body_parts: list[bytes] = []
-    for message in messages:
-        if message.get("type") == "http.response.start":
-            status_code = int(message.get("status") or 500)
-        elif message.get("type") == "http.response.body":
-            body_parts.append(bytes(message.get("body") or b""))
-    try:
-        value = json.loads(b"".join(body_parts).decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return status_code, None
-    return status_code, value if isinstance(value, dict) else None
+_security_error_response = claim_http.error_response
+_read_request_body = claim_http.read_request_body
+_replay_receive = claim_http.replay_receive
+_response_json = claim_http.response_json
 
 
 async def _preclaim_decision(

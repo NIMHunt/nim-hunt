@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 import constants as const
 import database as schema
 import db_access
+import security_metadata
 import trans_updater
 
 logger = logging.getLogger(__name__)
@@ -56,27 +57,13 @@ def _key(prefix: str, value: str | int) -> str:
 
 
 async def _get(db, key: str) -> Any:
-    cur = await db.execute(
-        f"SELECT {schema.APP_METADATA_VALUE} FROM {schema.APP_METADATA_TABLE_NAME} "
-        f"WHERE {schema.APP_METADATA_KEY} = ?", (key,)
-    )
-    row = await cur.fetchone()
-    if row is None:
-        return None
-    try:
-        return json.loads(str(row[0]))
-    except (TypeError, json.JSONDecodeError):
-        return None
+    # Weak-evidence corruption fails neutral; do not turn generic metadata
+    # deletion into an implicit policy decision.
+    return await security_metadata.get_json(db, key, delete_malformed=False)
 
 
 async def _set(db, key: str, value: Any) -> None:
-    await db.execute(
-        f"INSERT INTO {schema.APP_METADATA_TABLE_NAME} "
-        f"({schema.APP_METADATA_KEY}, {schema.APP_METADATA_VALUE}) VALUES (?, ?) "
-        f"ON CONFLICT ({schema.APP_METADATA_KEY}) DO UPDATE SET "
-        f"{schema.APP_METADATA_VALUE}=excluded.{schema.APP_METADATA_VALUE}",
-        (key, json.dumps(value, separators=(",", ":"), sort_keys=True)),
-    )
+    await security_metadata.set_json(db, key, value)
 
 
 async def ensure_rollout_marker(db) -> dict[str, int]:

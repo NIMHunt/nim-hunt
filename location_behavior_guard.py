@@ -7,11 +7,11 @@ Spot IDs (strictly capped at the rule thresholds), and deduplication timestamps.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import database as schema
 import db_access
+import security_metadata
 
 STATE_PREFIX = "location_behavior_guard:user:"
 STATE_VERSION = 2
@@ -101,27 +101,14 @@ def _migrate(value: Any) -> dict[str, Any]:
 
 
 async def get_state(db, *, user_id: int) -> dict[str, Any]:
-    cur = await db.execute(
-        f"SELECT {schema.APP_METADATA_VALUE} FROM {schema.APP_METADATA_TABLE_NAME} "
-        f"WHERE {schema.APP_METADATA_KEY} = ?", (_key(user_id),)
+    value = await security_metadata.get_json(
+        db, _key(user_id), delete_malformed=False
     )
-    row = await cur.fetchone()
-    if row is None:
-        return _empty_state()
-    try:
-        return _migrate(json.loads(str(row[0])))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return _empty_state()
+    return _migrate(value)
 
 
 async def _save(db, *, user_id: int, state: dict[str, Any]) -> None:
-    await db.execute(
-        f"INSERT INTO {schema.APP_METADATA_TABLE_NAME} "
-        f"({schema.APP_METADATA_KEY}, {schema.APP_METADATA_VALUE}) VALUES (?, ?) "
-        f"ON CONFLICT ({schema.APP_METADATA_KEY}) DO UPDATE SET "
-        f"{schema.APP_METADATA_VALUE}=excluded.{schema.APP_METADATA_VALUE}",
-        (_key(user_id), json.dumps(_migrate(state), separators=(",", ":"), sort_keys=True)),
-    )
+    await security_metadata.set_json(db, _key(user_id), _migrate(state))
 
 
 async def _claimable_public_spots(db, *, user_id: int) -> list[dict[str, Any]]:

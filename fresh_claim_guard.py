@@ -652,13 +652,14 @@ async def public_claim_decision(db, *, user_id: int, signer_address: str,
     now = await db_access.get_unixepoch(db)
     if not await _behaviour_allows_public_claim(db, user_id=user_id, now=now):
         return {"allowed": False, "reason": "behavioural_temporary_restriction"}
-    # Funding observation is one-hop and never bans. UNKNOWN is fail-closed only
-    # for this request, with a short retry cache, rather than being called safe.
+    # Funding observation is one-hop and never bans. UNKNOWN retains a short
+    # retry cache and contributes no evidence, but is not a claim denial.
     import wallet_cluster_guard
     cluster = await wallet_cluster_guard.observe(
         db, signer_address=signer_address, now=now)
-    if cluster["status"] == "unknown":
-        return {"allowed": False, "reason": "funding_history_unavailable"}
+    # UNKNOWN is deliberately neutral: this optional corroborating observer
+    # must not become a second availability dependency on Nimiq history. The
+    # pre-existing signer-history and location decisions below remain fail-safe.
     if (cluster["evidence"] and cluster.get("similar_pattern") is True
             and await _recent_weak_behaviour_anomaly(db, user_id=user_id, now=now)):
         return {"allowed": False, "reason": "corroborated_temporary_restriction"}
@@ -669,10 +670,4 @@ async def public_claim_decision(db, *, user_id: int, signer_address: str,
         db, user=user, ip=ip, gps_lat=lat, gps_long=long,
         gps_country=spot.get(schema.SPOT_COUNTRY), now=now,
     )
-    # Established signer age remains valid. A suspicious small cluster merely
-    # requires the same independent first-location verification as a fresh
-    # identity; it never changes USER status or blocks a Password Spot.
-    if cluster["evidence"] and location.get("reason") not in {
-            "first_location_verified", "legacy_account"}:
-        return {"allowed": False, "reason": "cluster_requires_corroboration"}
     return {"allowed": bool(location["allowed"]), **location}

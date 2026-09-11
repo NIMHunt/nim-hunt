@@ -113,7 +113,7 @@ class WalletClusterGuardTests(IsolatedAsyncioTestCase):
         self.assertEqual(len(source["members"]), 1)
         self.assertEqual(rpc.await_count, 2)  # signer history + one source sample
 
-    async def test_full_source_page_is_service_like(self):
+    async def test_genuinely_broad_outgoing_source_is_service_like(self):
         count = const.CLAIM_FUNDING_CLUSTER_MIN_CLAIMANTS
         origins = {f"signer-{i}": ("faucet", self.now - i, 1000)
                    for i in range(count)}
@@ -122,6 +122,31 @@ class WalletClusterGuardTests(IsolatedAsyncioTestCase):
         source = await fresh_claim_guard._get(
             self.db, f"{guard.SOURCE_PREFIX}{guard._hash('faucet')}")
         self.assertTrue(source["service_like"])
+
+    async def test_full_page_with_two_outgoing_recipients_is_not_a_service(self):
+        source = "busy-small-source"
+        page = [self.inbound(
+            f"recipient-{index % 2}", source, suffix=f"{index:02x}")
+            for index in range(const.CLAIM_FUNDING_SOURCE_SAMPLE_SIZE)]
+        rpc = mock.AsyncMock(return_value={"data": page, "metadata": None})
+        with mock.patch.object(
+                guard.trans_updater, "get_chain_transactions_by_address", rpc):
+            breadth = await guard._source_breadth(source)
+        self.assertEqual(breadth, "unknown")
+
+    async def test_fiftieth_claimant_does_not_make_cluster_safe_and_storage_is_bounded(self):
+        origins = {f"signer-{i}": ("small-source", self.now - i, 1000)
+                   for i in range(50)}
+        results, _ = await self.observe_many(origins)
+        self.assertTrue(results[48]["evidence"])
+        self.assertTrue(results[49]["evidence"])
+        source = await fresh_claim_guard._get(
+            self.db, f"{guard.SOURCE_PREFIX}{guard._hash('small-source')}")
+        self.assertFalse(source["service_like"])
+        self.assertLessEqual(
+            len(source["members"]), const.CLAIM_FUNDING_CLUSTER_MEMBER_LIMIT)
+        self.assertLessEqual(
+            source["member_count"], const.CLAIM_FUNDING_CLUSTER_MEMBER_LIMIT + 1)
 
     async def test_wide_time_window_is_not_cluster_evidence(self):
         origins = {f"signer-{i}": (
@@ -146,7 +171,12 @@ class WalletClusterGuardTests(IsolatedAsyncioTestCase):
             second = await guard.observe(self.db, signer_address="a", now=self.now + 1)
         self.assertEqual(first["status"], "unknown")
         self.assertEqual(second["status"], "unknown")
+        self.assertFalse(first["evidence"] or second["evidence"])
         rpc.assert_awaited_once()
+        cached = await fresh_claim_guard._get(
+            self.db, f"{guard.ORIGIN_PREFIX}{guard._hash('a')}")
+        self.assertEqual(cached["result"], "provider_failure")
+        self.assertNotIn("source_hash", cached)
 
     async def test_bounded_unexhausted_history_is_unknown(self):
         page = [self.inbound("a", "source", suffix=f"{i:02x}")
@@ -174,6 +204,128 @@ class WalletClusterGuardTests(IsolatedAsyncioTestCase):
         source = await fresh_claim_guard._get(
             self.db, f"{guard.SOURCE_PREFIX}{guard._hash('friend')}")
         self.assertEqual(len(source["members"]), 1)
+
+    async def test_authoritative_refresh_moves_member_to_new_source(self):
+        origins = {name: ("source-a", self.now - index, 1000)
+                   for index, name in enumerate(("a", "b", "c", "d", "e"))}
+        await self.observe_many(origins)
+        origin_key = f"{guard.ORIGIN_PREFIX}{guard._hash('a')}"
+        cached = await fresh_claim_guard._get(self.db, origin_key)
+        cached["refresh_at"] = self.now
+        await fresh_claim_guard._set(self.db, origin_key, cached)
+        await self.db.commit()
+        self.now += 1
+        origins["a"] = ("source-b", self.now - 10, 2000)
+        await self.observe_many(origins)
+        old_source = await fresh_claim_guard._get(
+            self.db, f"{guard.SOURCE_PREFIX}{guard._hash('source-a')}")
+        new_source = await fresh_claim_guard._get(
+            self.db, f"{guard.SOURCE_PREFIX}{guard._hash('source-b')}")
+        authoritative = await fresh_claim_guard._get(self.db, origin_key)
+        self.assertNotIn(guard._hash("a"), old_source["members"])
+        self.assertFalse(guard._cluster_state(old_source)["evidence"])
+        self.assertIn(guard._hash("a"), new_source["members"])
+        self.assertEqual(authoritative["source_hash"], guard._hash("source-b"))
+        self.assertEqual((authoritative["first_funding_at"],
+                          authoritative["first_funding_amount"]),
+                         (self.now - 10, 2000))
+
+    async def test_refresh_to_no_origin_removes_old_membership(self):
+        await self.observe_many({"a": ("source-a", self.now - 20, 1000)})
+        origin_key = f"{guard.ORIGIN_PREFIX}{guard._hash('a')}"
+        cached = await fresh_claim_guard._get(self.db, origin_key)
+        cached["refresh_at"] = self.now
+        await fresh_claim_guard._set(self.db, origin_key, cached)
+        await self.db.commit()
+        self.now += 1
+        rpc = mock.AsyncMock(return_value={"data": [], "metadata": None})
+        with mock.patch.object(
+                guard.trans_updater, "get_chain_transactions_by_address", rpc):
+            result = await guard.observe(self.db, signer_address="a", now=self.now)
+        old_source = await fresh_claim_guard._get(
+            self.db, f"{guard.SOURCE_PREFIX}{guard._hash('source-a')}")
+        authoritative = await fresh_claim_guard._get(self.db, origin_key)
+        self.assertFalse(result["evidence"])
+        self.assertNotIn(guard._hash("a"), old_source["members"])
+        self.assertIsNone(authoritative["source_hash"])
+
+    async def test_saturated_source_change_downgrades_ghost_evidence(self):
+        origins = {f"signer-{i}": ("source-a", self.now - i, 1000)
+                   for i in range(const.CLAIM_FUNDING_CLUSTER_MEMBER_LIMIT + 1)}
+        await self.observe_many(origins)
+        signer = "signer-0"
+        origin_key = f"{guard.ORIGIN_PREFIX}{guard._hash(signer)}"
+        cached = await fresh_claim_guard._get(self.db, origin_key)
+        cached["refresh_at"] = self.now
+        await fresh_claim_guard._set(self.db, origin_key, cached)
+        await self.db.commit()
+        self.now += 1
+        await self.observe_many({signer: ("source-b", self.now, 2000)})
+        old_source = await fresh_claim_guard._get(
+            self.db, f"{guard.SOURCE_PREFIX}{guard._hash('source-a')}")
+        self.assertTrue(old_source["membership_uncertain"])
+        self.assertFalse(guard._cluster_state(old_source)["evidence"])
+
+    async def test_concurrent_different_origins_keep_winner_metadata_consistent(self):
+        release_a = asyncio.Event()
+
+        async def history(address):
+            del address
+            if asyncio.current_task().get_name() == "origin-a":
+                await release_a.wait()
+                await asyncio.sleep(0.05)
+                return [self.inbound("a", "source-a", age=20, amount=1000)]
+            release_a.set()
+            return [self.inbound("a", "source-b", age=10, amount=2000)]
+
+        async def run(name):
+            async with schema.get_db() as connection:
+                task = asyncio.current_task()
+                task.set_name(name)
+                return await guard.observe(connection, signer_address="a", now=self.now)
+
+        with (mock.patch.object(guard, "_complete_history", side_effect=history),
+              mock.patch.object(guard, "_source_breadth",
+                                mock.AsyncMock(return_value="ordinary"))):
+            await asyncio.gather(run("origin-a"), run("origin-b"))
+        origin = await fresh_claim_guard._get(
+            self.db, f"{guard.ORIGIN_PREFIX}{guard._hash('a')}")
+        self.assertEqual(origin["source_hash"], guard._hash("source-b"))
+        self.assertEqual((origin["first_funding_at"], origin["first_funding_amount"]),
+                         (self.now - 10, 2000))
+        source_b = await fresh_claim_guard._get(
+            self.db, f"{guard.SOURCE_PREFIX}{guard._hash('source-b')}")
+        self.assertEqual(source_b["members"][guard._hash("a")],
+                         {"timestamp": self.now - 10, "amount": 2000})
+        self.assertIsNone(await fresh_claim_guard._get(
+            self.db, f"{guard.SOURCE_PREFIX}{guard._hash('source-a')}"))
+
+    async def test_concurrent_no_origin_cannot_create_ghost_cluster(self):
+        release_empty = asyncio.Event()
+
+        async def history(address):
+            del address
+            if asyncio.current_task().get_name() == "empty":
+                await release_empty.wait()
+                await asyncio.sleep(0.05)
+                return []
+            release_empty.set()
+            return [self.inbound("a", "source-b", age=10, amount=2000)]
+
+        async def run(name):
+            async with schema.get_db() as connection:
+                asyncio.current_task().set_name(name)
+                return await guard.observe(connection, signer_address="a", now=self.now)
+
+        with (mock.patch.object(guard, "_complete_history", side_effect=history),
+              mock.patch.object(guard, "_source_breadth",
+                                mock.AsyncMock(return_value="ordinary"))):
+            await asyncio.gather(run("empty"), run("valid"))
+        origin = await fresh_claim_guard._get(
+            self.db, f"{guard.ORIGIN_PREFIX}{guard._hash('a')}")
+        self.assertEqual(origin["source_hash"], guard._hash("source-b"))
+        self.assertIsNone(await fresh_claim_guard._get(
+            self.db, f"{guard.SOURCE_PREFIX}None"))
 
     async def test_cluster_observation_never_changes_user_status(self):
         user = await db_access.create_user(
@@ -231,27 +383,45 @@ class WalletClusterPolicyTests(IsolatedAsyncioTestCase):
         self.assertFalse(result["allowed"])
         self.assertEqual(result["reason"], "corroborated_temporary_restriction")
 
-    async def test_suspicious_aged_signer_requires_location_corroboration(self):
+    async def test_funding_unknown_does_not_block_established_claimant(self):
         db = mock.Mock(in_transaction=False)
-        user = {schema.USER_STATUS: 1}
         with (mock.patch.object(fresh_claim_guard.db_access, "get_user_by_id",
-                               mock.AsyncMock(return_value=user)),
+                               mock.AsyncMock(return_value={schema.USER_STATUS: 1})),
               mock.patch.object(fresh_claim_guard.db_access, "get_unixepoch",
                                mock.AsyncMock(return_value=100)),
               mock.patch.object(fresh_claim_guard, "_behaviour_allows_public_claim",
                                mock.AsyncMock(return_value=True)),
               mock.patch.object(guard, "observe", mock.AsyncMock(return_value={
-                  "status": "observed", "evidence": True})),
+                  "status": "unknown", "evidence": False})),
               mock.patch.object(fresh_claim_guard, "signer_or_account_trusted",
-                               mock.AsyncMock(return_value={"trusted": True,
-                                                            "reason": "signer_established"})),
+                               mock.AsyncMock(return_value={"trusted": True})),
               mock.patch.object(fresh_claim_guard, "first_location_decision",
-                               mock.AsyncMock(return_value={"allowed": False,
-                                                            "reason": "first_location_mismatch_restriction"}))):
+                               mock.AsyncMock(return_value={"allowed": True,
+                                                            "reason": "ip_geolocation_unreliable"}))):
             result = await fresh_claim_guard.public_claim_decision(
                 db, user_id=1, signer_address="signer",
-                spot={schema.SPOT_USE_PASSWORD: 0}, ip="8.8.8.8", lat=0, long=0)
+                spot={schema.SPOT_USE_PASSWORD: 0}, ip=None, lat=0, long=0)
+        self.assertTrue(result["allowed"])
+
+    async def test_funding_unknown_does_not_weaken_signer_history_unknown(self):
+        db = mock.Mock(in_transaction=False)
+        with (mock.patch.object(fresh_claim_guard.db_access, "get_user_by_id",
+                               mock.AsyncMock(return_value={schema.USER_STATUS: 1})),
+              mock.patch.object(fresh_claim_guard.db_access, "get_unixepoch",
+                               mock.AsyncMock(return_value=100)),
+              mock.patch.object(fresh_claim_guard, "_behaviour_allows_public_claim",
+                               mock.AsyncMock(return_value=True)),
+              mock.patch.object(guard, "observe", mock.AsyncMock(return_value={
+                  "status": "unknown", "evidence": False})),
+              mock.patch.object(fresh_claim_guard, "signer_or_account_trusted",
+                               mock.AsyncMock(return_value={
+                                   "trusted": False,
+                                   "reason": "signer_history_unavailable"}))):
+            result = await fresh_claim_guard.public_claim_decision(
+                db, user_id=1, signer_address="signer",
+                spot={schema.SPOT_USE_PASSWORD: 0}, ip=None, lat=0, long=0)
         self.assertFalse(result["allowed"])
+        self.assertEqual(result["reason"], "signer_history_unavailable")
 
     async def test_cluster_alone_with_verified_location_is_allowed(self):
         db = mock.Mock(in_transaction=False)

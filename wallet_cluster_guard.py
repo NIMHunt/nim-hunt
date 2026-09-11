@@ -83,7 +83,11 @@ async def _complete_history(address: str) -> list[dict[str, Any]]:
     raise RuntimeError("funding history exceeded its bounded page limit")
 
 
-async def _source_is_service_like(source: str) -> bool:
+async def _source_breadth(source: str) -> str:
+    """Classify only demonstrated outgoing recipient breadth.
+
+    A full bounded page with few recipients is inconclusive, not a service.
+    """
     limit = max(1, int(const.CLAIM_FUNDING_SOURCE_SAMPLE_SIZE))
     raw = await trans_updater.get_chain_transactions_by_address(
         source, max_transactions=limit, start_at=None,
@@ -92,32 +96,80 @@ async def _source_is_service_like(source: str) -> bool:
     transactions = list(trans_updater._iter_candidate_transactions(raw))
     recipients = {
         recipient for tx in transactions
-        if fresh_claim_guard._confirmed(tx)
+        if (fresh_claim_guard._confirmed(tx)
+            and trans_updater._extract_chain_from_address(tx) == source)
         for recipient in [trans_updater._extract_chain_to_address(tx)]
         if recipient and recipient != source
     }
-    # A full page means degree may be arbitrarily higher than the sample. Treat
-    # it as service-like even if repeated recipients obscure sampled degree.
-    return (len(transactions) >= limit
-            or len(recipients) >= int(const.CLAIM_FUNDING_SOURCE_SERVICE_DEGREE))
+    if len(recipients) >= int(const.CLAIM_FUNDING_SOURCE_SERVICE_DEGREE):
+        return "service"
+    if len(transactions) >= limit:
+        return "unknown"
+    return "ordinary"
 
 
-def _cluster_state(source: Any, *, signer_hash: str) -> dict[str, Any]:
+def _cluster_state(source: Any) -> dict[str, Any]:
     if not isinstance(source, dict) or source.get("result") != "observed":
         return {"evidence": False, "member_count": 0, "similar_pattern": False}
     members = dict(source.get("members") or {})
-    if signer_hash not in members or source.get("service_like") is not False:
-        return {"evidence": False, "member_count": len(members), "similar_pattern": False}
+    count = int(source.get("member_count") or len(members))
+    if source.get("service_like") is True or source.get("membership_uncertain") is True:
+        return {"evidence": False, "member_count": count, "similar_pattern": False}
+    return {"evidence": source.get("cluster_evidence") is True,
+            "member_count": count,
+            "similar_pattern": source.get("similar_pattern") is True}
+
+
+def _pattern(members: dict[str, Any]) -> tuple[bool, bool]:
     values = list(members.values())
+    if len(values) < int(const.CLAIM_FUNDING_CLUSTER_MIN_CLAIMANTS):
+        return False, False
     timestamps = [int(item["timestamp"]) for item in values]
     amounts = [int(item["amount"]) for item in values]
     tight = max(timestamps) - min(timestamps) <= int(const.CLAIM_FUNDING_CLUSTER_WINDOW_SECONDS)
     # Similar means all positive transfers lie within 10% of the largest. It
     # strengthens/logs evidence but is not an independent enforcement trigger.
     similar = bool(amounts) and min(amounts) * 10 >= max(amounts) * 9
-    enough = len(members) >= int(const.CLAIM_FUNDING_CLUSTER_MIN_CLAIMANTS)
-    return {"evidence": bool(enough and tight), "member_count": len(members),
-            "similar_pattern": bool(enough and tight and similar)}
+    return bool(tight), bool(tight and similar)
+
+
+def _add_member(state: dict[str, Any], *, signer_hash: str,
+                timestamp: int, amount: int) -> None:
+    if state.get("membership_uncertain") is True:
+        return
+    members = dict(state.get("members") or {})
+    if signer_hash not in members:
+        limit = max(int(const.CLAIM_FUNDING_CLUSTER_MIN_CLAIMANTS),
+                    int(const.CLAIM_FUNDING_CLUSTER_MEMBER_LIMIT))
+        if len(members) < limit:
+            members[signer_hash] = {"timestamp": int(timestamp), "amount": int(amount)}
+        else:
+            state["members_saturated"] = True
+        state["member_count"] = min(limit + 1,
+                                    int(state.get("member_count") or len(members) - 1) + 1)
+    else:
+        members[signer_hash] = {"timestamp": int(timestamp), "amount": int(amount)}
+    state["members"] = members
+    evidence, similar = _pattern(members)
+    # Additions are monotonic. More claimant wallets can never erase evidence.
+    state["cluster_evidence"] = bool(state.get("cluster_evidence") or evidence)
+    state["similar_pattern"] = bool(state.get("similar_pattern") or similar)
+
+
+def _remove_member(state: dict[str, Any], *, signer_hash: str) -> None:
+    members = dict(state.get("members") or {})
+    if state.get("members_saturated") is True:
+        # Exact correction is impossible. Disable punitive evidence rather than
+        # retaining a potentially ghost member/cluster.
+        state.update({"membership_uncertain": True, "cluster_evidence": False,
+                      "similar_pattern": False})
+        return
+    if signer_hash in members:
+        members.pop(signer_hash)
+        state["members"] = members
+        state["member_count"] = len(members)
+        evidence, similar = _pattern(members)
+        state.update({"cluster_evidence": evidence, "similar_pattern": similar})
 
 
 async def observe(db, *, signer_address: str, now: int) -> dict[str, Any]:
@@ -134,7 +186,7 @@ async def observe(db, *, signer_address: str, now: int) -> dict[str, Any]:
             return {"status": "unknown", "evidence": False}
         source_hash = cached.get("source_hash")
         source = await fresh_claim_guard._get(db, f"{SOURCE_PREFIX}{source_hash}")
-        return {"status": "observed", **_cluster_state(source, signer_hash=signer_hash)}
+        return {"status": "observed", **_cluster_state(source)}
 
     lookup_started_at = int(now)
     try:
@@ -146,55 +198,73 @@ async def observe(db, *, signer_address: str, now: int) -> dict[str, Any]:
             db, f"{SOURCE_PREFIX}{_hash(origin['source'])}")) if origin else None
         if (isinstance(prior_source, dict) and prior_source.get("result") == "observed"
                 and int(prior_source.get("source_refresh_at") or 0) > now):
-            service_like = bool(prior_source.get("service_like"))
+            breadth = str(prior_source.get("breadth") or "unknown")
         else:
-            service_like = await _source_is_service_like(origin["source"]) if origin else None
+            breadth = await _source_breadth(origin["source"]) if origin else None
     except Exception:
         logger.warning("Funding-origin history unavailable for signer_hash=%s", signer_hash[:12])
         async with db_access.transaction(db, immediate=True):
             current = await fresh_claim_guard._get(db, origin_key)
-            if not isinstance(current, dict) or int(current.get("checked_at") or 0) <= lookup_started_at:
+            if (not isinstance(current, dict)
+                    or (current.get("result") != "observed"
+                        and int(current.get("checked_at") or 0) <= lookup_started_at)):
                 await fresh_claim_guard._set(db, origin_key, {
                     "result": "provider_failure", "checked_at": now,
                     "refresh_at": now + const.CLAIM_SIGNER_HISTORY_FAILURE_RETRY_SECONDS,
                 })
         return {"status": "unknown", "evidence": False}
 
-    source_hash = _hash(origin["source"]) if origin else None
+    local_record = {
+        "result": "observed",
+        "source_hash": _hash(origin["source"]) if origin else None,
+        "first_funding_at": origin["timestamp"] if origin else None,
+        "first_funding_amount": origin["amount"] if origin else None,
+        "checked_at": now, "refresh_at": now + const.CLAIM_FUNDING_CACHE_SECONDS,
+    }
     async with db_access.transaction(db, immediate=True):
         current = await fresh_claim_guard._get(db, origin_key)
         if (isinstance(current, dict) and current.get("result") == "observed"
                 and int(current.get("checked_at") or 0) >= lookup_started_at):
-            source_hash = current.get("source_hash")
+            # The concurrent winner is authoritative in its entirety. Never
+            # combine its source with this request's stale amount/timestamp.
+            authoritative = current
+            wrote_origin = False
         else:
-            await fresh_claim_guard._set(db, origin_key, {
-                "result": "observed", "source_hash": source_hash,
-                "first_funding_at": origin["timestamp"] if origin else None,
-                "first_funding_amount": origin["amount"] if origin else None,
-                "checked_at": now, "refresh_at": now + const.CLAIM_FUNDING_CACHE_SECONDS,
-            })
-        if source_hash:
+            authoritative = local_record
+            wrote_origin = True
+            old_source_hash = current.get("source_hash") if isinstance(current, dict) else None
+            new_source_hash = authoritative.get("source_hash")
+            if old_source_hash and old_source_hash != new_source_hash:
+                old_key = f"{SOURCE_PREFIX}{old_source_hash}"
+                old_state = await fresh_claim_guard._get(db, old_key)
+                if isinstance(old_state, dict):
+                    old_state = dict(old_state)
+                    _remove_member(old_state, signer_hash=signer_hash)
+                    await fresh_claim_guard._set(db, old_key, old_state)
+            await fresh_claim_guard._set(db, origin_key, authoritative)
+        source_hash = authoritative.get("source_hash")
+        if source_hash and wrote_origin:
             key = f"{SOURCE_PREFIX}{source_hash}"
             state = await fresh_claim_guard._get(db, key)
             state = dict(state) if isinstance(state, dict) else {
                 "result": "observed", "members": {}}
-            members = dict(state.get("members") or {})
-            members[signer_hash] = {"timestamp": int(origin["timestamp"]),
-                                    "amount": int(origin["amount"])}
-            service_like = bool(
-                state.get("service_like") or service_like
-                or len(members) >= const.CLAIM_FUNDING_SOURCE_SERVICE_DEGREE
+            _add_member(
+                state, signer_hash=signer_hash,
+                timestamp=int(authoritative["first_funding_at"]),
+                amount=int(authoritative["first_funding_amount"]),
             )
-            if service_like:
-                # Once suppression is certain, individual claimant membership
-                # no longer serves the rule and need not remain correlated.
-                members = {}
-            state.update({"result": "observed", "members": members,
-                          "service_like": service_like,
+            state.update({"result": "observed",
+                          "breadth": breadth,
+                          # Demonstrated breadth is monotonic; claimant count is
+                          # deliberately not a service classification signal.
+                          "service_like": bool(state.get("service_like")
+                                               or breadth == "service"),
                           "source_refresh_at": now + const.CLAIM_FUNDING_CACHE_SECONDS,
                           "checked_at": now})
             await fresh_claim_guard._set(db, key, state)
             source = state
+        elif source_hash:
+            source = await fresh_claim_guard._get(db, f"{SOURCE_PREFIX}{source_hash}")
         else:
             source = None
-    return {"status": "observed", **_cluster_state(source, signer_hash=signer_hash)}
+    return {"status": "observed", **_cluster_state(source)}

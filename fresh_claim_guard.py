@@ -388,3 +388,13 @@ async def public_claim_decision(db, *, user_id: int, signer_address: str,
         gps_country=spot.get(schema.SPOT_COUNTRY), now=now,
     )
     return {"allowed": bool(location["allowed"]), **location}
+
+
+async def has_active_location_anomaly(db, *, user_id: int, now: int) -> bool:
+    """Expose only whether the independent first-location evidence is active."""
+    state = await _get(db, _key(LOCATION_PREFIX, int(user_id)))
+    return bool(
+        isinstance(state, dict)
+        and state.get("last_result") == "blatant_mismatch"
+        and int(state.get("retry_at") or 0) > int(now)
+    )

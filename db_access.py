@@ -3166,6 +3166,28 @@ async def create_claim_attempt(
     if await has_spot_cancellation_started(db, spot_id=spot_id):
         raise ValueError("This spot is being cancelled and can no longer be claimed.")
 
+    if not use_password:
+        # This runs under the caller's IMMEDIATE claim transaction, so the
+        # bounded evidence update and restriction decision are race-safe.
+        import fresh_claim_guard
+        import location_behavior_guard
+
+        now = await get_unixepoch(db)
+        behaviour = await location_behavior_guard.observe_signed_claim(
+            db,
+            user_id=int(user_id),
+            spot=spot,
+            lat=float(lat),
+            long=float(long),
+            location_accuracy_metres=location_accuracy_metres,
+            now=now,
+            corroborated=await fresh_claim_guard.has_active_location_anomaly(
+                db, user_id=int(user_id), now=now
+            ),
+        )
+        if behaviour["restricted"]:
+            raise location_behavior_guard.PublicClaimBehaviorRestrictionError()
+
     try:
         claim_id = await create_claim(
             db,

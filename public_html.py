@@ -1791,6 +1791,19 @@ async def spots_claim_status_api(payload: ClaimStatusRequest, request: Request) 
         # that small caller-owned unit before any guard can perform network I/O;
         # the guard then uses only its own short post-I/O write transactions.
         await db.commit()
+        import fresh_claim_guard
+        import location_behavior_guard
+        if payload.lat is not None and payload.long is not None:
+            await location_behavior_guard.observe_find_location(
+                db,
+                user_id=int(user[schema.USER_ID]),
+                lat=float(payload.lat),
+                long=float(payload.long),
+                now=now,
+            )
+        behaviour = await location_behavior_guard.current_decision(
+            db, user_id=int(user[schema.USER_ID]), now=now
+        )
         statuses: dict[str, Any] = {}
         for spot_id in ids:
             spot = await db_access.get_spot_owner_summary(db, spot_id=spot_id)
@@ -1805,6 +1818,10 @@ async def spots_claim_status_api(payload: ClaimStatusRequest, request: Request) 
                 location_accuracy_metres=payload.accuracy,
             )
             allowed = bool(rule.get("allowed"))
+            if allowed and int(spot.get(schema.SPOT_USE_PASSWORD) or 0) != 1 and behaviour["restricted"]:
+                allowed = False
+                rule["reason"] = "public_temporarily_unavailable"
+                rule["message"] = fresh_claim_guard.GENERIC_MESSAGE
             if allowed and int(spot.get(schema.SPOT_USE_PASSWORD) or 0) != 1 and bool(getattr(const, "PUBLIC_DEPLOYMENT", False)):
                 import fresh_claim_guard
                 if signer_address:

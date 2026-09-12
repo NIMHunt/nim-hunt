@@ -16,9 +16,11 @@ def test_production_runtime_installs_financial_guards_and_refund_address_safety(
             "NIMHUNT_NIMIQ_NETWORK": "TestAlbatross",
         }
         code = """
+import db_access
 import main
 import public_html
 import trans_updater
+assert db_access.reserve_draft_creation.__module__ == 'funding_fee_worker'
 assert trans_updater.record_spot_deposit_transaction.__module__ == 'refund_address_safety'
 assert trans_updater.resolve_nimiq_pay_payout_address.__module__ == 'refund_address_safety'
 assert trans_updater.submit_spot_cancellation_transactions.__module__ == 'cancellation_safety'

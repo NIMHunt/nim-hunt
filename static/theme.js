@@ -84,6 +84,27 @@
         return applyTheme(normalizedTheme, { persist, documentObj });
     }
 
+    function switchThemeFromToggle(documentObj) {
+        const currentTheme = documentObj.documentElement.dataset.theme === DARK_THEME
+            ? DARK_THEME
+            : LIGHT_THEME;
+        return switchTheme(currentTheme === DARK_THEME ? LIGHT_THEME : DARK_THEME, {
+            persist: true,
+            documentObj,
+        });
+    }
+
+    function installThemeToggleDelegation(documentObj = document) {
+        // theme.js runs in the document head, before the server-rendered footer
+        // button exists. Delegating from document means that button is already
+        // interactive on its very first paint, without waiting for DOMContentLoaded.
+        documentObj.addEventListener('click', (event) => {
+            const toggle = event.target?.closest?.(`#${TOGGLE_ID}`);
+            if (!toggle) return;
+            switchThemeFromToggle(documentObj);
+        });
+    }
+
     function buildToggle(documentObj) {
         const toggle = documentObj.createElement('button');
         toggle.id = TOGGLE_ID;
@@ -97,27 +118,14 @@
         return toggle;
     }
 
-    function bindToggle(toggle, documentObj) {
-        if (toggle.dataset.themeToggleBound === 'true') return toggle;
-        toggle.dataset.themeToggleBound = 'true';
-
-        toggle.addEventListener('click', () => {
-            const currentTheme = documentObj.documentElement.dataset.theme === DARK_THEME
-                ? DARK_THEME
-                : LIGHT_THEME;
-            switchTheme(currentTheme === DARK_THEME ? LIGHT_THEME : DARK_THEME, {
-                persist: true,
-                documentObj,
-            });
-        });
-
+    function prepareToggle(toggle, documentObj) {
         updateToggle(documentObj, documentObj.documentElement.dataset.theme || LIGHT_THEME);
         return toggle;
     }
 
     function createToggle(documentObj = document) {
         const existingToggle = documentObj.getElementById(TOGGLE_ID);
-        if (existingToggle) return bindToggle(existingToggle, documentObj);
+        if (existingToggle) return prepareToggle(existingToggle, documentObj);
 
         const adminHeader = documentObj.querySelector('.admin-header');
         if (adminHeader) {
@@ -133,7 +141,7 @@
             } else {
                 adminHeader.appendChild(toggle);
             }
-            return bindToggle(toggle, documentObj);
+            return prepareToggle(toggle, documentObj);
         }
 
         const loginCard = documentObj.querySelector('.admin-login-card');
@@ -145,7 +153,7 @@
             row.className = 'admin-login-theme-row';
             row.appendChild(toggle);
             loginCard.prepend(row);
-            return bindToggle(toggle, documentObj);
+            return prepareToggle(toggle, documentObj);
         }
 
         return null;
@@ -180,6 +188,7 @@
         }
     }
 
+    installThemeToggleDelegation(document);
     applyTheme(preferredTheme());
     installSystemThemeListener();
 

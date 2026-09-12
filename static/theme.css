@@ -9,6 +9,12 @@
     grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
 }
 
+/* Once the theme toggle is inserted, this stylesheet owns the final five-slot
+   public footer presentation. Keep the navigation at normal NimHunt text size. */
+.home-information-links > a {
+    font-size: 2rem;
+}
+
 .theme-toggle {
     position: relative;
     width: 100%;
@@ -58,6 +64,10 @@
     line-height: 1;
 }
 
+.home-information-links .theme-toggle-symbol {
+    font-size: 2rem;
+}
+
 html:not([data-theme="dark"]) .theme-toggle-symbol {
     background: transparent;
     color: #1f2348;
@@ -67,6 +77,10 @@ html[data-theme="dark"] .theme-toggle-symbol {
     background: transparent;
     color: #fc8702;
     font-size: 1.5rem;
+}
+
+html[data-theme="dark"] .home-information-links .theme-toggle-symbol {
+    font-size: 2.2rem;
 }
 
 /* Custom tooltip; title remains present as a native/accessibility fallback. */

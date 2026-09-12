@@ -197,7 +197,7 @@
             mediaQuery.addEventListener('change', syncUnpinnedTheme);
         } else if (typeof mediaQuery.addListener === 'function') {
             // Compatibility fallback for older embedded/WebKit browsers.
-            mediaQuery.addListener('change', syncUnpinnedTheme);
+            mediaQuery.addListener(syncUnpinnedTheme);
         }
     }
 

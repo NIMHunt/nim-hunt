@@ -9,7 +9,7 @@ def source(path: str) -> str:
 
 def test_theme_head_is_loaded_by_every_page_shell():
     theme_head = source("templates/_theme_head.html")
-    assert "/static/theme.css?v=dark-mode-v9-footer-size-20260912" in theme_head
+    assert "/static/theme.css?v=dark-mode-v9-footer-typography-20260912" in theme_head
     assert "/static/theme.js?v=dark-mode-v3-20260816" in theme_head
 
     for path in (

@@ -47,6 +47,13 @@ def test_footer_theme_toggle_is_inserted_between_how_to_and_faq_slots():
     assert "font-size: 2rem;" not in footer_toggle_rule
     assert "font-size: 2.2rem;" not in dark_footer_toggle_rule
 
+    narrow_rule = stylesheet.split("@media (max-width: 390px) {", 1)[1].split(".theme-toggle-symbol {", 1)[0]
+    assert "display: flex;" in narrow_rule
+    assert "flex-wrap: wrap;" in narrow_rule
+    assert "justify-content: center;" in narrow_rule
+    assert ".home-information-links .theme-toggle" in narrow_rule
+    assert "width: auto;" in narrow_rule
+
 
 def test_theme_toggle_uses_requested_symbols_and_tooltips():
     javascript = source("static/theme.js")

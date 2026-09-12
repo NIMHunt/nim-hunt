@@ -12,7 +12,7 @@
 
 /* The footer adopts Nimiq's standard nq-text typography in theme.js. These
    children inherit that shared size instead of restating a pixel/rem value. */
-.home-information-links > a {
+.home-information-links.nq-text > a {
     font-size: inherit;
 }
 

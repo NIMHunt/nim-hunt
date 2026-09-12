@@ -18,16 +18,19 @@ test('wrapped Auckland longitudes normalise to the same canonical coordinate', (
     assert.ok(Math.abs(normaliseLongitude(auckland + 360) - auckland) < 1e-9);
 });
 
-test('normaliseLongitude handles repeated worlds and canonical boundaries', () => {
+test('normaliseLongitude handles repeated worlds, boundaries and missing values', () => {
     assert.equal(normaliseLongitude(545), -175);
     assert.equal(normaliseLongitude(-535), -175);
     assert.equal(normaliseLongitude(180), -180);
     assert.equal(normaliseLongitude(-180), -180);
     assert.equal(normaliseLongitude(-0), 0);
+    assert.equal(normaliseLongitude(null), null);
+    assert.equal(normaliseLongitude(undefined), null);
+    assert.equal(normaliseLongitude(''), null);
     assert.equal(normaliseLongitude('not-a-number'), null);
 });
 
-test('canonical coordinate validation rejects out-of-range map copies', () => {
+test('canonical coordinate validation rejects missing and out-of-range map copies', () => {
     assert.equal(validCanonicalCoordinates(-36.8485, 174.7633), true);
     assert.equal(validCanonicalCoordinates(-36.8485, -185.2367), false);
     assert.equal(validCanonicalCoordinates(-36.8485, 534.7633), false);
@@ -35,4 +38,6 @@ test('canonical coordinate validation rejects out-of-range map copies', () => {
     assert.equal(validCanonicalCoordinates(-91, 0), false);
     assert.equal(validCanonicalCoordinates(0, 181), false);
     assert.equal(validCanonicalCoordinates(0, -181), false);
+    assert.equal(validCanonicalCoordinates(null, null), false);
+    assert.equal(validCanonicalCoordinates('', ''), false);
 });

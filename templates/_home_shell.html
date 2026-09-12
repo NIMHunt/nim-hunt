@@ -159,30 +159,35 @@
         {% endif %}
 
         {% if show_information_links | default(false) or information_view | default('') in ('about', 'how-to', 'roadmap') or information_view | default('') == 'faq' %}
-        <nav class="home-information-links" aria-label="Project information">
+        <nav class="home-information-links nq-text" aria-label="Project information">
             {% if information_view | default('') == 'about' %}
             <a href="/">Home</a>
             <a href="/how-to">How To</a>
+            <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle colour theme" title="Toggle colour theme" data-tooltip="Toggle colour theme"><span class="theme-toggle-symbol" aria-hidden="true"></span></button>
             <a href="/faq">FAQ</a>
             <a href="/roadmap">Roadmap</a>
             {% elif information_view | default('') == 'how-to' %}
             <a href="/about">About</a>
             <a href="/">Home</a>
+            <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle colour theme" title="Toggle colour theme" data-tooltip="Toggle colour theme"><span class="theme-toggle-symbol" aria-hidden="true"></span></button>
             <a href="/faq">FAQ</a>
             <a href="/roadmap">Roadmap</a>
             {% elif information_view | default('') == 'faq' %}
             <a href="/about">About</a>
             <a href="/how-to">How To</a>
+            <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle colour theme" title="Toggle colour theme" data-tooltip="Toggle colour theme"><span class="theme-toggle-symbol" aria-hidden="true"></span></button>
             <a href="/">Home</a>
             <a href="/roadmap">Roadmap</a>
             {% elif information_view | default('') == 'roadmap' %}
             <a href="/about">About</a>
             <a href="/how-to">How To</a>
+            <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle colour theme" title="Toggle colour theme" data-tooltip="Toggle colour theme"><span class="theme-toggle-symbol" aria-hidden="true"></span></button>
             <a href="/faq">FAQ</a>
             <a href="/">Home</a>
             {% else %}
             <a href="/about">About</a>
             <a href="/how-to">How To</a>
+            <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle colour theme" title="Toggle colour theme" data-tooltip="Toggle colour theme"><span class="theme-toggle-symbol" aria-hidden="true"></span></button>
             <a href="/faq">FAQ</a>
             <a href="/roadmap">Roadmap</a>
             {% endif %}

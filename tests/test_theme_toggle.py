@@ -9,8 +9,8 @@ def source(path: str) -> str:
 
 def test_theme_head_is_loaded_by_every_page_shell():
     theme_head = source("templates/_theme_head.html")
-    assert "/static/theme.css?v=dark-mode-v9-footer-typography-20260912" in theme_head
-    assert "/static/theme.js?v=dark-mode-v3-20260816" in theme_head
+    assert "/static/theme.css?v=dark-mode-v10-footer-first-paint-20260912" in theme_head
+    assert "/static/theme.js?v=dark-mode-v3-20260816-admin-toggle-v1-20260901-footer-first-paint-v2-20260912" in theme_head
 
     for path in (
         "templates/_home_shell.html",
@@ -24,14 +24,18 @@ def test_theme_head_is_loaded_by_every_page_shell():
         assert '{% include "_theme_head.html" %}' in source(path), path
 
 
-def test_footer_theme_toggle_is_inserted_between_how_to_and_faq_slots():
+def test_public_footer_is_complete_before_javascript_runs():
+    template = source("templates/_home_shell.html")
     javascript = source("static/theme.js")
     stylesheet = source("static/theme.css")
 
-    assert "documentObj.querySelector('.home-information-links')" in javascript
-    assert "footer?.classList.add('nq-text');" in javascript
-    assert "documentObj.querySelectorAll('.home-information-links > a')" in javascript
-    assert "links[1].after(toggle);" in javascript
+    assert 'class="home-information-links nq-text"' in template
+    assert template.count('id="theme-toggle"') == 5
+    assert template.count('class="theme-toggle-symbol"') == 5
+    assert "documentObj.querySelector('.home-information-links')" not in javascript
+    assert "footer?.classList.add('nq-text');" not in javascript
+    assert "documentObj.querySelectorAll('.home-information-links > a')" not in javascript
+    assert "links[1].after(toggle);" not in javascript
     assert "grid-template-columns: repeat(5, minmax(0, 1fr))" in stylesheet
 
     footer_link_rule = stylesheet.split(".home-information-links.nq-text > a {", 1)[1].split("}", 1)[0]
@@ -55,16 +59,36 @@ def test_footer_theme_toggle_is_inserted_between_how_to_and_faq_slots():
     assert "width: auto;" in narrow_rule
 
 
-def test_theme_toggle_uses_requested_symbols_and_tooltips():
+def test_server_rendered_toggle_is_clickable_before_dom_content_loaded():
     javascript = source("static/theme.js")
 
-    assert "symbol: '◐'" in javascript
-    assert "symbol: '☀'" in javascript
-    assert "label: 'Switch to dark mode'" in javascript
-    assert "label: 'Switch to light mode'" in javascript
-    assert "toggle.dataset.tooltip = presentation.label" in javascript
-    assert "toggle.setAttribute('title', presentation.label)" in javascript
-    assert "toggle.setAttribute('aria-label', presentation.label)" in javascript
+    delegation_install = "installThemeToggleDelegation(document);"
+    dom_ready_gate = "if (document.readyState === 'loading') {"
+
+    assert "documentObj.addEventListener('click', (event) => {" in javascript
+    assert "event.target?.closest?.(`#${TOGGLE_ID}`)" in javascript
+    assert "switchThemeFromToggle(documentObj);" in javascript
+    assert "toggle.addEventListener('click'" not in javascript
+    assert javascript.index(delegation_install) < javascript.index(dom_ready_gate)
+
+
+def test_theme_toggle_symbol_is_css_driven_from_initial_theme():
+    javascript = source("static/theme.js")
+    stylesheet = source("static/theme.css")
+
+    light_symbol_rule = stylesheet.split(".theme-toggle-symbol::before {", 1)[1].split("}", 1)[0]
+    dark_symbol_rule = stylesheet.split(
+        'html[data-theme="dark"] .theme-toggle-symbol::before {', 1
+    )[1].split("}", 1)[0]
+
+    assert 'content: "◐";' in light_symbol_rule
+    assert 'content: "☀";' in dark_symbol_rule
+    assert "symbol.textContent" not in javascript
+    assert "'Switch to dark mode'" in javascript
+    assert "'Switch to light mode'" in javascript
+    assert "toggle.dataset.tooltip = label" in javascript
+    assert "toggle.setAttribute('title', label)" in javascript
+    assert "toggle.setAttribute('aria-label', label)" in javascript
 
 
 def test_theme_toggle_is_buttonless_and_uses_standard_tooltip_typography():

@@ -103,18 +103,20 @@ def test_faq_controller_keeps_only_one_answer_open() -> None:
     assert "innerHTML" not in controller
 
 
-def test_information_footer_uses_requested_four_link_order() -> None:
+def test_information_footer_uses_requested_link_order_with_theme_slot() -> None:
     shell_template = _read("templates/_home_shell.html")
     faq_styles = _read("static/faq.css")
+    theme_styles = _read("static/theme.css")
 
-    ordered_links = (
+    ordered_footer = (
         '<a href="/about">About</a>\n'
         '            <a href="/how-to">How To</a>\n'
+        '            <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle colour theme" title="Toggle colour theme" data-tooltip="Toggle colour theme"><span class="theme-toggle-symbol" aria-hidden="true"></span></button>\n'
         '            <a href="/faq">FAQ</a>\n'
         '            <a href="/roadmap">Roadmap</a>'
     )
-    assert ordered_links in shell_template
-    assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in faq_styles
+    assert ordered_footer in shell_template
+    assert "grid-template-columns: repeat(5, minmax(0, 1fr))" in theme_styles
     assert ".faq-question" in faq_styles
     assert "white-space: normal;" in faq_styles
     assert ".nq-style .faq-answer > .faq-answer-copy" in faq_styles

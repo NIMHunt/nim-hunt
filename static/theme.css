@@ -10,7 +10,7 @@
     margin: 0;
 }
 
-/* The footer adopts Nimiq's standard nq-text typography in theme.js. These
+/* The footer is rendered with Nimiq's standard nq-text typography, so its
    children inherit that shared size instead of restating a pixel/rem value. */
 .home-information-links.nq-text > a {
     font-size: inherit;
@@ -65,6 +65,12 @@
     line-height: 1;
 }
 
+/* The theme itself is selected synchronously in the document head. Rendering
+   the glyph from that data attribute avoids waiting for DOMContentLoaded. */
+.theme-toggle-symbol::before {
+    content: "◐";
+}
+
 .home-information-links .theme-toggle-symbol {
     font-size: 1em;
 }
@@ -78,6 +84,10 @@ html[data-theme="dark"] .theme-toggle-symbol {
     background: transparent;
     color: #fc8702;
     font-size: 1.5rem;
+}
+
+html[data-theme="dark"] .theme-toggle-symbol::before {
+    content: "☀";
 }
 
 html[data-theme="dark"] .home-information-links .theme-toggle-symbol {
@@ -297,7 +307,6 @@ html[data-theme="dark"] .nq-style .notice-card .notice-guide-button:active {
 html[data-theme="dark"] .leaflet-container {
     background: #151833;
 }
-
 html[data-theme="dark"] .leaflet-popup-content-wrapper,
 html[data-theme="dark"] .leaflet-popup-tip,
 html[data-theme="dark"] .leaflet-tooltip {

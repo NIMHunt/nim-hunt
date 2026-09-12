@@ -30,10 +30,11 @@ def test_shared_theme_ui_places_toggle_on_admin_pages():
 
 def test_admin_toggle_reuses_shared_theme_preference_and_symbols():
     javascript = source("static/theme.js")
+    stylesheet = source("static/theme.css")
 
     assert "const STORAGE_KEY = 'nimhunt-theme'" in javascript
-    assert "symbol: '◐'" in javascript
-    assert "symbol: '☀'" in javascript
+    assert 'content: "◐";' in stylesheet
+    assert 'content: "☀";' in stylesheet
     assert "return explicitStoredTheme() || systemTheme();" in javascript
     assert "persist: true" in javascript
     assert "typeof documentObj.startViewTransition === 'function'" in javascript

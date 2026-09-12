@@ -9,7 +9,7 @@ def source(path: str) -> str:
 
 def test_theme_head_is_loaded_by_every_page_shell():
     theme_head = source("templates/_theme_head.html")
-    assert "/static/theme.css?v=dark-mode-v8-20260816" in theme_head
+    assert "/static/theme.css?v=dark-mode-v9-footer-typography-20260912" in theme_head
     assert "/static/theme.js?v=dark-mode-v3-20260816" in theme_head
 
     for path in (
@@ -28,9 +28,31 @@ def test_footer_theme_toggle_is_inserted_between_how_to_and_faq_slots():
     javascript = source("static/theme.js")
     stylesheet = source("static/theme.css")
 
+    assert "documentObj.querySelector('.home-information-links')" in javascript
+    assert "footer?.classList.add('nq-text');" in javascript
     assert "documentObj.querySelectorAll('.home-information-links > a')" in javascript
     assert "links[1].after(toggle);" in javascript
     assert "grid-template-columns: repeat(5, minmax(0, 1fr))" in stylesheet
+
+    footer_link_rule = stylesheet.split(".home-information-links.nq-text > a {", 1)[1].split("}", 1)[0]
+    footer_toggle_rule = stylesheet.split(".home-information-links .theme-toggle-symbol {", 1)[1].split("}", 1)[0]
+    dark_footer_toggle_rule = stylesheet.split(
+        'html[data-theme="dark"] .home-information-links .theme-toggle-symbol {', 1
+    )[1].split("}", 1)[0]
+
+    assert "font-size: inherit;" in footer_link_rule
+    assert "font-size: 1em;" in footer_toggle_rule
+    assert "font-size: 1em;" in dark_footer_toggle_rule
+    assert "font-size: 2rem;" not in footer_link_rule
+    assert "font-size: 2rem;" not in footer_toggle_rule
+    assert "font-size: 2.2rem;" not in dark_footer_toggle_rule
+
+    narrow_rule = stylesheet.split("@media (max-width: 390px) {", 1)[1].split(".theme-toggle-symbol {", 1)[0]
+    assert "display: flex;" in narrow_rule
+    assert "flex-wrap: wrap;" in narrow_rule
+    assert "justify-content: center;" in narrow_rule
+    assert ".home-information-links .theme-toggle" in narrow_rule
+    assert "width: auto;" in narrow_rule
 
 
 def test_theme_toggle_uses_requested_symbols_and_tooltips():

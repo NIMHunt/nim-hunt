@@ -158,6 +158,9 @@
             return bindToggle(toggle, documentObj);
         }
 
+        const footer = documentObj.querySelector('.home-information-links');
+        footer?.classList.add('nq-text');
+
         const links = documentObj.querySelectorAll('.home-information-links > a');
         if (links.length < 4) return null;
 

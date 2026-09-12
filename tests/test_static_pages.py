@@ -43,7 +43,7 @@ def test_information_links_use_clean_routes_and_cover_every_view() -> None:
     shell_template = _read("templates/_home_shell.html")
 
     assert shell_template.index('id="home-metrics"') < shell_template.index(
-        'class="home-information-links"'
+        'class="home-information-links nq-text"'
     )
     assert '<a href="/about">About</a>' in shell_template
     assert '<a href="/how-to">How To</a>' in shell_template

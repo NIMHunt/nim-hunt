@@ -10,7 +10,7 @@ def source(path: str) -> str:
 def test_theme_head_is_loaded_by_every_page_shell():
     theme_head = source("templates/_theme_head.html")
     assert "/static/theme.css?v=dark-mode-v10-footer-first-paint-20260912" in theme_head
-    assert "/static/theme.js?v=dark-mode-v3-20260816-admin-toggle-v1-20260901-footer-first-paint-v1-20260912" in theme_head
+    assert "/static/theme.js?v=dark-mode-v3-20260816-admin-toggle-v1-20260901-footer-first-paint-v2-20260912" in theme_head
 
     for path in (
         "templates/_home_shell.html",
@@ -57,6 +57,19 @@ def test_public_footer_is_complete_before_javascript_runs():
     assert "justify-content: center;" in narrow_rule
     assert ".home-information-links .theme-toggle" in narrow_rule
     assert "width: auto;" in narrow_rule
+
+
+def test_server_rendered_toggle_is_clickable_before_dom_content_loaded():
+    javascript = source("static/theme.js")
+
+    delegation_install = "installThemeToggleDelegation(document);"
+    dom_ready_gate = "if (document.readyState === 'loading') {"
+
+    assert "documentObj.addEventListener('click', (event) => {" in javascript
+    assert "event.target?.closest?.(`#${TOGGLE_ID}`)" in javascript
+    assert "switchThemeFromToggle(documentObj);" in javascript
+    assert "toggle.addEventListener('click'" not in javascript
+    assert javascript.index(delegation_install) < javascript.index(dom_ready_gate)
 
 
 def test_theme_toggle_symbol_is_css_driven_from_initial_theme():

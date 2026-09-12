@@ -9,7 +9,7 @@ def source(path: str) -> str:
 
 def test_theme_head_is_loaded_by_every_page_shell():
     theme_head = source("templates/_theme_head.html")
-    assert "/static/theme.css?v=dark-mode-v8-20260816" in theme_head
+    assert "/static/theme.css?v=dark-mode-v9-footer-size-20260912" in theme_head
     assert "/static/theme.js?v=dark-mode-v3-20260816" in theme_head
 
     for path in (
@@ -31,6 +31,16 @@ def test_footer_theme_toggle_is_inserted_between_how_to_and_faq_slots():
     assert "documentObj.querySelectorAll('.home-information-links > a')" in javascript
     assert "links[1].after(toggle);" in javascript
     assert "grid-template-columns: repeat(5, minmax(0, 1fr))" in stylesheet
+
+    footer_link_rule = stylesheet.split(".home-information-links > a {", 1)[1].split("}", 1)[0]
+    footer_toggle_rule = stylesheet.split(".home-information-links .theme-toggle-symbol {", 1)[1].split("}", 1)[0]
+    dark_footer_toggle_rule = stylesheet.split(
+        'html[data-theme="dark"] .home-information-links .theme-toggle-symbol {', 1
+    )[1].split("}", 1)[0]
+
+    assert "font-size: 2rem;" in footer_link_rule
+    assert "font-size: 2rem;" in footer_toggle_rule
+    assert "font-size: 2.2rem;" in dark_footer_toggle_rule
 
 
 def test_theme_toggle_uses_requested_symbols_and_tooltips():

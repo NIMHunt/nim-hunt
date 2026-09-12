@@ -34,7 +34,10 @@ def test_first_visit_notice_has_a_quiet_starter_guide_action() -> None:
         "/static/first_visit_guide.js?v=first-visit-guide-v3-browser-session-20260731"
         in shell
     )
-    assert "/static/home_information_polish.css?v=roadmap-typography-v2-20260730" in shell
+    assert (
+        "/static/home_information_polish.css?v=home-information-polish-v3-metrics-spacing-20260912"
+        in shell
+    )
 
     assert ".notice-actions > .nq-button" in stylesheet
     assert "height: 7.5rem;" in stylesheet

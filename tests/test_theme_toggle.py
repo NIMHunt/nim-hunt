@@ -34,7 +34,7 @@ def test_footer_theme_toggle_is_inserted_between_how_to_and_faq_slots():
     assert "links[1].after(toggle);" in javascript
     assert "grid-template-columns: repeat(5, minmax(0, 1fr))" in stylesheet
 
-    footer_link_rule = stylesheet.split(".home-information-links > a {", 1)[1].split("}", 1)[0]
+    footer_link_rule = stylesheet.split(".home-information-links.nq-text > a {", 1)[1].split("}", 1)[0]
     footer_toggle_rule = stylesheet.split(".home-information-links .theme-toggle-symbol {", 1)[1].split("}", 1)[0]
     dark_footer_toggle_rule = stylesheet.split(
         'html[data-theme="dark"] .home-information-links .theme-toggle-symbol {', 1

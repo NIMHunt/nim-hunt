@@ -2,6 +2,7 @@ import { requestDeviceIdentifier } from 'https://esm.sh/@nimiq/mini-app-sdk';
 import { getCommonText, makeCreateSpotFormText } from './interface_text.js?v=qol-v1-20260717';
 import { LUNA_PER_NIM, formatNimAmount } from './nim_format.js';
 import { adjustedPrizedrawLimits, prizedrawLimitsAreValid } from './prizedraw_rules.js?v=qol-v1-20260717';
+import { normaliseLongitude, validCanonicalCoordinates } from './geo_coordinates.js?v=create-spot-wrap-v1-20260912';
 import {
     createNoticePresenter,
     getLanguage,
@@ -217,7 +218,6 @@ function showSaveLockedTooltip() {
     if (!els.save || els.save.getAttribute('aria-disabled') !== 'true' || !els.save.dataset.tooltip) return;
     showHelpTooltip(els.save);
 }
-
 function redirectHome() {
     window.location.replace('/');
 }
@@ -761,9 +761,11 @@ function setLocationLines({ city, country, lat, long } = {}) {
 function setLatLongFromMap() {
     if (!state.map) return;
     const centre = state.map.getCenter();
+    const canonicalLong = normaliseLongitude(centre.lng);
+    if (canonicalLong === null) return;
     state.spot.lat = centre.lat;
-    state.spot.long = centre.lng;
-    setLocationLines({ lat: centre.lat, long: centre.lng });
+    state.spot.long = canonicalLong;
+    setLocationLines({ lat: centre.lat, long: canonicalLong });
     updateRadiusCircle();
     updateSaveButtonState();
 }
@@ -842,13 +844,18 @@ async function reverseGeocodeMapCentre() {
     }
 
     const centre = state.map.getCenter();
+    const canonicalLong = normaliseLongitude(centre.lng);
+    if (canonicalLong === null) {
+        finishHydration();
+        return;
+    }
     if (state.reverseController) state.reverseController.abort();
     state.reverseController = new AbortController();
 
     try {
         const params = new URLSearchParams({
             lat: String(centre.lat),
-            long: String(centre.lng),
+            long: String(canonicalLong),
         });
         const data = await fetchJson(`/api/location/reverse?${params.toString()}`, {
             signal: state.reverseController.signal,
@@ -956,7 +963,7 @@ function validPasswordSettings() {
 function validLocation() {
     const lat = state.spot?.lat;
     const long = state.spot?.long;
-    return Number.isFinite(Number(lat)) && Number.isFinite(Number(long));
+    return validCanonicalCoordinates(lat, long);
 }
 
 function validateForm({ showMessage = true } = {}) {
@@ -1010,12 +1017,13 @@ function validateForm({ showMessage = true } = {}) {
 function buildDraftFields() {
     const lat = state.spot?.lat;
     const long = state.spot?.long;
+    const canonicalLong = normaliseLongitude(long);
 
     return {
         title: els.title.value.trim(),
         description: els.description.value.trim() || null,
         lat: Number.isFinite(Number(lat)) ? Number(lat) : null,
-        long: Number.isFinite(Number(long)) ? Number(long) : null,
+        long: canonicalLong,
         city: state.city || null,
         country: state.country || null,
         radius: sliderValue('radius'),

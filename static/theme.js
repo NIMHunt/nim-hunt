@@ -39,30 +39,20 @@
         }
     }
 
-    function togglePresentation(theme) {
-        if (theme === DARK_THEME) {
-            return {
-                symbol: '☀',
-                label: 'Switch to light mode',
-            };
-        }
-
-        return {
-            symbol: '◐',
-            label: 'Switch to dark mode',
-        };
+    function toggleLabel(theme) {
+        return theme === DARK_THEME
+            ? 'Switch to light mode'
+            : 'Switch to dark mode';
     }
 
     function updateToggle(documentObj, theme) {
         const toggle = documentObj.getElementById(TOGGLE_ID);
         if (!toggle) return;
 
-        const presentation = togglePresentation(theme);
-        const symbol = toggle.querySelector('.theme-toggle-symbol');
-        if (symbol) symbol.textContent = presentation.symbol;
-        toggle.setAttribute('aria-label', presentation.label);
-        toggle.setAttribute('title', presentation.label);
-        toggle.dataset.tooltip = presentation.label;
+        const label = toggleLabel(theme);
+        toggle.setAttribute('aria-label', label);
+        toggle.setAttribute('title', label);
+        toggle.dataset.tooltip = label;
     }
 
     function applyTheme(theme, { persist = false, documentObj = document } = {}) {
@@ -158,18 +148,7 @@
             return bindToggle(toggle, documentObj);
         }
 
-        const footer = documentObj.querySelector('.home-information-links');
-        footer?.classList.add('nq-text');
-
-        const links = documentObj.querySelectorAll('.home-information-links > a');
-        if (links.length < 4) return null;
-
-        const toggle = buildToggle(documentObj);
-
-        // The information footer is About · How To · FAQ · Roadmap. Insert
-        // the theme control exactly in the middle, after the second link.
-        links[1].after(toggle);
-        return bindToggle(toggle, documentObj);
+        return null;
     }
 
     function installThemeUi(documentObj = document) {

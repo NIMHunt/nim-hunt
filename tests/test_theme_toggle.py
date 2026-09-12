@@ -28,6 +28,8 @@ def test_footer_theme_toggle_is_inserted_between_how_to_and_faq_slots():
     javascript = source("static/theme.js")
     stylesheet = source("static/theme.css")
 
+    assert "documentObj.querySelector('.home-information-links')" in javascript
+    assert "footer?.classList.add('nq-text');" in javascript
     assert "documentObj.querySelectorAll('.home-information-links > a')" in javascript
     assert "links[1].after(toggle);" in javascript
     assert "grid-template-columns: repeat(5, minmax(0, 1fr))" in stylesheet
@@ -38,9 +40,12 @@ def test_footer_theme_toggle_is_inserted_between_how_to_and_faq_slots():
         'html[data-theme="dark"] .home-information-links .theme-toggle-symbol {', 1
     )[1].split("}", 1)[0]
 
-    assert "font-size: 2rem;" in footer_link_rule
-    assert "font-size: 2rem;" in footer_toggle_rule
-    assert "font-size: 2.2rem;" in dark_footer_toggle_rule
+    assert "font-size: inherit;" in footer_link_rule
+    assert "font-size: 1em;" in footer_toggle_rule
+    assert "font-size: 1em;" in dark_footer_toggle_rule
+    assert "font-size: 2rem;" not in footer_link_rule
+    assert "font-size: 2rem;" not in footer_toggle_rule
+    assert "font-size: 2.2rem;" not in dark_footer_toggle_rule
 
 
 def test_theme_toggle_uses_requested_symbols_and_tooltips():

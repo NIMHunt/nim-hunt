@@ -19,6 +19,58 @@ _INSTALLED = False
 
 _ORIGINAL_CREATE_FEE = db_access.create_spot_creation_fee_transaction
 _ORIGINAL_SUBMIT_READY = trans_updater.submit_ready_spot_creation_fees
+_ORIGINAL_RESERVE_DRAFT_CREATION = db_access.reserve_draft_creation
+
+
+async def release_fully_funded_draft_admissions(db) -> int:
+    """Stop fully funded Spots consuming rolling draft-creation capacity.
+
+    Draft admission exists to bound cheap deposit-address derivation. Once the
+    full required Spot deposit is confirmed on-chain, the creator has committed
+    real funds (including the snapshotted creation-fee amount), so retaining the
+    one-hour admission would mainly penalise legitimate prolific creators.
+
+    Pending and partial deposits deliberately remain counted. Only consumed
+    admissions can be released, and the deposit key index is the durable link
+    between the admission and the Spot created from it.
+
+    The caller already owns the draft-admission writer transaction.
+    """
+    cur = await db.execute(
+        f"""
+        DELETE FROM {schema.DRAFT_CREATION_ADMISSION_TABLE_NAME}
+        WHERE {schema.DRAFT_CREATION_ADMISSION_STATUS} = ?
+          AND EXISTS (
+                SELECT 1
+                FROM {schema.SPOT_TABLE_NAME} s
+                WHERE s.{schema.SPOT_DEPOSIT_KEY_INDEX} =
+                      {schema.DRAFT_CREATION_ADMISSION_TABLE_NAME}.{schema.DRAFT_CREATION_ADMISSION_KEY_INDEX}
+                  AND (
+                        SELECT COALESCE(SUM(t.{schema.TRANS_AMOUNT}), 0)
+                        FROM {schema.TRANS_TABLE_NAME} t
+                        WHERE t.{schema.TRANS_SPOT_ID} = s.{schema.SPOT_ID}
+                          AND t.{schema.TRANS_TYPE} = ?
+                          AND t.{schema.TRANS_STATUS} = ?
+                  ) >= s.{schema.SPOT_TOTAL_VALUE} + s.{schema.SPOT_CREATION_FEE}
+          );
+        """,
+        (
+            schema.DRAFT_ADMISSION_CONSUMED,
+            const.TRANS_TYPE_FILL_SPOT,
+            const.TRANS_STATUS_CONFIRMED,
+        ),
+    )
+    return int(cur.rowcount)
+
+
+async def reserve_draft_creation(db, *, user_id: int, now: int | None = None) -> RowDict | None:
+    """Apply ordinary draft admission after releasing paid-for capacity."""
+    await release_fully_funded_draft_admissions(db)
+    return await _ORIGINAL_RESERVE_DRAFT_CREATION(
+        db,
+        user_id=int(user_id),
+        now=now,
+    )
 
 
 async def get_spot_ids_ready_for_creation_fee(
@@ -328,6 +380,7 @@ def install() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+    db_access.reserve_draft_creation = reserve_draft_creation
     db_access.get_spot_ids_ready_for_creation_fee = get_spot_ids_ready_for_creation_fee
     db_access.create_spot_creation_fee_transaction = create_spot_creation_fee_transaction
     trans_updater.submit_spot_creation_fee_transaction = submit_spot_creation_fee_transaction

@@ -30,6 +30,6 @@ def test_roadmap_primary_copy_uses_matching_weight_and_real_bullets() -> None:
     assert "line-height:" not in item_rule
     assert "font-family:" not in item_rule
     assert (
-        "/static/home_information_polish.css?v=roadmap-typography-v2-20260730"
+        "/static/home_information_polish.css?v=home-information-polish-v3-metrics-spacing-20260912"
         in shell_template
     )

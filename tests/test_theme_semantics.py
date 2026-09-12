@@ -10,7 +10,7 @@ def source(path: str) -> str:
 def test_semantic_theme_layer_loads_after_neutral_theme():
     head = source("templates/_theme_head.html")
 
-    theme_href = "/static/theme.css?v=dark-mode-v9-footer-typography-20260912"
+    theme_href = "/static/theme.css?v=dark-mode-v10-footer-first-paint-20260912"
     semantics_href = "/static/theme_semantics.css?v=semantic-accents-v1-20260816"
     assert theme_href in head
     assert semantics_href in head

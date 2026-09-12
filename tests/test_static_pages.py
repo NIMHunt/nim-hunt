@@ -37,6 +37,7 @@ def test_information_views_are_variants_of_the_real_homepage() -> None:
     assert "/static/static_page.js?v=about-nimiq-pay-v2-20260725" in shell_template
     assert "/static/static_pages.css?v=home-information-v9-how-to-interactions-20260729" in shell_template
     assert "/static/how_to.js?v=how-to-platform-toggle-v3-20260729" in shell_template
+    assert "/static/how_to_video.css?v=responsive-youtube-v1-20260912" in shell_template
 
 
 def test_information_links_use_clean_routes_and_cover_every_view() -> None:
@@ -226,28 +227,35 @@ def test_how_to_story_has_complete_copy_shared_map_tooltips_and_real_claim_butto
     assert "gap: clamp(5.5rem, 19vw, 8.5rem);" in stylesheet
 
 
-def test_how_to_uses_user_supplied_image_paths_only() -> None:
+def test_how_to_embeds_responsive_video_and_keeps_permission_images() -> None:
     partial = _read("templates/_how_to_content.html")
-    stylesheet = _read("static/static_pages.css")
+    video_stylesheet = _read("static/how_to_video.css")
     controller = _read("static/how_to.js")
 
-    figure = partial.split('<figure class="how-to-find-spots-figure">', 1)[1]
-    assert figure.count("<img") == 1
-    assert "/static/images/how-to/example.png" in figure
-    assert 'width="703"' in figure
-    assert 'height="1015"' in figure
+    video = partial.split('<figure class="how-to-video-figure">', 1)[1]
+    assert video.count("<iframe") == 1
+    assert "https://www.youtube-nocookie.com/embed/RAYx0I1MAMY" in video
+    assert 'title="NimHunt promotional video"' in video
+    assert 'loading="lazy"' in video
+    assert 'referrerpolicy="strict-origin-when-cross-origin"' in video
+    assert "allowfullscreen" in video
+    assert "/static/images/how-to/example.png" not in partial
     assert "data-how-to-image-chunk-prefix" not in partial
     assert "data:image/webp;base64," not in controller
     assert "chunks.join" not in controller
 
-    assert "-webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 88%, transparent 100%);" in stylesheet
-    assert "max-width: 440px;" in stylesheet
+    assert ".how-to-video-figure" in video_stylesheet
+    assert ".how-to-video-frame" in video_stylesheet
+    assert "width: 100%;" in video_stylesheet
+    assert "max-width: 100%;" in video_stylesheet
+    assert "aspect-ratio: 16 / 9;" in video_stylesheet
+    assert ".how-to-video-frame iframe" in video_stylesheet
+    assert "height: 100%;" in video_stylesheet
 
     asset_dir = ROOT / "static" / "images" / "how-to"
     for required_asset in (
         "warning-android.png",
         "warning-ios.png",
-        "example.png",
     ):
         asset = asset_dir / required_asset
         assert asset.exists()

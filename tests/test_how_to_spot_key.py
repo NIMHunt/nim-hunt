@@ -12,16 +12,19 @@ def test_how_to_heading_is_starter_guide_without_renaming_navigation_link() -> N
     assert (
         '/static/how_to_key.css?v=spot-key-v2-map-tooltip-20260729' in shell
     )
+    assert (
+        '/static/how_to_video.css?v=responsive-youtube-v1-20260912' in shell
+    )
 
 
-def test_spot_key_sits_above_example_and_uses_existing_nimiq_icons() -> None:
+def test_spot_key_sits_above_video_and_uses_existing_nimiq_icons() -> None:
     partial = _read("templates/_how_to_content.html")
     stylesheet = _read("static/how_to_key.css")
 
     key_position = partial.index('class="how-to-spot-key"')
-    example_position = partial.index('<figure class="how-to-find-spots-figure">')
+    video_position = partial.index('<figure class="how-to-video-figure">')
 
-    assert key_position < example_position
+    assert key_position < video_position
     assert '>Spot Key</h3>' in partial
     assert "Spot Key:" not in partial
     assert "#nq-stopwatch" in partial

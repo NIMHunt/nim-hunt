@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import constants as const
 import database as schema
 
 TABLE_NAME = "SECURITY_EVENT"
@@ -35,6 +36,25 @@ async def ensure_table(db) -> None:
     await db.execute(f"CREATE INDEX IF NOT EXISTS idx_security_event_active ON {TABLE_NAME}(decision_type, expires_at, user_id);")
 
 
+async def prune_expired(db, *, now: int) -> None:
+    """Prune history unless it is the record of a still-enforced automatic ban."""
+    await db.execute(
+        f"""
+        DELETE FROM {TABLE_NAME}
+        WHERE created_at < ?
+          AND NOT (
+              decision_type = ?
+              AND EXISTS (
+                  SELECT 1 FROM {schema.USER_TABLE_NAME} u
+                  WHERE u.{schema.USER_ID} = {TABLE_NAME}.user_id
+                    AND u.{schema.USER_STATUS} = ?
+              )
+          );
+        """,
+        (int(now) - RETENTION_SECONDS, DECISION_AUTOMATIC_BAN, const.USER_STATUS_BANNED),
+    )
+
+
 async def record_decision(db, *, user_id: int, code: str, decision_type: str,
                           created_at: int, expires_at: int | None = None,
                           metadata: dict[str, Any] | None = None) -> int | None:
@@ -55,10 +75,7 @@ async def record_decision(db, *, user_id: int, code: str, decision_type: str,
         clean = {key: metadata[key] for key in allowed if key in metadata}
         clean_metadata = json.dumps(clean, separators=(",", ":"), sort_keys=True) if clean else None
     await ensure_table(db)
-    await db.execute(
-        f"DELETE FROM {TABLE_NAME} WHERE created_at < ?;",
-        (created_at - RETENTION_SECONDS,),
-    )
+    await prune_expired(db, now=created_at)
     cur = await db.execute(f"""
         INSERT OR IGNORE INTO {TABLE_NAME}
             (user_id, code, decision_type, episode_key, created_at, expires_at, metadata)

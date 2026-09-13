@@ -79,10 +79,7 @@ async def security_overview(db, *, limit: int = 30) -> RowDict:
     # Keep lazy retention genuinely time-bounded even during quiet periods with
     # no new enforcement decisions. The administrator view is an existing,
     # local operator maintenance path, so no scheduler is required.
-    await db.execute(
-        f"DELETE FROM {security_events.TABLE_NAME} WHERE created_at < ?;",
-        (now - security_events.RETENTION_SECONDS,),
-    )
+    await security_events.prune_expired(db, now=now)
     await db.commit()
     event_rows = await db.execute_fetchall(
         f"""
@@ -159,7 +156,7 @@ async def security_overview(db, *, limit: int = 30) -> RowDict:
             elif current["action"] == "Temporary restriction":
                 # The event preserves when the episode began. Live guard state
                 # is authoritative for an extension of that same episode.
-                current["expires_at"] = expiry
+                current["expires_at"] = max(int(current["expires_at"]), expiry)
     counts = await (await db.execute(
         f"""SELECT
             SUM(CASE WHEN decision_type = ? THEN 1 ELSE 0 END) AS restrictions,

@@ -91,6 +91,26 @@ class SecurityEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(overview["restricted_now"], 1)
         self.assertEqual(overview["active"][0]["expires_at"], expiry_b)
 
+    async def test_shorter_live_metadata_does_not_shorten_event_expiry(self):
+        now = await db_access.get_unixepoch(self.db)
+        expiry_a = now + 200
+        expiry_b = now + 100
+        await self._temporary(created_at=now, expires_at=expiry_a)
+        digest = hashlib.sha256(str(self.user_id).encode()).hexdigest()
+        await security_metadata.set_json(
+            self.db, f"fresh_claim_guard:gps:{digest}",
+            {"restricted_until": expiry_b},
+        )
+        await self.db.commit()
+
+        overview = await admin_store.security_overview(self.db)
+        count = await (await self.db.execute(
+            f"SELECT COUNT(*) FROM {security_events.TABLE_NAME}"
+        )).fetchone()
+
+        self.assertEqual(count[0], 1)
+        self.assertEqual(overview["active"][0]["expires_at"], expiry_a)
+
     async def test_sensitive_values_cannot_be_persisted_as_diagnostics(self):
         await self._temporary(
             created_at=100, expires_at=200,
@@ -126,6 +146,32 @@ class SecurityEventTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(count[0], 0)
         self.assertEqual(overview["events"], [])
+
+    async def test_old_automatic_ban_is_retained_only_while_user_remains_banned(self):
+        now = await db_access.get_unixepoch(self.db)
+        created_at = now - security_events.RETENTION_SECONDS - 1
+        await db_access.set_user_status_to_banned(self.db, user_id=self.user_id)
+        await security_events.record_decision(
+            self.db, user_id=self.user_id, code="impossible_claim_travel",
+            decision_type=security_events.DECISION_AUTOMATIC_BAN,
+            created_at=created_at,
+        )
+        await self.db.commit()
+
+        overview = await admin_store.security_overview(self.db)
+        self.assertEqual(len(overview["events"]), 1)
+        self.assertEqual(overview["restricted_now"], 1)
+        self.assertEqual(overview["active"][0]["action"], "Automatic ban")
+
+        await db_access.set_user_status_to_active(self.db, user_id=self.user_id)
+        await self.db.commit()
+        overview = await admin_store.security_overview(self.db)
+        count = await (await self.db.execute(
+            f"SELECT COUNT(*) FROM {security_events.TABLE_NAME}"
+        )).fetchone()
+        self.assertEqual(count[0], 0)
+        self.assertEqual(overview["events"], [])
+        self.assertEqual(overview["restricted_now"], 0)
 
 
 if __name__ == "__main__":

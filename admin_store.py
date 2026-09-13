@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 import constants as const
 import database as schema
 import db_access
+import security_events
 
 RowDict = dict[str, Any]
 
@@ -28,6 +31,7 @@ async def ensure_admin_tables(db) -> None:
         );
         """
     )
+    await security_events.ensure_table(db)
     await db.execute(
         f"""
         CREATE INDEX IF NOT EXISTS idx_admin_audit_created
@@ -66,6 +70,106 @@ async def ensure_admin_tables(db) -> None:
         """
     )
     await db.commit()
+
+
+async def security_overview(db, *, limit: int = 30) -> RowDict:
+    """Return local-only enforcement metrics, active restrictions, and events."""
+    await ensure_admin_tables(db)
+    now = await db_access.get_unixepoch(db)
+    # Keep lazy retention genuinely time-bounded even during quiet periods with
+    # no new enforcement decisions. The administrator view is an existing,
+    # local operator maintenance path, so no scheduler is required.
+    await security_events.prune_expired(db, now=now)
+    await db.commit()
+    event_rows = await db.execute_fetchall(
+        f"""
+        SELECT e.id, e.user_id, e.code, e.decision_type, e.created_at, e.expires_at,
+               u.{schema.USER_DISPLAY_NAME} AS display_name,
+               u.{schema.USER_STATUS} AS user_status
+        FROM {security_events.TABLE_NAME} e
+        JOIN {schema.USER_TABLE_NAME} u ON u.{schema.USER_ID} = e.user_id
+        ORDER BY e.created_at DESC, e.id DESC LIMIT ?;
+        """, (max(1, min(int(limit), 100)),)
+    )
+    active_rows = await db.execute_fetchall(
+        f"""
+        SELECT e.user_id, e.expires_at, e.decision_type,
+               u.{schema.USER_DISPLAY_NAME} AS display_name,
+               u.{schema.USER_STATUS} AS user_status
+        FROM {security_events.TABLE_NAME} e
+        JOIN {schema.USER_TABLE_NAME} u ON u.{schema.USER_ID} = e.user_id
+        WHERE (e.decision_type = ? AND e.expires_at > ?)
+           OR (e.decision_type = ? AND u.{schema.USER_STATUS} = ?)
+        ORDER BY e.created_at DESC, e.id DESC;
+        """, (security_events.DECISION_TEMPORARY_RESTRICTION, now,
+                security_events.DECISION_AUTOMATIC_BAN, const.USER_STATUS_BANNED)
+    )
+
+    # Add restrictions issued before this table existed. This examines only
+    # bounded local metadata and never calls a provider or blockchain RPC.
+    users = await db.execute_fetchall(
+        f"SELECT {schema.USER_ID}, {schema.USER_DISPLAY_NAME}, {schema.USER_STATUS} "
+        f"FROM {schema.USER_TABLE_NAME};"
+    )
+    metadata_rows = await db.execute_fetchall(
+        f"SELECT {schema.APP_METADATA_KEY}, {schema.APP_METADATA_VALUE} "
+        f"FROM {schema.APP_METADATA_TABLE_NAME};"
+    )
+    metadata = {}
+    for row in metadata_rows:
+        try:
+            metadata[str(row[schema.APP_METADATA_KEY])] = json.loads(row[schema.APP_METADATA_VALUE])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+    active = {}
+    for row in active_rows:
+        user_id = int(row["user_id"])
+        value = dict(row)
+        value["action"] = ("Automatic ban" if row["decision_type"] ==
+                           security_events.DECISION_AUTOMATIC_BAN else "Temporary restriction")
+        if user_id not in active or value["action"] == "Automatic ban":
+            active[user_id] = value
+    for user in users:
+        user_id = int(user[schema.USER_ID])
+        digest = hashlib.sha256(str(user_id).encode()).hexdigest()
+        candidates = [
+            metadata.get(f"location_behavior_guard:user:{user_id}"),
+            metadata.get(f"claim_location_suspicion:{user_id}"),
+            metadata.get(f"fresh_claim_guard:gps:{digest}"),
+            metadata.get(f"fresh_claim_guard:location:{digest}"),
+        ]
+        expiry = 0
+        for state in candidates:
+            if isinstance(state, dict):
+                value = int(state.get("restricted_until") or state.get("retry_at") or 0)
+                if state.get("restriction_reason") == "first_location_provider_unavailable":
+                    value = 0
+                expiry = max(expiry, value)
+        if expiry > now:
+            current = active.get(user_id)
+            if current is None:
+                active[user_id] = {
+                    "user_id": user_id, "display_name": user[schema.USER_DISPLAY_NAME],
+                    "user_status": user[schema.USER_STATUS], "expires_at": expiry,
+                    "action": "Temporary restriction",
+                }
+            elif current["action"] == "Temporary restriction":
+                # The event preserves when the episode began. Live guard state
+                # is authoritative for an extension of that same episode.
+                current["expires_at"] = max(int(current["expires_at"]), expiry)
+    counts = await (await db.execute(
+        f"""SELECT
+            SUM(CASE WHEN decision_type = ? THEN 1 ELSE 0 END) AS restrictions,
+            SUM(CASE WHEN decision_type = ? THEN 1 ELSE 0 END) AS bans
+            FROM {security_events.TABLE_NAME} WHERE created_at >= ?;""",
+        (security_events.DECISION_TEMPORARY_RESTRICTION,
+         security_events.DECISION_AUTOMATIC_BAN, now - 86_400),
+    )).fetchone()
+    recent_restrictions = int(counts["restrictions"] or 0)
+    recent_bans = int(counts["bans"] or 0)
+    return {"restricted_now": len(active), "restrictions_24h": recent_restrictions,
+            "automatic_bans_24h": recent_bans, "active": list(active.values()),
+            "events": [dict(row) for row in event_rows]}
 
 
 async def record_audit(

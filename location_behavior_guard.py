@@ -11,6 +11,7 @@ from typing import Any
 
 import database as schema
 import db_access
+import security_events
 import security_metadata
 
 STATE_PREFIX = "location_behavior_guard:user:"
@@ -262,6 +263,11 @@ async def observe_signed_claim(
 
     if _new_evidence_matured(state):
         _consume_episode(state, now=checked_at)
+        await security_events.record_decision(
+            db, user_id=user_id, code="repeated_exact_reward_positioning",
+            decision_type=security_events.DECISION_TEMPORARY_RESTRICTION,
+            created_at=checked_at, expires_at=int(state["restricted_until"]),
+        )
     await _save(db, user_id=user_id, state=state)
     return {"restricted": _currently_restricted(state, now=checked_at), "state": state}
 

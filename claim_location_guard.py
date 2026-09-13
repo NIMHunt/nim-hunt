@@ -20,6 +20,7 @@ from typing import Any, Awaitable, Callable
 import constants as const
 import database as schema
 import db_access
+import security_events
 import security_metadata
 
 RowDict = dict[str, Any]
@@ -426,6 +427,11 @@ async def get_claim_location_decision(
             "last_attempted_at": int(checked_at),
         }
         await _save_suspicion(db, user_id=int(user_id), value=marker)
+        await security_events.record_decision(
+            db, user_id=user_id, code="impossible_claim_travel_cooldown",
+            decision_type=security_events.DECISION_TEMPORARY_RESTRICTION,
+            created_at=checked_at, expires_at=int(marker["retry_at"]),
+        )
         logger.warning(
             "Postponed claim for suspicious travel: user=%s previous_claim=%s "
             "previous_spot=%s current_spot=%s distance=%.0fm elapsed=%ss "
@@ -451,6 +457,12 @@ async def get_claim_location_decision(
 async def _ban_for_decision(db, *, user_id: int, decision: RowDict) -> None:
     await db_access.set_user_status_to_banned(db, user_id=int(user_id))
     await _clear_suspicion(db, user_id=int(user_id))
+    checked_at = int(decision.get("checked_at") or await db_access.get_unixepoch(db))
+    await security_events.record_decision(
+        db, user_id=user_id, code="impossible_claim_travel",
+        decision_type=security_events.DECISION_AUTOMATIC_BAN,
+        created_at=checked_at,
+    )
     logger.warning(
         "Banned user %s for impossible claim travel: reason=%s previous_claim=%s "
         "previous_spot=%s current_spot=%s distance=%.0fm elapsed=%ss speed=%.1fm/s",

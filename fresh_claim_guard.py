@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 import constants as const
 import database as schema
 import db_access
+import security_events
 import security_metadata
 import trans_updater
 
@@ -254,10 +255,17 @@ async def record_gps_observation(db, *, user_id: int, ip: str | None,
                 if (int(state["same_ip_contradiction_count"]) >= 2
                         or (bool(state.get("first_inside_public_spot"))
                             and not bool(state.get("ordinary_presence_before_reward")))):
+                    prior_restriction = int(state.get("restricted_until") or 0)
                     state["restricted_until"] = max(
                         int(state.get("restricted_until") or 0),
                         now + const.CLAIM_BEHAVIOURAL_RESTRICTION_SECONDS,
                     )
+                    if prior_restriction <= now:
+                        await security_events.record_decision(
+                            db, user_id=user_id, code="fresh_account_location_anomaly",
+                            decision_type=security_events.DECISION_TEMPORARY_RESTRICTION,
+                            created_at=now, expires_at=int(state["restricted_until"]),
+                        )
                 # A genuinely distinct second point becomes the new stable
                 # anchor; the old stable + pending pair has served its purpose.
                 if pending_at:
@@ -299,6 +307,22 @@ async def _recent_weak_behaviour_anomaly(db, *, user_id: int, now: int) -> bool:
         return False
     observed_at = int(state.get("last_contradiction_at") or 0)
     return observed_at <= now < observed_at + const.CLAIM_BEHAVIOURAL_RESTRICTION_SECONDS
+
+
+async def _record_cluster_restriction(db, *, user_id: int, now: int) -> None:
+    """Persist the transition formed by funding and recent behaviour evidence."""
+    behaviour = await _get(db, _key(GPS_PREFIX, user_id))
+    if not isinstance(behaviour, dict):
+        return
+    expires_at = int(behaviour.get("last_contradiction_at") or now) + int(
+        const.CLAIM_BEHAVIOURAL_RESTRICTION_SECONDS
+    )
+    async with db_access.transaction(db, immediate=True):
+        await security_events.record_decision(
+            db, user_id=user_id, code="funding_cluster_corroboration",
+            decision_type=security_events.DECISION_TEMPORARY_RESTRICTION,
+            created_at=now, expires_at=expires_at,
+        )
 
 
 def _transaction_timestamp(tx: dict[str, Any]) -> int | None:
@@ -619,6 +643,11 @@ async def first_location_decision(db, *, user: dict[str, Any], ip: str | None,
                       "gps_country": outcome["gps_country"],
                       "distance_km": outcome["distance_km"]})
         await _set(db, key, state)
+        await security_events.record_decision(
+            db, user_id=int(user[schema.USER_ID]), code="fresh_account_location_anomaly",
+            decision_type=security_events.DECISION_TEMPORARY_RESTRICTION,
+            created_at=now, expires_at=int(state["retry_at"]),
+        )
     # Repeated weak IP evidence can extend the strong restriction indefinitely,
     # but never sets USER_STATUS_BANNED without a separate strong signal.
     logger.warning("Restricted public claims for user=%s after location mismatch event=%s",
@@ -649,6 +678,7 @@ async def public_claim_decision(db, *, user_id: int, signer_address: str,
     # pre-existing signer-history and location decisions below remain fail-safe.
     if (cluster["evidence"] and cluster.get("similar_pattern") is True
             and await _recent_weak_behaviour_anomaly(db, user_id=user_id, now=now)):
+        await _record_cluster_restriction(db, user_id=user_id, now=now)
         return {"allowed": False, "reason": "corroborated_temporary_restriction"}
     trust = await signer_or_account_trusted(db, user=user, signer_address=signer_address, now=now)
     if not trust["trusted"]:

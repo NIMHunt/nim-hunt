@@ -252,6 +252,13 @@
     margin-top: 22px;
 }
 
+.admin-table-scroll { overflow-x: auto; }
+.admin-security-table { width: 100%; border-collapse: collapse; text-align: left; }
+.admin-security-table th, .admin-security-table td {
+    padding: 10px; border-bottom: 1px solid var(--nh-border, rgba(31, 35, 72, 0.08));
+    white-space: nowrap;
+}
+
 .admin-report-list {
     display: grid;
     gap: 14px;

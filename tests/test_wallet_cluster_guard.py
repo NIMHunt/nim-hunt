@@ -494,6 +494,8 @@ class WalletClusterPolicyTests(IsolatedAsyncioTestCase):
                                mock.AsyncMock(return_value=True)),
               mock.patch.object(fresh_claim_guard, "_recent_weak_behaviour_anomaly",
                                mock.AsyncMock(return_value=True)),
+              mock.patch.object(fresh_claim_guard, "_record_cluster_restriction",
+                               mock.AsyncMock()) as record_event,
               mock.patch.object(guard, "observe", mock.AsyncMock(return_value={
                   "status": "observed", "evidence": True,
                   "similar_pattern": True}))):
@@ -502,6 +504,7 @@ class WalletClusterPolicyTests(IsolatedAsyncioTestCase):
                 spot={schema.SPOT_USE_PASSWORD: 0}, ip=None, lat=0, long=0)
         self.assertFalse(result["allowed"])
         self.assertEqual(result["reason"], "corroborated_temporary_restriction")
+        record_event.assert_awaited_once_with(db, user_id=1, now=100)
 
     async def test_funding_unknown_does_not_block_established_claimant(self):
         db = mock.Mock(in_transaction=False)

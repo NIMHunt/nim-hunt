@@ -41,6 +41,45 @@
             </article>
         </section>
 
+        <section class="admin-section" aria-labelledby="security-title">
+            <div class="admin-card-heading">
+                <h2 id="security-title">Security</h2>
+                <span class="admin-muted">Enforcement decisions only</span>
+            </div>
+            <div class="admin-stats" aria-label="Security enforcement totals">
+                <article class="admin-stat"><strong>{{ security.restricted_now }}</strong><span>Security restricted now</span></article>
+                <article class="admin-stat"><strong>{{ security.restrictions_24h }}</strong><span>Restrictions in last 24h</span></article>
+                <article class="admin-stat"><strong>{{ security.automatic_bans_24h }}</strong><span>Automatic bans in last 24h</span></article>
+            </div>
+
+            <article class="admin-card">
+                <div class="admin-card-heading"><h3>Currently restricted users</h3><span class="admin-muted">Active security enforcement</span></div>
+                {% if security.active %}
+                    <div class="admin-table-scroll"><table class="admin-security-table">
+                        <thead><tr><th>User</th><th>Current status</th><th>Security action</th><th>Expiry</th></tr></thead>
+                        <tbody>{% for item in security.active %}<tr>
+                            <td><strong>{{ item.display_name or ('User #' ~ item.user_id) }}</strong><br><small>#{{ item.user_id }}</small></td>
+                            <td>{{ item.user_status_label }}</td><td>{{ item.action }}</td><td>{{ item.expires_at if item.expires_at is not none else 'Permanent' }}</td>
+                        </tr>{% endfor %}</tbody>
+                    </table></div>
+                {% else %}<p class="admin-empty">No users are security-restricted now.</p>{% endif %}
+            </article>
+
+            <article class="admin-card admin-section">
+                <div class="admin-card-heading"><h3>Recent security events</h3><span class="admin-muted">Newest first</span></div>
+                {% if security.events %}
+                    <div class="admin-table-scroll"><table class="admin-security-table">
+                        <thead><tr><th>User</th><th>Current status</th><th>Security action</th><th>Reason</th><th>Occurred</th><th>Expiry</th></tr></thead>
+                        <tbody>{% for item in security.events %}<tr>
+                            <td><strong>{{ item.display_name or ('User #' ~ item.user_id) }}</strong><br><small>#{{ item.user_id }}</small></td>
+                            <td>{{ item.user_status_label }}</td><td>{{ item.action_label }}</td><td>{{ item.reason_label }}</td>
+                            <td>{{ item.created_at }}</td><td>{{ item.expires_at if item.expires_at is not none else 'Permanent' }}</td>
+                        </tr>{% endfor %}</tbody>
+                    </table></div>
+                {% else %}<p class="admin-empty">No security enforcement events have been recorded since deployment.</p>{% endif %}
+            </article>
+        </section>
+
         <section class="admin-grid">
             <article class="admin-card">
                 <div class="admin-card-heading">

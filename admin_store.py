@@ -76,6 +76,14 @@ async def security_overview(db, *, limit: int = 30) -> RowDict:
     """Return local-only enforcement metrics, active restrictions, and events."""
     await ensure_admin_tables(db)
     now = await db_access.get_unixepoch(db)
+    # Keep lazy retention genuinely time-bounded even during quiet periods with
+    # no new enforcement decisions. The administrator view is an existing,
+    # local operator maintenance path, so no scheduler is required.
+    await db.execute(
+        f"DELETE FROM {security_events.TABLE_NAME} WHERE created_at < ?;",
+        (now - security_events.RETENTION_SECONDS,),
+    )
+    await db.commit()
     event_rows = await db.execute_fetchall(
         f"""
         SELECT e.id, e.user_id, e.code, e.decision_type, e.created_at, e.expires_at,
@@ -140,12 +148,18 @@ async def security_overview(db, *, limit: int = 30) -> RowDict:
                 if state.get("restriction_reason") == "first_location_provider_unavailable":
                     value = 0
                 expiry = max(expiry, value)
-        if expiry > now and user_id not in active:
-            active[user_id] = {
-                "user_id": user_id, "display_name": user[schema.USER_DISPLAY_NAME],
-                "user_status": user[schema.USER_STATUS], "expires_at": expiry,
-                "action": "Temporary restriction",
-            }
+        if expiry > now:
+            current = active.get(user_id)
+            if current is None:
+                active[user_id] = {
+                    "user_id": user_id, "display_name": user[schema.USER_DISPLAY_NAME],
+                    "user_status": user[schema.USER_STATUS], "expires_at": expiry,
+                    "action": "Temporary restriction",
+                }
+            elif current["action"] == "Temporary restriction":
+                # The event preserves when the episode began. Live guard state
+                # is authoritative for an extension of that same episode.
+                current["expires_at"] = expiry
     counts = await (await db.execute(
         f"""SELECT
             SUM(CASE WHEN decision_type = ? THEN 1 ELSE 0 END) AS restrictions,

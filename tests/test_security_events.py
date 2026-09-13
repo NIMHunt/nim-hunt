@@ -10,6 +10,7 @@ import constants as const
 import database as schema
 import db_access
 import security_events
+import security_metadata
 
 
 class SecurityEventTests(unittest.IsolatedAsyncioTestCase):
@@ -69,6 +70,27 @@ class SecurityEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(overview["restricted_now"], 0)
         self.assertEqual(overview["active"], [])
 
+    async def test_live_restriction_extension_updates_current_expiry_without_new_event(self):
+        now = await db_access.get_unixepoch(self.db)
+        expiry_a = now + 100
+        expiry_b = now + 200
+        await self._temporary(created_at=now, expires_at=expiry_a)
+        digest = hashlib.sha256(str(self.user_id).encode()).hexdigest()
+        await security_metadata.set_json(
+            self.db, f"fresh_claim_guard:gps:{digest}",
+            {"restricted_until": expiry_b},
+        )
+        await self.db.commit()
+
+        overview = await admin_store.security_overview(self.db)
+        count = await (await self.db.execute(
+            f"SELECT COUNT(*) FROM {security_events.TABLE_NAME}"
+        )).fetchone()
+
+        self.assertEqual(count[0], 1)
+        self.assertEqual(overview["restricted_now"], 1)
+        self.assertEqual(overview["active"][0]["expires_at"], expiry_b)
+
     async def test_sensitive_values_cannot_be_persisted_as_diagnostics(self):
         await self._temporary(
             created_at=100, expires_at=200,
@@ -88,6 +110,22 @@ class SecurityEventTests(unittest.IsolatedAsyncioTestCase):
             f"SELECT COUNT(*) FROM {security_events.TABLE_NAME}"
         )).fetchone()
         self.assertEqual(count[0], 1)
+
+    async def test_admin_security_overview_prunes_history_after_quiet_period(self):
+        now = await db_access.get_unixepoch(self.db)
+        await self._temporary(
+            created_at=now - security_events.RETENTION_SECONDS - 1,
+            expires_at=now - security_events.RETENTION_SECONDS,
+        )
+        await self.db.commit()
+
+        overview = await admin_store.security_overview(self.db)
+        count = await (await self.db.execute(
+            f"SELECT COUNT(*) FROM {security_events.TABLE_NAME}"
+        )).fetchone()
+
+        self.assertEqual(count[0], 0)
+        self.assertEqual(overview["events"], [])
 
 
 if __name__ == "__main__":

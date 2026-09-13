@@ -45,6 +45,13 @@ _SPOT_STATUS_LABELS = {
     const.SPOT_STATUS_CANCELLED: "Cancelled",
     const.SPOT_STATUS_BANNED: "Banned",
 }
+_SECURITY_REASON_LABELS = {
+    "repeated_exact_reward_positioning": "Repeated exact reward positioning",
+    "fresh_account_location_anomaly": "Fresh account/location anomaly",
+    "impossible_claim_travel_cooldown": "Impossible claim travel",
+    "impossible_claim_travel": "Impossible claim travel",
+    "funding_cluster_corroboration": "Funding-cluster corroboration",
+}
 
 
 def _shared_context(request: Request, *, page_title: str) -> dict:
@@ -231,6 +238,7 @@ async def admin_dashboard(request: Request):
         leaderboard = await admin_store.spot_creation_leaderboard(db, limit=10)
         reports = await admin_store.pending_reports(db, limit=50)
         audit = await admin_store.recent_audit(db, limit=20)
+        security = await admin_store.security_overview(db, limit=30)
 
     for item in reports:
         item["reason_label"] = _REASON_LABELS.get(int(item["reason"]), f"Reason {item['reason']}")
@@ -247,6 +255,13 @@ async def admin_dashboard(request: Request):
         item["user_status_label"] = _USER_STATUS_LABELS.get(
             int(item["user_status"]), "Unknown"
         )
+    for item in security["active"]:
+        item["user_status_label"] = _USER_STATUS_LABELS.get(int(item["user_status"]), "Unknown")
+    for item in security["events"]:
+        item["user_status_label"] = _USER_STATUS_LABELS.get(int(item["user_status"]), "Unknown")
+        item["reason_label"] = _SECURITY_REASON_LABELS.get(item["code"], item["code"])
+        item["action_label"] = ("Automatic ban" if item["decision_type"] == "automatic_ban"
+                                else "Temporary restriction")
 
     context = {
         **_shared_context(request, page_title="NimHunt Administration"),
@@ -257,6 +272,7 @@ async def admin_dashboard(request: Request):
         "leaderboard": leaderboard,
         "reports": reports,
         "audit": audit,
+        "security": security,
     }
     return _protect_response(
         templates.TemplateResponse(
